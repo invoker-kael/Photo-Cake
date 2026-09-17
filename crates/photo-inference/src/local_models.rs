@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
+use tract_onnx::prelude::InferenceModelExt;
 use tract_tflite::prelude::*;
 
 const SEGMENT_SIZE: u32 = 256;
@@ -93,8 +94,8 @@ impl LocalSemanticModels {
             .map_err(inference_error)?;
 
         Ok(Self {
-            segmenter,
-            embedder,
+            segmenter: Arc::new(segmenter),
+            embedder: Arc::new(embedder),
             segmentation_identity: LoadedModelIdentity {
                 id: seg_spec.id.clone(),
                 version: seg_spec.version.clone(),
@@ -139,7 +140,7 @@ impl LocalSemanticModels {
         let output = outputs
             .first()
             .ok_or_else(|| LocalModelError::Output("segmentation model returned no output".into()))?
-            .to_array_view::<f32>()
+            .to_plain_array_view::<f32>()
             .map_err(inference_error)?;
         let shape = output.shape();
         if shape.len() != 4 || shape[0] != 1 || shape[3] != 6 {
@@ -162,7 +163,7 @@ impl LocalSemanticModels {
 
         let mut fallback = None;
         for value in &outputs {
-            let Ok(view) = value.to_array_view::<f32>() else {
+            let Ok(view) = value.to_plain_array_view::<f32>() else {
                 continue;
             };
             let shape = view.shape();

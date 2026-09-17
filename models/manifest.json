@@ -51,8 +51,8 @@
           "format": "TFLITE",
           "file": "mobilenet_v3_small_embedder.tflite",
           "source_url": "https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_small/float32/1/mobilenet_v3_small.tflite",
-          "sha256": "e3fcbd44ab47a0b02d77c67f42f8e208e42baf0bb39ec078594019b709ad7a24",
-          "size_bytes": 10335220
+          "sha256": "bbbb4c51a55a53905af1daec995ca1aae355046f8839bb8c9f5ce9271394bc40",
+          "size_bytes": 4117670
         }
       ]
     }

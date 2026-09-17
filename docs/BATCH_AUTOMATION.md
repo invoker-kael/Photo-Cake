@@ -2,17 +2,23 @@
 
 Batch automation is a first-class product requirement, not a later add-on.
 
-## Goals
+## Implemented foundation
 
-1. Import a directory or selected files.
-2. Create one independent job per photo.
-3. Run configured stages automatically.
-4. Persist a checkpoint after every completed stage.
-5. Continue other photos when one fails.
-6. Retry only failed stages, not the whole photo.
-7. Pause/resume safely when Windows sleeps or a tablet app is backgrounded.
-8. Run automatic QA before export.
-9. Keep originals untouched.
+The current core now persists batches and per-photo jobs in SQLite. The Windows host opens `photo-cake.sqlite3` in the application data directory and recovers interrupted work on startup.
+
+Implemented behavior:
+
+- one independent persisted job per photo
+- checkpoint before stage execution (`RUNNING`)
+- checkpoint after success, failure, pause, resume, retry, or cancel
+- abnormal-exit recovery: `RUNNING` becomes `PENDING` at the same stage
+- explicit retry resumes the failed stage instead of restarting import
+- one failed photo does not block other pending photos by default
+- optional `stop_on_error` policy
+- automatic QA stage can be skipped by the batch contract
+- SQLite WAL mode for durable local state
+
+The actual image-processing stage implementations are still adapters; the current default executor is a no-op so the automation contract can be tested before RAW/AI engines are attached.
 
 ## Default pipeline
 
@@ -26,8 +32,6 @@ IMPORT
   -> DONE
 ```
 
-Stages may be disabled by a workflow recipe. For example, a simple resize/export recipe can skip ANALYZE and RETOUCH.
-
 ## Job states
 
 ```text
@@ -40,6 +44,55 @@ DONE
 ```
 
 Stage and status are deliberately separate. If ANALYZE fails, retrying the job restarts ANALYZE rather than IMPORT.
+
+## Crash-safe transition
+
+```text
+PENDING / stage=ANALYZE
+        |
+        | persist before work
+        v
+RUNNING / stage=ANALYZE
+        |
+        +---- success ----> PENDING / stage=APPLY_PRESET
+        |
+        +---- failure ----> FAILED  / stage=ANALYZE
+        |
+        +---- process dies
+                         next launch
+                            |
+                            v
+                    PENDING / stage=ANALYZE
+```
+
+This prevents a crash from falsely marking an unfinished stage as complete and prevents already completed stages from being repeated.
+
+## SQLite records
+
+`batches` stores batch-level policy. `batch_items` stores the ordered photo jobs with:
+
+- stable UUID
+- source reference/path (portable asset IDs come later)
+- current stage
+- current status
+- attempt count
+- last error
+
+Future migrations will extend this with edit revision/hash, model versions, input fingerprint, QA result and export records.
+
+## Runner API
+
+The shared Rust core exposes `AutomationRunner<E>` where `E: StageExecutor`. Windows, Android and future inference backends plug into the same runner contract.
+
+The runner supports:
+
+- create/list/load batches
+- run one checkpointed stage
+- run until no pending work remains
+- retry failed jobs
+- pause/resume a batch
+- cancel a batch
+- recover interrupted jobs
 
 ## Automation recipes
 
@@ -76,24 +129,8 @@ A future recipe will look conceptually like:
 
 Watched folders are intentionally optional because Photo-Cake is a personal editor, not a server daemon.
 
-## Checkpoint model
-
-Each photo persists:
-
-- current stage
-- completed stages
-- edit revision/hash
-- model/version identifiers
-- input file fingerprint
-- retry count
-- error details
-- QA result
-- output paths
-
-If an input file or relevant model/edit revision changes, only affected stages should become stale.
-
 ## QA behavior
 
-QA does not silently delete or hide images. It produces PASS / REVIEW / FAIL with reasons such as blur, closed eyes, overexposure, mask anomaly, excessive smoothing, or export failure.
+QA does not silently delete or hide images. It will produce PASS / REVIEW / FAIL with reasons such as blur, closed eyes, overexposure, mask anomaly, excessive smoothing, or export failure.
 
-The default export policy will be configurable. Safe initial behavior is to export PASS images automatically and leave REVIEW/FAIL visible for manual confirmation.
+The safe initial export policy remains: export PASS images automatically and leave REVIEW/FAIL visible for manual confirmation.

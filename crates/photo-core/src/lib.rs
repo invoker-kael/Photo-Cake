@@ -14,8 +14,8 @@ pub use grouping::{
     initial_group_raw_assets, GroupingBasis, InitialGroupingConfig, PhotoGroup, PhotoGroupKind,
 };
 pub use handoff::{
-    plan_lightroom_handoff, HandoffColorSpace, HandoffError, HandoffFormat,
-    LightroomHandoffPlan, LightroomHandoffPreset, TiffCompression,
+    plan_finish, xmp_sidecar_path, EditCompatibility, FallbackReason, FinishPlan, FinishTarget,
+    HandoffColorSpace, HandoffError, HandoffMode, RenderedHandoffPreset, TiffCompression,
 };
 pub use handoff_store::{HandoffStore, HandoffStoreError};
 pub use importer::{RawImportError, RawImportResult, RawImporter};

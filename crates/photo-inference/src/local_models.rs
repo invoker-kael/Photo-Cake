@@ -1,13 +1,17 @@
 use image::{DynamicImage, imageops::FilterType};
 use photo_core::{InferenceTask, ModelBundleManifest, ModelPlatform};
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use thiserror::Error;
-use tract_tflite::prelude::*;
 
 const SEGMENT_SIZE: u32 = 256;
 const EMBEDDING_SIZE: u32 = 224;
+
+thread_local! {
+    static LITERT_SESSIONS: RefCell<HashMap<PathBuf, LiteRtSession>> = RefCell::new(HashMap::new());
+}
 
 #[derive(Debug, Error)]
 pub enum LocalModelError {
@@ -17,6 +21,8 @@ pub enum LocalModelError {
     MissingSpec(InferenceTask),
     #[error("bundled model file is missing: {0}")]
     MissingFile(PathBuf),
+    #[error("model path is not valid UTF-8: {0}")]
+    InvalidPath(PathBuf),
     #[error("model/inference error: {0}")]
     Inference(String),
     #[error("unexpected model output: {0}")]
@@ -41,11 +47,89 @@ pub struct LoadedModelIdentity {
     pub file: PathBuf,
 }
 
+/// Lightweight model registry handle.
+///
+/// Native LiteRT sessions are deliberately kept in a thread-local cache instead of this
+/// structure. The Tauri batch worker is long-lived, so a session is loaded once per worker
+/// thread and reused across photos without moving native handles between threads.
 pub struct LocalSemanticModels {
-    segmenter: Arc<TypedRunnableModel>,
-    embedder: Arc<TypedRunnableModel>,
+    segment_path: PathBuf,
+    embedding_path: PathBuf,
     segmentation_identity: LoadedModelIdentity,
     embedding_identity: LoadedModelIdentity,
+}
+
+struct LiteRtSession {
+    // Drop the compiled model before the model/environment it depends on.
+    compiled_model: litert::CompiledModel,
+    model: litert::Model,
+    env: litert::Environment,
+}
+
+impl LiteRtSession {
+    fn load(path: &Path) -> Result<Self, LocalModelError> {
+        let path_text = path
+            .to_str()
+            .ok_or_else(|| LocalModelError::InvalidPath(path.to_path_buf()))?;
+        let env = litert::EnvironmentBuilder::build_default()
+            .map_err(|error| litert_error("create LiteRT environment", error))?;
+        let model = litert::Model::create_model_from_file(&env, path_text)
+            .map_err(|error| litert_error(&format!("load {}", path.display()), error))?;
+        let options = litert::Options::create_with_accelerator(litert::LiteRtHwAccelerator::Cpu)
+            .map_err(|error| litert_error("create LiteRT CPU options", error))?;
+        let compiled_model = litert::CompiledModel::create(&env, &model, &options)
+            .map_err(|error| litert_error(&format!("compile {}", path.display()), error))?;
+        Ok(Self {
+            compiled_model,
+            model,
+            env,
+        })
+    }
+
+    fn run_f32(&self, input: &[f32]) -> Result<Vec<(Vec<i32>, Vec<f32>)>, LocalModelError> {
+        let signature = litert::SignatureIndex::from(0);
+        let inputs = self
+            .compiled_model
+            .create_input_tensor_buffers(&self.env, &self.model, signature)
+            .map_err(|error| litert_error("create LiteRT input buffers", error))?;
+        if inputs.len() != 1 {
+            return Err(LocalModelError::Output(format!(
+                "expected one model input, got {}",
+                inputs.len()
+            )));
+        }
+        let expected = tensor_elements(inputs[0].dimensions())?;
+        if expected != input.len() {
+            return Err(LocalModelError::Output(format!(
+                "model input expects {expected} float elements with dimensions {:?}, got {}",
+                inputs[0].dimensions(),
+                input.len()
+            )));
+        }
+        inputs[0]
+            .write(input)
+            .map_err(|error| litert_error("write LiteRT input", error))?;
+
+        let outputs = self
+            .compiled_model
+            .create_output_tensor_buffers(&self.env, &self.model, signature)
+            .map_err(|error| litert_error("create LiteRT output buffers", error))?;
+        self.compiled_model
+            .run(signature, &inputs, &outputs)
+            .map_err(|error| litert_error("run LiteRT model", error))?;
+
+        let mut result = Vec::with_capacity(outputs.len());
+        for output in &outputs {
+            let dimensions = output.dimensions().to_vec();
+            let len = tensor_elements(&dimensions)?;
+            let mut values = vec![0.0f32; len];
+            output
+                .read(&mut values)
+                .map_err(|error| litert_error("read LiteRT output", error))?;
+            result.push((dimensions, values));
+        }
+        Ok(result)
+    }
 }
 
 impl LocalSemanticModels {
@@ -70,24 +154,21 @@ impl LocalSemanticModels {
             return Err(LocalModelError::MissingFile(embedding_path));
         }
 
-        let segmenter = load_tflite_model(&segment_path, &seg_spec.id)?;
-        let embedder = load_tflite_model(&embedding_path, &emb_spec.id)?;
-
         Ok(Self {
-            segmenter,
-            embedder,
             segmentation_identity: LoadedModelIdentity {
                 id: seg_spec.id.clone(),
                 version: seg_spec.version.clone(),
                 task: InferenceTask::Segmentation,
-                file: segment_path,
+                file: segment_path.clone(),
             },
             embedding_identity: LoadedModelIdentity {
                 id: emb_spec.id.clone(),
                 version: emb_spec.version.clone(),
                 task: InferenceTask::ImageEmbedding,
-                file: embedding_path,
+                file: embedding_path.clone(),
             },
+            segment_path,
+            embedding_path,
         })
     }
 
@@ -107,31 +188,24 @@ impl LocalSemanticModels {
             SEGMENT_SIZE,
             FilterType::Triangle,
         );
-        let input: Tensor = tract_ndarray::Array4::from_shape_fn(
-            (1, SEGMENT_SIZE as usize, SEGMENT_SIZE as usize, 3),
-            |(_, y, x, c)| f32::from(resized[(x as u32, y as u32)][c]) / 255.0,
-        )
-        .into();
+        // Match Google's official LiteRT Rust segmentation example for this exact model.
+        let mut input = Vec::with_capacity((SEGMENT_SIZE * SEGMENT_SIZE * 3) as usize);
+        for pixel in resized.pixels() {
+            input.push((f32::from(pixel[0]) - 127.0) / 127.0);
+            input.push((f32::from(pixel[1]) - 127.0) / 127.0);
+            input.push((f32::from(pixel[2]) - 127.0) / 127.0);
+        }
 
-        let outputs = self
-            .segmenter
-            .run(tvec!(input.into()))
-            .map_err(|error| inference_error("run segmentation model", error))?;
-        let output = outputs
+        let outputs = with_litert_session(&self.segment_path, |session| session.run_f32(&input))?;
+        let (shape, values) = outputs
             .first()
-            .ok_or_else(|| LocalModelError::Output("segmentation model returned no output".into()))?
-            .to_plain_array_view::<f32>()
-            .map_err(|error| inference_error("read segmentation output", error))?;
-        let shape = output.shape();
+            .ok_or_else(|| LocalModelError::Output("segmentation model returned no output".into()))?;
         if shape.len() != 4 || shape[0] != 1 || shape[3] != 6 {
             return Err(LocalModelError::Output(format!(
                 "expected segmentation output [1,H,W,6], got {shape:?}"
             )));
         }
-        let height = shape[1];
-        let width = shape[2];
-        let flat = output.iter().copied().collect::<Vec<_>>();
-        summarize_segmentation(&flat, width, height)
+        summarize_segmentation(values, shape[2] as usize, shape[1] as usize)
     }
 
     pub fn embed(&self, image: &DynamicImage) -> Result<Vec<f32>, LocalModelError> {
@@ -146,22 +220,16 @@ impl LocalSemanticModels {
             EMBEDDING_SIZE,
             FilterType::Triangle,
         );
-        let input: Tensor = tract_ndarray::Array4::from_shape_fn(
-            (1, EMBEDDING_SIZE as usize, EMBEDDING_SIZE as usize, 3),
-            |(_, y, x, c)| f32::from(resized[(x as u32, y as u32)][c]) / 255.0,
-        )
-        .into();
+        let mut input = Vec::with_capacity((EMBEDDING_SIZE * EMBEDDING_SIZE * 3) as usize);
+        for pixel in resized.pixels() {
+            input.push(f32::from(pixel[0]) / 255.0);
+            input.push(f32::from(pixel[1]) / 255.0);
+            input.push(f32::from(pixel[2]) / 255.0);
+        }
 
-        let outputs = self
-            .embedder
-            .run(tvec!(input.into()))
-            .map_err(|error| inference_error("run image embedding model", error))?;
+        let outputs = with_litert_session(&self.embedding_path, |session| session.run_f32(&input))?;
         let mut best = None::<Vec<f32>>;
-        for value in &outputs {
-            let Ok(view) = value.to_plain_array_view::<f32>() else {
-                continue;
-            };
-            let values = view.iter().copied().collect::<Vec<_>>();
+        for (_, values) in outputs {
             if values.len() >= 128 && best.as_ref().is_none_or(|current| values.len() > current.len()) {
                 best = Some(values);
             }
@@ -172,16 +240,34 @@ impl LocalSemanticModels {
     }
 }
 
-fn load_tflite_model(path: &Path, model_id: &str) -> Result<Arc<TypedRunnableModel>, LocalModelError> {
-    let model = tract_tflite::tflite()
-        .model_for_path(path)
-        .map_err(|error| inference_error(&format!("load {model_id} from {}", path.display()), error))?;
-    let model = model
-        .into_optimized()
-        .map_err(|error| inference_error(&format!("optimize {model_id}"), error))?;
-    model
-        .into_runnable()
-        .map_err(|error| inference_error(&format!("make {model_id} runnable"), error))
+fn with_litert_session<R>(
+    path: &Path,
+    operation: impl FnOnce(&LiteRtSession) -> Result<R, LocalModelError>,
+) -> Result<R, LocalModelError> {
+    LITERT_SESSIONS.with(|sessions| {
+        let mut sessions = sessions.borrow_mut();
+        if !sessions.contains_key(path) {
+            sessions.insert(path.to_path_buf(), LiteRtSession::load(path)?);
+        }
+        let session = sessions
+            .get(path)
+            .ok_or_else(|| LocalModelError::Inference("LiteRT session cache insertion failed".into()))?;
+        operation(session)
+    })
+}
+
+fn tensor_elements(dimensions: &[i32]) -> Result<usize, LocalModelError> {
+    if dimensions.is_empty() {
+        return Err(LocalModelError::Output("tensor has no dimensions".into()));
+    }
+    dimensions.iter().try_fold(1usize, |total, dimension| {
+        let dimension = usize::try_from(*dimension).map_err(|_| {
+            LocalModelError::Output(format!("tensor has invalid dimension {dimension}"))
+        })?;
+        total
+            .checked_mul(dimension)
+            .ok_or_else(|| LocalModelError::Output("tensor element count overflow".into()))
+    })
 }
 
 fn summarize_segmentation(
@@ -318,8 +404,8 @@ fn normalize_embedding(mut embedding: Vec<f32>) -> Result<Vec<f32>, LocalModelEr
     Ok(embedding)
 }
 
-fn inference_error(context: &str, error: impl std::fmt::Display) -> LocalModelError {
-    LocalModelError::Inference(format!("{context}: {error:#}"))
+fn litert_error(context: &str, error: impl std::fmt::Debug) -> LocalModelError {
+    LocalModelError::Inference(format!("{context}: {error:?}"))
 }
 
 #[cfg(test)]

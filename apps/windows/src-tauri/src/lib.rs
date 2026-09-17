@@ -1,10 +1,14 @@
-use photo_core::{AutomationRunner, Batch, BatchStore, NoopStageExecutor};
+use photo_core::{
+    AutomationRunner, Batch, BatchStore, NoopStageExecutor, RawImportResult, RawImporter,
+};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 use uuid::Uuid;
 
 struct AppState {
     runner: Mutex<AutomationRunner<NoopStageExecutor>>,
+    raw_importer: RawImporter,
 }
 
 fn parse_batch_id(value: &str) -> Result<Uuid, String> {
@@ -34,6 +38,31 @@ fn create_batch(
     state: State<'_, AppState>,
 ) -> Result<Batch, String> {
     with_runner(&state, |runner| runner.create_batch(name, paths))
+}
+
+#[tauri::command]
+fn import_raw_paths(
+    name: String,
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<RawImportResult, String> {
+    state
+        .raw_importer
+        .import_paths(name, paths.into_iter().map(PathBuf::from))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn import_raw_directory(
+    name: String,
+    directory: String,
+    recursive: bool,
+    state: State<'_, AppState>,
+) -> Result<RawImportResult, String> {
+    state
+        .raw_importer
+        .import_directory(name, PathBuf::from(directory), recursive)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -72,17 +101,22 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            let store = BatchStore::open(data_dir.join("photo-cake.sqlite3"))?;
+            let database = data_dir.join("photo-cake.sqlite3");
+            let store = BatchStore::open(&database)?;
             let runner = AutomationRunner::new(store, NoopStageExecutor);
             runner.recover_interrupted()?;
+            let raw_importer = RawImporter::open(&database)?;
             app.manage(AppState {
                 runner: Mutex::new(runner),
+                raw_importer,
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_batches,
             create_batch,
+            import_raw_paths,
+            import_raw_directory,
             run_batch,
             retry_failed,
             pause_batch,

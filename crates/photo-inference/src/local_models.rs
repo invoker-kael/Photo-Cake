@@ -1,3 +1,4 @@
+use crate::litert_runtime::LiteRtSession;
 use image::{DynamicImage, imageops::FilterType};
 use photo_core::{InferenceTask, ModelBundleManifest, ModelPlatform};
 use serde::{Deserialize, Serialize};
@@ -21,8 +22,6 @@ pub enum LocalModelError {
     MissingSpec(InferenceTask),
     #[error("bundled model file is missing: {0}")]
     MissingFile(PathBuf),
-    #[error("model path is not valid UTF-8: {0}")]
-    InvalidPath(PathBuf),
     #[error("model/inference error: {0}")]
     Inference(String),
     #[error("unexpected model output: {0}")]
@@ -49,87 +48,14 @@ pub struct LoadedModelIdentity {
 
 /// Lightweight model registry handle.
 ///
-/// Native LiteRT sessions are deliberately kept in a thread-local cache instead of this
-/// structure. The Tauri batch worker is long-lived, so a session is loaded once per worker
-/// thread and reused across photos without moving native handles between threads.
+/// Native LiteRT sessions are kept in a worker-thread-local cache. The batch worker is
+/// long-lived, so each model/runtime pair is loaded once per worker and reused without moving
+/// native handles between threads.
 pub struct LocalSemanticModels {
     segment_path: PathBuf,
     embedding_path: PathBuf,
     segmentation_identity: LoadedModelIdentity,
     embedding_identity: LoadedModelIdentity,
-}
-
-struct LiteRtSession {
-    // Drop the compiled model before the model/environment it depends on.
-    compiled_model: litert::CompiledModel,
-    model: litert::Model,
-    env: litert::Environment,
-}
-
-impl LiteRtSession {
-    fn load(path: &Path) -> Result<Self, LocalModelError> {
-        let path_text = path
-            .to_str()
-            .ok_or_else(|| LocalModelError::InvalidPath(path.to_path_buf()))?;
-        let env = litert::EnvironmentBuilder::build_default()
-            .map_err(|error| litert_error("create LiteRT environment", error))?;
-        let model = litert::Model::create_model_from_file(&env, path_text)
-            .map_err(|error| litert_error(&format!("load {}", path.display()), error))?;
-        let options = litert::Options::create_with_accelerator(litert::LiteRtHwAccelerator::Cpu)
-            .map_err(|error| litert_error("create LiteRT CPU options", error))?;
-        let compiled_model = litert::CompiledModel::create(&env, &model, &options)
-            .map_err(|error| litert_error(&format!("compile {}", path.display()), error))?;
-        Ok(Self {
-            compiled_model,
-            model,
-            env,
-        })
-    }
-
-    fn run_f32(&self, input: &[f32]) -> Result<Vec<(Vec<i32>, Vec<f32>)>, LocalModelError> {
-        let signature = litert::SignatureIndex::from(0);
-        let inputs = self
-            .compiled_model
-            .create_input_tensor_buffers(&self.env, &self.model, signature)
-            .map_err(|error| litert_error("create LiteRT input buffers", error))?;
-        if inputs.len() != 1 {
-            return Err(LocalModelError::Output(format!(
-                "expected one model input, got {}",
-                inputs.len()
-            )));
-        }
-        let expected = tensor_elements(inputs[0].dimensions())?;
-        if expected != input.len() {
-            return Err(LocalModelError::Output(format!(
-                "model input expects {expected} float elements with dimensions {:?}, got {}",
-                inputs[0].dimensions(),
-                input.len()
-            )));
-        }
-        inputs[0]
-            .write(input)
-            .map_err(|error| litert_error("write LiteRT input", error))?;
-
-        let outputs = self
-            .compiled_model
-            .create_output_tensor_buffers(&self.env, &self.model, signature)
-            .map_err(|error| litert_error("create LiteRT output buffers", error))?;
-        self.compiled_model
-            .run(signature, &inputs, &outputs)
-            .map_err(|error| litert_error("run LiteRT model", error))?;
-
-        let mut result = Vec::with_capacity(outputs.len());
-        for output in &outputs {
-            let dimensions = output.dimensions().to_vec();
-            let len = tensor_elements(&dimensions)?;
-            let mut values = vec![0.0f32; len];
-            output
-                .read(&mut values)
-                .map_err(|error| litert_error("read LiteRT output", error))?;
-            result.push((dimensions, values));
-        }
-        Ok(result)
-    }
 }
 
 impl LocalSemanticModels {
@@ -188,7 +114,7 @@ impl LocalSemanticModels {
             SEGMENT_SIZE,
             FilterType::Triangle,
         );
-        // Match Google's official LiteRT Rust segmentation example for this exact model.
+        // Match Google's LiteRT preprocessing example for this exact Selfie Multiclass model.
         let mut input = Vec::with_capacity((SEGMENT_SIZE * SEGMENT_SIZE * 3) as usize);
         for pixel in resized.pixels() {
             input.push((f32::from(pixel[0]) - 127.0) / 127.0);
@@ -196,7 +122,11 @@ impl LocalSemanticModels {
             input.push((f32::from(pixel[2]) - 127.0) / 127.0);
         }
 
-        let outputs = with_litert_session(&self.segment_path, |session| session.run_f32(&input))?;
+        let outputs = with_litert_session(&self.segment_path, |session| {
+            session
+                .run_f32(&input)
+                .map_err(|error| LocalModelError::Inference(error.to_string()))
+        })?;
         let (shape, values) = outputs
             .first()
             .ok_or_else(|| LocalModelError::Output("segmentation model returned no output".into()))?;
@@ -227,10 +157,18 @@ impl LocalSemanticModels {
             input.push(f32::from(pixel[2]) / 255.0);
         }
 
-        let outputs = with_litert_session(&self.embedding_path, |session| session.run_f32(&input))?;
+        let outputs = with_litert_session(&self.embedding_path, |session| {
+            session
+                .run_f32(&input)
+                .map_err(|error| LocalModelError::Inference(error.to_string()))
+        })?;
         let mut best = None::<Vec<f32>>;
         for (_, values) in outputs {
-            if values.len() >= 128 && best.as_ref().is_none_or(|current| values.len() > current.len()) {
+            if values.len() >= 128
+                && best
+                    .as_ref()
+                    .is_none_or(|current| values.len() > current.len())
+            {
                 best = Some(values);
             }
         }
@@ -247,26 +185,14 @@ fn with_litert_session<R>(
     LITERT_SESSIONS.with(|sessions| {
         let mut sessions = sessions.borrow_mut();
         if !sessions.contains_key(path) {
-            sessions.insert(path.to_path_buf(), LiteRtSession::load(path)?);
+            let session = LiteRtSession::load(path)
+                .map_err(|error| LocalModelError::Inference(error.to_string()))?;
+            sessions.insert(path.to_path_buf(), session);
         }
-        let session = sessions
-            .get(path)
-            .ok_or_else(|| LocalModelError::Inference("LiteRT session cache insertion failed".into()))?;
-        operation(session)
-    })
-}
-
-fn tensor_elements(dimensions: &[i32]) -> Result<usize, LocalModelError> {
-    if dimensions.is_empty() {
-        return Err(LocalModelError::Output("tensor has no dimensions".into()));
-    }
-    dimensions.iter().try_fold(1usize, |total, dimension| {
-        let dimension = usize::try_from(*dimension).map_err(|_| {
-            LocalModelError::Output(format!("tensor has invalid dimension {dimension}"))
+        let session = sessions.get(path).ok_or_else(|| {
+            LocalModelError::Inference("LiteRT session cache insertion failed".into())
         })?;
-        total
-            .checked_mul(dimension)
-            .ok_or_else(|| LocalModelError::Output("tensor element count overflow".into()))
+        operation(session)
     })
 }
 
@@ -396,16 +322,14 @@ fn normalize_embedding(mut embedding: Vec<f32>) -> Result<Vec<f32>, LocalModelEr
         .sum::<f32>()
         .sqrt();
     if !norm.is_finite() || norm <= f32::EPSILON {
-        return Err(LocalModelError::Output("embedding has zero/invalid norm".into()));
+        return Err(LocalModelError::Output(
+            "embedding has zero/invalid norm".into(),
+        ));
     }
     for value in &mut embedding {
         *value /= norm;
     }
     Ok(embedding)
-}
-
-fn litert_error(context: &str, error: impl std::fmt::Debug) -> LocalModelError {
-    LocalModelError::Inference(format!("{context}: {error:?}"))
 }
 
 #[cfg(test)]

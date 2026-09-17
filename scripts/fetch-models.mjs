@@ -30,32 +30,71 @@ for (const model of manifest.models) {
 }
 
 for (const { model, variant } of selected) {
-  const target = join(outputDir, variant.file);
+  await preparePinnedFile({
+    label: `${model.id}@${model.version}`,
+    file: variant.file,
+    sourceUrl: variant.source_url,
+    sha256: variant.sha256,
+    sizeBytes: variant.size_bytes,
+  });
+}
+
+if (platform === "windows") {
+  await prepareRuntimeProbe({
+    label: "google-litert@2.2.0",
+    file: "libLiteRt.dll",
+    sourceUrl:
+      "https://storage.googleapis.com/litert/binaries/2.2.0/windows_x86_64/libLiteRt.dll",
+  });
+}
+
+await readFile(manifestPath, "utf8");
+console.log(`Prepared ${selected.length} pinned local models in ${outputDir}`);
+
+async function preparePinnedFile({
+  label,
+  file,
+  sourceUrl,
+  sha256,
+  sizeBytes,
+}) {
+  const target = join(outputDir, file);
+  const expectedHash = sha256.toLowerCase();
   const current = await sha256IfExists(target);
-  if (current === variant.sha256.toLowerCase()) {
-    console.log(`reuse ${model.id}@${model.version}: ${basename(target)}`);
-    continue;
+  if (current === expectedHash) {
+    if (sizeBytes) {
+      const info = await stat(target);
+      if (info.size !== sizeBytes) {
+        await rm(target, { force: true });
+      } else {
+        console.log(`reuse ${label}: ${basename(target)}`);
+        return;
+      }
+    } else {
+      console.log(`reuse ${label}: ${basename(target)}`);
+      return;
+    }
   }
 
   const partial = `${target}.part`;
   await rm(partial, { force: true });
-  console.log(`fetch ${model.id}@${model.version}: ${variant.source_url}`);
-  await download(variant.source_url, partial);
+  console.log(`fetch ${label}: ${sourceUrl}`);
+  await download(sourceUrl, partial);
 
   const downloadedHash = await sha256IfExists(partial);
-  if (downloadedHash !== variant.sha256.toLowerCase()) {
+  if (downloadedHash !== expectedHash) {
     await rm(partial, { force: true });
     throw new Error(
-      `SHA256 mismatch for ${variant.file}: expected ${variant.sha256}, got ${downloadedHash}`,
+      `SHA256 mismatch for ${file}: expected ${sha256}, got ${downloadedHash}`,
     );
   }
 
-  if (variant.size_bytes) {
+  if (sizeBytes) {
     const info = await stat(partial);
-    if (info.size !== variant.size_bytes) {
+    if (info.size !== sizeBytes) {
       await rm(partial, { force: true });
       throw new Error(
-        `Size mismatch for ${variant.file}: expected ${variant.size_bytes}, got ${info.size}`,
+        `Size mismatch for ${file}: expected ${sizeBytes}, got ${info.size}`,
       );
     }
   }
@@ -63,8 +102,21 @@ for (const { model, variant } of selected) {
   await rename(partial, target);
 }
 
-await readFile(manifestPath, "utf8");
-console.log(`Prepared ${selected.length} pinned local models in ${outputDir}`);
+// One CI pass is used to obtain Google's exact binary hash/size. The next commit pins these
+// values just like the model files. Runtime remains local and is bundled with Windows releases.
+async function prepareRuntimeProbe({ label, file, sourceUrl }) {
+  const target = join(outputDir, file);
+  if (!(await sha256IfExists(target))) {
+    const partial = `${target}.part`;
+    await rm(partial, { force: true });
+    console.log(`fetch ${label}: ${sourceUrl}`);
+    await download(sourceUrl, partial);
+    await rename(partial, target);
+  }
+  const hash = await sha256IfExists(target);
+  const info = await stat(target);
+  console.log(`RUNTIME_PROBE ${label} file=${file} sha256=${hash} size=${info.size}`);
+}
 
 async function sha256IfExists(path) {
   try {

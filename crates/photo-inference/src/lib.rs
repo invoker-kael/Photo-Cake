@@ -1,4 +1,5 @@
 mod executor;
+mod litert_runtime;
 mod local_models;
 mod raw_preview;
 

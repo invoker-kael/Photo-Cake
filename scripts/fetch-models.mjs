@@ -40,11 +40,13 @@ for (const { model, variant } of selected) {
 }
 
 if (platform === "windows") {
-  await prepareRuntimeProbe({
+  await preparePinnedFile({
     label: "google-litert@2.2.0",
     file: "libLiteRt.dll",
     sourceUrl:
       "https://storage.googleapis.com/litert/binaries/2.2.0/windows_x86_64/libLiteRt.dll",
+    sha256: "3f2b6ed9ccca4f8d8a298a9b49006fcf9b176ef27ea2c757d1ce552b736a5675",
+    sizeBytes: 11908608,
   });
 }
 
@@ -100,22 +102,6 @@ async function preparePinnedFile({
   }
 
   await rename(partial, target);
-}
-
-// One CI pass is used to obtain Google's exact binary hash/size. The next commit pins these
-// values just like the model files. Runtime remains local and is bundled with Windows releases.
-async function prepareRuntimeProbe({ label, file, sourceUrl }) {
-  const target = join(outputDir, file);
-  if (!(await sha256IfExists(target))) {
-    const partial = `${target}.part`;
-    await rm(partial, { force: true });
-    console.log(`fetch ${label}: ${sourceUrl}`);
-    await download(sourceUrl, partial);
-    await rename(partial, target);
-  }
-  const hash = await sha256IfExists(target);
-  const info = await stat(target);
-  console.log(`RUNTIME_PROBE ${label} file=${file} sha256=${hash} size=${info.size}`);
 }
 
 async function sha256IfExists(path) {

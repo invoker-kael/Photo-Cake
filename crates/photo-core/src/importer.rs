@@ -142,6 +142,26 @@ mod tests {
     }
 
     #[test]
+    fn import_does_not_modify_or_add_files_to_source_directory() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("app-data").join("photo-cake.sqlite3");
+        let source = dir.path().join("2026-05-Europe");
+        std::fs::create_dir_all(&source).unwrap();
+        let raw = source.join("IMG_1001.CR3");
+        let original_bytes = b"immutable-camera-raw";
+        std::fs::write(&raw, original_bytes).unwrap();
+
+        let before_entries = std::fs::read_dir(&source).unwrap().count();
+        let importer = RawImporter::open(&project).unwrap();
+        importer.import_paths("Europe", vec![raw.clone()]).unwrap();
+        let after_entries = std::fs::read_dir(&source).unwrap().count();
+
+        assert_eq!(std::fs::read(&raw).unwrap(), original_bytes);
+        assert_eq!(before_entries, after_entries);
+        assert_eq!(after_entries, 1);
+    }
+
+    #[test]
     fn separate_imports_keep_separate_group_collections() {
         let dir = tempdir().unwrap();
         let project = dir.path().join("photo-cake.sqlite3");

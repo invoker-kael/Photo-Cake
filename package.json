@@ -1,0 +1,13 @@
+{
+  "name": "photo-cake",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "dev": "pnpm --filter @photo-cake/desktop dev",
+    "build": "pnpm --filter @photo-cake/desktop build",
+    "tauri": "pnpm --filter @photo-cake/desktop tauri",
+    "check": "pnpm --filter @photo-cake/desktop check",
+    "test:core": "cargo test --workspace"
+  }
+}

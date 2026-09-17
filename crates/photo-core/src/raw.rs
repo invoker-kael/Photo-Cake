@@ -84,6 +84,26 @@ pub fn scan_raw_paths(paths: impl IntoIterator<Item = PathBuf>) -> RawImportScan
     }
 }
 
+pub fn scan_raw_directory(root: impl AsRef<Path>, recursive: bool) -> std::io::Result<RawImportScan> {
+    let mut paths = Vec::new();
+    collect_files(root.as_ref(), recursive, &mut paths)?;
+    Ok(scan_raw_paths(paths))
+}
+
+fn collect_files(root: &Path, recursive: bool, output: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_file() {
+            output.push(path);
+        } else if recursive && file_type.is_dir() {
+            collect_files(&path, recursive, output)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn extract_sequence_number(filename: &str) -> Option<u64> {
     let stem = Path::new(filename).file_stem()?.to_str()?;
     let digits_rev: String = stem
@@ -105,6 +125,7 @@ fn system_time_to_ms(value: SystemTime) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn accepts_common_raw_and_rejects_rendered_formats() {
@@ -114,6 +135,7 @@ mod tests {
         assert!(!is_supported_raw("D.jpg"));
         assert!(!is_supported_raw("E.tiff"));
         assert!(!is_supported_raw("F.png"));
+        assert!(!is_supported_raw("G.heic"));
     }
 
     #[test]
@@ -121,5 +143,17 @@ mod tests {
         assert_eq!(extract_sequence_number("DSC_1042.ARW"), Some(1042));
         assert_eq!(extract_sequence_number("IMG000123.CR3"), Some(123));
         assert_eq!(extract_sequence_number("portrait-final.NEF"), None);
+    }
+
+    #[test]
+    fn directory_scan_keeps_only_raw_files() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("IMG_0001.CR3"), b"raw").unwrap();
+        std::fs::write(dir.path().join("IMG_0001.JPG"), b"jpeg").unwrap();
+
+        let scan = scan_raw_directory(dir.path(), false).unwrap();
+        assert_eq!(scan.assets.len(), 1);
+        assert_eq!(scan.assets[0].filename, "IMG_0001.CR3");
+        assert_eq!(scan.skipped_non_raw.len(), 1);
     }
 }

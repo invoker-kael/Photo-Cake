@@ -1,20 +1,19 @@
-use crate::{LightroomHandoffPlan, LightroomHandoffPreset};
+use crate::FinishPlan;
 use rusqlite::{params, Connection};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
 const SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS lightroom_handoffs (
+CREATE TABLE IF NOT EXISTS finishing_handoffs (
     id TEXT PRIMARY KEY NOT NULL,
     asset_id TEXT NOT NULL,
     source_path TEXT NOT NULL,
-    output_path TEXT NOT NULL UNIQUE,
-    preset_json TEXT NOT NULL,
+    plan_json TEXT NOT NULL,
     created_at_unix_ms INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_lightroom_handoffs_asset_id
-    ON lightroom_handoffs(asset_id);
+CREATE INDEX IF NOT EXISTS idx_finishing_handoffs_asset_id
+    ON finishing_handoffs(asset_id);
 "#;
 
 #[derive(Debug, Error)]
@@ -25,8 +24,6 @@ pub enum HandoffStoreError {
     Io(#[from] std::io::Error),
     #[error("serialization error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("invalid uuid in handoff database: {0}")]
-    Uuid(#[from] uuid::Error),
 }
 
 #[derive(Debug, Clone)]
@@ -52,55 +49,37 @@ impl HandoffStore {
         Ok(Connection::open(&self.path)?)
     }
 
-    pub fn record_plan(&self, plan: &LightroomHandoffPlan) -> Result<(), HandoffStoreError> {
+    pub fn record_plan(&self, plan: &FinishPlan) -> Result<(), HandoffStoreError> {
         let conn = self.connect()?;
-        let preset_json = serde_json::to_string(&plan.preset)?;
+        let plan_json = serde_json::to_string(plan)?;
         conn.execute(
-            "INSERT INTO lightroom_handoffs
-             (id, asset_id, source_path, output_path, preset_json, created_at_unix_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO finishing_handoffs
+             (id, asset_id, source_path, plan_json, created_at_unix_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 plan.id.to_string(),
                 plan.asset_id.to_string(),
                 plan.source_path,
-                plan.output_path,
-                preset_json,
+                plan_json,
                 unix_time_ms()
             ],
         )?;
         Ok(())
     }
 
-    pub fn list_for_asset(
-        &self,
-        asset_id: Uuid,
-    ) -> Result<Vec<LightroomHandoffPlan>, HandoffStoreError> {
+    pub fn list_for_asset(&self, asset_id: Uuid) -> Result<Vec<FinishPlan>, HandoffStoreError> {
         let conn = self.connect()?;
         let mut stmt = conn.prepare(
-            "SELECT id, source_path, output_path, preset_json
-             FROM lightroom_handoffs
+            "SELECT plan_json
+             FROM finishing_handoffs
              WHERE asset_id = ?1
              ORDER BY created_at_unix_ms ASC, rowid ASC",
         )?;
-        let rows = stmt.query_map([asset_id.to_string()], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-            ))
-        })?;
+        let rows = stmt.query_map([asset_id.to_string()], |row| row.get::<_, String>(0))?;
 
         let mut plans = Vec::new();
         for row in rows {
-            let (id, source_path, output_path, preset_json) = row?;
-            plans.push(LightroomHandoffPlan {
-                id: Uuid::parse_str(&id)?,
-                asset_id,
-                source_path,
-                output_path,
-                preset: serde_json::from_str::<LightroomHandoffPreset>(&preset_json)?,
-            });
+            plans.push(serde_json::from_str::<FinishPlan>(&row?)?);
         }
         Ok(plans)
     }
@@ -118,17 +97,15 @@ fn unix_time_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{plan_lightroom_handoff, RawAsset};
+    use crate::{plan_finish, EditCompatibility, FinishTarget, HandoffMode, RawAsset};
     use tempfile::tempdir;
 
     #[test]
-    fn persists_handoff_manifest_linked_to_raw_asset() {
+    fn persists_xmp_handoff_manifest_linked_to_raw_asset() {
         let dir = tempdir().unwrap();
         let db = dir.path().join("photo-cake.sqlite3");
         let source_dir = dir.path().join("source");
-        let output_dir = dir.path().join("handoff");
         std::fs::create_dir_all(&source_dir).unwrap();
-        std::fs::create_dir_all(&output_dir).unwrap();
         let raw_path = source_dir.join("IMG_0001.CR3");
         std::fs::write(&raw_path, b"raw").unwrap();
 
@@ -143,10 +120,12 @@ mod tests {
             sequence_number: Some(1),
         };
 
-        let plan = plan_lightroom_handoff(
+        let plan = plan_finish(
             &asset,
-            &output_dir,
-            LightroomHandoffPreset::default(),
+            FinishTarget::Lightroom,
+            EditCompatibility::default(),
+            false,
+            None,
         )
         .unwrap();
         let store = HandoffStore::open(&db).unwrap();
@@ -156,7 +135,7 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].asset_id, asset.id);
         assert_eq!(loaded[0].source_path, asset.source_path);
-        assert_eq!(loaded[0].output_path, plan.output_path);
-        assert_eq!(loaded[0].preset, LightroomHandoffPreset::default());
+        assert_eq!(loaded[0].mode, HandoffMode::XmpNative);
+        assert_eq!(loaded[0], plan);
     }
 }

@@ -32,8 +32,15 @@ CREATE TABLE IF NOT EXISTS photo_group_members (
     FOREIGN KEY(asset_id) REFERENCES raw_assets(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS photo_group_collections (
+    group_id TEXT PRIMARY KEY NOT NULL,
+    collection_id TEXT NOT NULL,
+    FOREIGN KEY(group_id) REFERENCES photo_groups(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_raw_assets_source_path ON raw_assets(source_path);
 CREATE INDEX IF NOT EXISTS idx_group_members_asset_id ON photo_group_members(asset_id);
+CREATE INDEX IF NOT EXISTS idx_group_collections_collection_id ON photo_group_collections(collection_id);
 "#;
 
 #[derive(Debug, Error)]
@@ -131,10 +138,21 @@ impl RawCatalog {
         Ok(canonical)
     }
 
-    pub fn replace_automatic_groups(&self, groups: &[PhotoGroup]) -> Result<(), CatalogError> {
+    pub fn replace_automatic_groups(
+        &self,
+        collection_id: Uuid,
+        groups: &[PhotoGroup],
+    ) -> Result<(), CatalogError> {
         let mut conn = self.connect()?;
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM photo_groups WHERE manual_locked = 0", [])?;
+        tx.execute(
+            "DELETE FROM photo_groups
+             WHERE manual_locked = 0
+               AND id IN (
+                   SELECT group_id FROM photo_group_collections WHERE collection_id = ?1
+               )",
+            [collection_id.to_string()],
+        )?;
 
         for group in groups {
             tx.execute(
@@ -145,6 +163,10 @@ impl RawCatalog {
                     grouping_basis_to_db(group.basis),
                     bool_to_int(group.manual_locked)
                 ],
+            )?;
+            tx.execute(
+                "INSERT INTO photo_group_collections (group_id, collection_id) VALUES (?1, ?2)",
+                params![group.id.to_string(), collection_id.to_string()],
             )?;
             for (position, asset_id) in group.asset_ids.iter().enumerate() {
                 tx.execute(
@@ -195,22 +217,57 @@ impl RawCatalog {
     }
 
     pub fn list_groups(&self) -> Result<Vec<PhotoGroup>, CatalogError> {
+        self.list_groups_where(None)
+    }
+
+    pub fn list_groups_for_collection(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<Vec<PhotoGroup>, CatalogError> {
+        self.list_groups_where(Some(collection_id))
+    }
+
+    fn list_groups_where(
+        &self,
+        collection_id: Option<Uuid>,
+    ) -> Result<Vec<PhotoGroup>, CatalogError> {
         let conn = self.connect()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, kind, basis, manual_locked FROM photo_groups ORDER BY rowid ASC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)? != 0,
-            ))
-        })?;
+        let mut group_rows = Vec::new();
+
+        if let Some(collection_id) = collection_id {
+            let mut stmt = conn.prepare(
+                "SELECT g.id, g.kind, g.basis, g.manual_locked
+                 FROM photo_groups g
+                 JOIN photo_group_collections c ON c.group_id = g.id
+                 WHERE c.collection_id = ?1
+                 ORDER BY g.rowid ASC",
+            )?;
+            let rows = stmt.query_map([collection_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)? != 0,
+                ))
+            })?;
+            group_rows.extend(rows.collect::<Result<Vec<_>, _>>()?);
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, kind, basis, manual_locked FROM photo_groups ORDER BY rowid ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)? != 0,
+                ))
+            })?;
+            group_rows.extend(rows.collect::<Result<Vec<_>, _>>()?);
+        }
 
         let mut groups = Vec::new();
-        for row in rows {
-            let (id, kind, basis, manual_locked) = row?;
+        for (id, kind, basis, manual_locked) in group_rows {
             let group_id = Uuid::parse_str(&id)?;
             let mut members = conn.prepare(
                 "SELECT asset_id FROM photo_group_members WHERE group_id = ?1 ORDER BY position ASC",
@@ -311,20 +368,38 @@ mod tests {
     }
 
     #[test]
-    fn persists_groups_with_canonical_asset_ids() {
+    fn groups_are_scoped_to_collection() {
         let dir = tempdir().unwrap();
         let catalog = RawCatalog::open(dir.path().join("catalog.sqlite3")).unwrap();
-        let assets = catalog
+        let first_assets = catalog
             .ensure_assets(&[
-                sample_asset("C:/shoot/IMG_1001.CR3", 1001),
-                sample_asset("C:/shoot/IMG_1002.CR3", 1002),
+                sample_asset("C:/shoot-a/IMG_1001.CR3", 1001),
+                sample_asset("C:/shoot-a/IMG_1002.CR3", 1002),
             ])
             .unwrap();
-        let groups = initial_group_raw_assets(&assets, InitialGroupingConfig::default());
-        catalog.replace_automatic_groups(&groups).unwrap();
+        let second_assets = catalog
+            .ensure_assets(&[
+                sample_asset("C:/shoot-b/IMG_2001.CR3", 2001),
+                sample_asset("C:/shoot-b/IMG_2002.CR3", 2002),
+            ])
+            .unwrap();
 
-        let loaded = catalog.list_groups().unwrap();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].asset_ids, groups[0].asset_ids);
+        let first_collection = Uuid::new_v4();
+        let second_collection = Uuid::new_v4();
+        let first_groups = initial_group_raw_assets(&first_assets, InitialGroupingConfig::default());
+        let second_groups = initial_group_raw_assets(&second_assets, InitialGroupingConfig::default());
+        catalog
+            .replace_automatic_groups(first_collection, &first_groups)
+            .unwrap();
+        catalog
+            .replace_automatic_groups(second_collection, &second_groups)
+            .unwrap();
+
+        let loaded_first = catalog.list_groups_for_collection(first_collection).unwrap();
+        let loaded_second = catalog.list_groups_for_collection(second_collection).unwrap();
+        assert_eq!(loaded_first.len(), 1);
+        assert_eq!(loaded_second.len(), 1);
+        assert_eq!(loaded_first[0].asset_ids, first_groups[0].asset_ids);
+        assert_eq!(loaded_second[0].asset_ids, second_groups[0].asset_ids);
     }
 }

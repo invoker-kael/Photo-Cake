@@ -5,6 +5,7 @@ pub mod classification;
 pub mod classification_store;
 pub mod color_sync;
 pub mod color_sync_store;
+pub mod export;
 pub mod grouping;
 pub mod handoff;
 pub mod handoff_store;
@@ -37,6 +38,10 @@ pub use color_sync::{
     PhotoColorAnalysis, ResolvedColorEdit, SemanticColorIntent, SemanticRegion,
 };
 pub use color_sync_store::{ColorSyncStore, ColorSyncStoreError};
+pub use export::{
+    collision_safe_output, plan_export, ExportColorSpace, ExportFormat, ExportPlan, ExportPlanError,
+    ExportRecipe, ResizeRecipe,
+};
 pub use grouping::{
     initial_group_raw_assets, GroupingBasis, InitialGroupingConfig, PhotoGroup, PhotoGroupKind,
 };

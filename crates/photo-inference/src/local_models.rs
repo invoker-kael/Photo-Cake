@@ -94,8 +94,8 @@ impl LocalSemanticModels {
             .map_err(inference_error)?;
 
         Ok(Self {
-            segmenter: Arc::new(segmenter),
-            embedder: Arc::new(embedder),
+            segmenter,
+            embedder,
             segmentation_identity: LoadedModelIdentity {
                 id: seg_spec.id.clone(),
                 version: seg_spec.version.clone(),

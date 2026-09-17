@@ -1,6 +1,6 @@
 use crate::{
-    initial_group_raw_assets, Batch, BatchStore, CatalogError, InitialGroupingConfig, PhotoGroup,
-    RawAsset, RawCatalog, RawImportScan, RunnerError,
+    initial_group_raw_assets, Batch, BatchStage, BatchStore, CatalogError, InitialGroupingConfig,
+    PhotoGroup, RawAsset, RawCatalog, RawImportScan, RunnerError,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -72,27 +72,35 @@ impl RawImporter {
     ) -> Result<RawImportResult, RawImportError> {
         let assets = self.catalog.ensure_assets(&scan.assets)?;
 
-        let all_assets = self.catalog.list_assets()?;
-        let groups = initial_group_raw_assets(&all_assets, self.grouping);
-        self.catalog.replace_automatic_groups(&groups)?;
+        if assets.is_empty() {
+            return Ok(RawImportResult {
+                assets,
+                groups: Vec::new(),
+                batch: None,
+                skipped_non_raw: scan.skipped_non_raw,
+            });
+        }
 
-        let batch = if assets.is_empty() {
-            None
-        } else {
-            let batch = Batch::new(
-                batch_name,
-                assets.iter().map(|asset| asset.source_path.clone()),
-            );
-            self.batch_store
-                .create_batch(&batch)
-                .map_err(RunnerError::from)?;
-            Some(batch)
-        };
+        let batch = Batch::from_imported(
+            batch_name,
+            assets.iter().map(|asset| asset.source_path.clone()),
+        );
+        debug_assert!(
+            batch.items.iter().all(|item| item.stage == BatchStage::Analyze),
+            "RAW ingest already completed import stage"
+        );
+        self.batch_store
+            .create_batch(&batch)
+            .map_err(RunnerError::from)?;
+
+        let groups = initial_group_raw_assets(&assets, self.grouping);
+        self.catalog
+            .replace_automatic_groups(batch.id, &groups)?;
 
         Ok(RawImportResult {
             assets,
             groups,
-            batch,
+            batch: Some(batch),
             skipped_non_raw: scan.skipped_non_raw,
         })
     }
@@ -121,9 +129,36 @@ mod tests {
         assert_eq!(first.assets.len(), 1);
         assert_eq!(first.skipped_non_raw.len(), 1);
         assert_eq!(first.batch.as_ref().unwrap().items.len(), 1);
+        assert_eq!(first.batch.as_ref().unwrap().items[0].stage, BatchStage::Analyze);
+        assert_eq!(first.groups.len(), 1);
         let stable_id = first.assets[0].id;
 
         let second = importer.import_paths("second", vec![raw]).unwrap();
         assert_eq!(second.assets[0].id, stable_id);
+        assert_ne!(
+            first.batch.as_ref().unwrap().id,
+            second.batch.as_ref().unwrap().id
+        );
+    }
+
+    #[test]
+    fn separate_imports_keep_separate_group_collections() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("photo-cake.sqlite3");
+        let first_dir = dir.path().join("shoot-a");
+        let second_dir = dir.path().join("shoot-b");
+        std::fs::create_dir_all(&first_dir).unwrap();
+        std::fs::create_dir_all(&second_dir).unwrap();
+        let first = first_dir.join("IMG_1001.CR3");
+        let second = second_dir.join("IMG_2001.CR3");
+        std::fs::write(&first, b"raw").unwrap();
+        std::fs::write(&second, b"raw").unwrap();
+
+        let importer = RawImporter::open(&project).unwrap();
+        let a = importer.import_paths("a", vec![first]).unwrap();
+        let b = importer.import_paths("b", vec![second]).unwrap();
+        assert_eq!(a.groups.len(), 1);
+        assert_eq!(b.groups.len(), 1);
+        assert_ne!(a.groups[0].id, b.groups[0].id);
     }
 }

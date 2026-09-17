@@ -1,31 +1,57 @@
 # Photo-Cake
 
-Local-first AI photo workflow focused on reliable batch automation, non-destructive editing, and Windows/Android support.
+Local-first RAW photo workflow for high-volume batch correction, adaptive group color consistency and non-destructive finishing.
 
-## Product shape
+## Product workflow
 
-Photo-Cake is a single-user application with two platform packages built from one `main` branch:
+```text
+RAW
+ -> import without changing source folders
+ -> conservative moment grouping
+ -> cached preview analysis
+ -> portrait / non-portrait classification
+ -> visual similarity regrouping
+ -> automatic group target + adaptive per-photo color sync
+ -> portrait-only retouch where applicable
+ -> QA
+ -> direct export for most photos
+    -> optional RAW + XMP handoff to Lightroom for small manual refinements
+    -> optional 16-bit TIFF handoff to Photoshop for pixel-level retouch
+```
 
-- **Photo-Cake Windows** — primary desktop build, future CUDA/TensorRT/DirectML acceleration.
-- **Photo-Cake Android** — high-end tablet build, future NNAPI/QNN/Vulkan acceleration.
+Photo-Cake never moves, renames, copies, overwrites or deletes source RAW files as part of normal import/processing. The user's month/trip/event folder structure remains authoritative.
 
-Shared behavior must stay in common packages/crates instead of being copied between platform branches.
+## Local AI policy
 
-## Repository layout
+Normal processing is offline-first. Online inference is disabled by default.
+
+Release builds bundle pinned local models for face detection, person/skin segmentation and image embeddings. Analysis results are cached by source fingerprint, preview revision, task, model/version and config hash so the same local inference is reused across classification, grouping, masks and QA instead of being recomputed.
+
+See:
+
+- `docs/LOCAL_INFERENCE.md`
+- `docs/MODEL_BUNDLE.md`
+- `docs/PREVIEW_AND_SEMANTIC_GROUPING.md`
+- `docs/ADAPTIVE_GROUP_SYNC.md`
+- `docs/FINISHING_WORKFLOW.md`
+- `docs/RAW_IMPORT_AND_GROUPING.md`
+
+## Repository
 
 ```text
 Photo-Cake/
 ├─ apps/
-│  ├─ windows/              # Tauri Windows shell
-│  └─ android/              # Tauri Android shell
+│  ├─ windows/              Windows Tauri host
+│  └─ android/              Android Tauri host
 ├─ packages/
-│  └─ ui/                   # Shared responsive React UI
+│  └─ ui/                   shared React UI
 ├─ crates/
-│  └─ photo-core/           # Shared batch/domain logic
+│  └─ photo-core/           shared project/batch/analysis/edit contracts
+├─ models/
+│  └─ manifest.json         pinned bundled local model manifest
+├─ scripts/
+│  └─ fetch-models.mjs      verified release-time model fetcher
 ├─ docs/
-│  ├─ ARCHITECTURE.md
-│  ├─ BATCH_AUTOMATION.md
-│  └─ PLATFORMS.md
 └─ .github/workflows/
 ```
 
@@ -35,66 +61,60 @@ Photo-Cake/
 IMPORT
   -> ANALYZE
   -> APPLY_PRESET
-  -> RETOUCH
+  -> PORTRAIT_RETOUCH  (skipped for non-portrait/unclassified assets)
   -> QA
   -> EXPORT
   -> DONE
 ```
 
-Each photo is an independent resumable job. A failed image does not stop the rest of the batch by default.
+Each photo is an independent resumable job. A failed image does not stop the rest of the batch by default. Imported RAW assets retain their stable catalog IDs in the batch store.
 
 ## Development
 
-Requirements:
+Prerequisites:
 
 - Node.js 22+
-- pnpm 10+
+- pnpm 10.17.1
 - Rust stable
-- Windows build prerequisites for Tauri
-- Android Studio/SDK/NDK for Android packaging
-
-Install dependencies:
+- Tauri platform prerequisites
 
 ```bash
 pnpm install
-```
-
-Windows:
-
-```bash
-pnpm dev:windows
-pnpm build:windows
-```
-
-Android first-time initialization:
-
-```bash
-pnpm android:init
-```
-
-Then:
-
-```bash
-pnpm dev:android
-pnpm build:android
-```
-
-Checks:
-
-```bash
 pnpm check
 cargo test --workspace
 ```
 
+Windows development:
+
+```bash
+pnpm dev:windows
+```
+
+Android development:
+
+```bash
+pnpm android:init
+pnpm dev:android
+```
+
+Prepare pinned local model payloads manually when needed:
+
+```bash
+pnpm models:windows
+pnpm models:android
+```
+
+Model payloads are not committed to Git. Release workflows fetch fixed versions, verify SHA256 and bundle them into the platform package.
+
 ## Git and releases
 
-Use `main` plus short-lived `feature/*`, `fix/*`, and `platform/*` branches. Do not maintain long-lived Windows/Android branches.
+One `main` branch is shared by both products. Use short-lived `feature/*`, `fix/*`, and `platform/*` branches when needed. Do not maintain long-lived Windows/Android branches.
 
-Release tags are independent:
+Platform versions may advance independently:
 
 ```text
 windows-v0.1.0
 android-v0.1.0
 ```
 
-See `docs/PLATFORMS.md` for the platform contract.
+Windows and Android use separate release workflows while sharing `photo-core` and the common UI package.

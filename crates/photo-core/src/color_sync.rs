@@ -106,6 +106,57 @@ pub enum ColorSyncError {
     MissingManualCopyEdit,
     #[error("analysis missing for group asset {0}")]
     MissingAnalysis(Uuid),
+    #[error("cannot derive automatic group intent without analyses")]
+    EmptyAnalysis,
+}
+
+pub fn derive_auto_group_intent(
+    analyses: &[PhotoColorAnalysis],
+) -> Result<GroupColorIntent, ColorSyncError> {
+    if analyses.is_empty() {
+        return Err(ColorSyncError::EmptyAnalysis);
+    }
+    Ok(GroupColorIntent {
+        name: "Auto Balanced".to_string(),
+        target_exposure_ev: median(analyses.iter().map(|a| a.exposure_ev)),
+        target_temperature_k: median(analyses.iter().map(|a| a.temperature_k)),
+        target_tint: median(analyses.iter().map(|a| a.tint)),
+        contrast: 0.0,
+        saturation: 0.0,
+        semantic: Vec::new(),
+    })
+}
+
+pub fn choose_reference_candidate(
+    analyses: &[PhotoColorAnalysis],
+    intent: &GroupColorIntent,
+) -> Option<Uuid> {
+    analyses
+        .iter()
+        .min_by(|left, right| {
+            reference_score(left, intent).total_cmp(&reference_score(right, intent))
+        })
+        .map(|analysis| analysis.asset_id)
+}
+
+pub fn build_auto_group_plan(
+    group_id: Uuid,
+    asset_ids: &[Uuid],
+    analyses: &[PhotoColorAnalysis],
+    revision: u64,
+) -> Result<GroupColorSyncPlan, ColorSyncError> {
+    let intent = derive_auto_group_intent(analyses)?;
+    let reference_asset_id = choose_reference_candidate(analyses, &intent);
+    build_adaptive_group_plan(
+        group_id,
+        asset_ids,
+        GroupSyncMode::AutoGroup,
+        reference_asset_id,
+        intent,
+        analyses,
+        None,
+        revision,
+    )
 }
 
 pub fn build_adaptive_group_plan(
@@ -217,6 +268,24 @@ fn resolve_adaptive_edit(
     }
 }
 
+fn reference_score(analysis: &PhotoColorAnalysis, intent: &GroupColorIntent) -> f32 {
+    (analysis.exposure_ev - intent.target_exposure_ev).abs() * 2.0
+        + (analysis.temperature_k - intent.target_temperature_k).abs() / 2000.0
+        + (analysis.tint - intent.target_tint).abs() / 50.0
+        + (1.0 - analysis.confidence.clamp(0.0, 1.0)) * 0.5
+}
+
+fn median(values: impl Iterator<Item = f32>) -> f32 {
+    let mut values = values.collect::<Vec<_>>();
+    values.sort_by(|left, right| left.total_cmp(right));
+    let middle = values.len() / 2;
+    if values.len() % 2 == 0 {
+        (values[middle - 1] + values[middle]) / 2.0
+    } else {
+        values[middle]
+    }
+}
+
 fn clamp(value: f32, min: f32, max: f32) -> f32 {
     value.max(min).min(max)
 }
@@ -233,6 +302,29 @@ mod tests {
             tint: 0.0,
             confidence: 1.0,
         }
+    }
+
+    #[test]
+    fn auto_mode_derives_target_and_reference_without_manual_grade() {
+        let first = Uuid::new_v4();
+        let middle = Uuid::new_v4();
+        let last = Uuid::new_v4();
+        let analyses = vec![
+            analysis(first, -1.0, 5000.0),
+            analysis(middle, 0.1, 5500.0),
+            analysis(last, 1.0, 6200.0),
+        ];
+        let plan = build_auto_group_plan(
+            Uuid::new_v4(),
+            &[first, middle, last],
+            &analyses,
+            1,
+        )
+        .unwrap();
+        assert_eq!(plan.mode, GroupSyncMode::AutoGroup);
+        assert_eq!(plan.reference_asset_id, Some(middle));
+        assert_eq!(plan.intent.target_exposure_ev, 0.1);
+        assert_eq!(plan.intent.target_temperature_k, 5500.0);
     }
 
     #[test]

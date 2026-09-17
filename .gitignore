@@ -22,6 +22,9 @@ Thumbs.db
 cache/
 exports/
 
+# Downloaded local model runtime payloads
+models/runtime/
+
 # Environment
 .env
 .env.*

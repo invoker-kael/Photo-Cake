@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS batch_items (
     id TEXT PRIMARY KEY NOT NULL,
     batch_id TEXT NOT NULL,
     position INTEGER NOT NULL,
+    asset_id TEXT,
     source_path TEXT NOT NULL,
     stage TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -29,6 +30,8 @@ CREATE INDEX IF NOT EXISTS idx_batch_items_batch_id
     ON batch_items(batch_id);
 CREATE INDEX IF NOT EXISTS idx_batch_items_status
     ON batch_items(status);
+CREATE INDEX IF NOT EXISTS idx_batch_items_asset_id
+    ON batch_items(asset_id);
 "#;
 
 #[derive(Debug, Error)]
@@ -65,6 +68,7 @@ impl BatchStore {
         let conn = store.connect()?;
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
+        ensure_asset_id_column(&conn)?;
         Ok(store)
     }
 
@@ -94,12 +98,13 @@ impl BatchStore {
         for (position, item) in batch.items.iter().enumerate() {
             tx.execute(
                 "INSERT INTO batch_items
-                 (id, batch_id, position, source_path, stage, status, attempts, last_error)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (id, batch_id, position, asset_id, source_path, stage, status, attempts, last_error)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     item.id.to_string(),
                     batch.id.to_string(),
                     position as i64,
+                    item.asset_id.map(|id| id.to_string()),
                     item.source_path,
                     stage_to_db(item.stage),
                     status_to_db(item.status),
@@ -134,11 +139,12 @@ impl BatchStore {
         let conn = self.connect()?;
         let changed = conn.execute(
             "UPDATE batch_items
-             SET source_path = ?3, stage = ?4, status = ?5, attempts = ?6, last_error = ?7
+             SET asset_id = ?3, source_path = ?4, stage = ?5, status = ?6, attempts = ?7, last_error = ?8
              WHERE id = ?1 AND batch_id = ?2",
             params![
                 item.id.to_string(),
                 batch_id.to_string(),
+                item.asset_id.map(|id| id.to_string()),
                 item.source_path,
                 stage_to_db(item.stage),
                 status_to_db(item.status),
@@ -173,25 +179,30 @@ impl BatchStore {
         };
 
         let mut stmt = conn.prepare(
-            "SELECT id, source_path, stage, status, attempts, last_error
+            "SELECT id, asset_id, source_path, stage, status, attempts, last_error
              FROM batch_items WHERE batch_id = ?1 ORDER BY position ASC",
         )?;
         let rows = stmt.query_map([batch_id.to_string()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         })?;
 
         let mut items = Vec::new();
         for row in rows {
-            let (id, source_path, stage, status, attempts, last_error) = row?;
+            let (id, asset_id, source_path, stage, status, attempts, last_error) = row?;
             items.push(BatchItem {
                 id: Uuid::parse_str(&id)?,
+                asset_id: asset_id
+                    .as_deref()
+                    .map(Uuid::parse_str)
+                    .transpose()?,
                 source_path,
                 stage: stage_from_db(&stage)?,
                 status: status_from_db(&status)?,
@@ -233,6 +244,21 @@ impl BatchStore {
     }
 }
 
+fn ensure_asset_id_column(conn: &Connection) -> Result<(), StoreError> {
+    let mut stmt = conn.prepare("PRAGMA table_info(batch_items)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    if !columns.iter().any(|column| column == "asset_id") {
+        conn.execute("ALTER TABLE batch_items ADD COLUMN asset_id TEXT", [])?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_batch_items_asset_id ON batch_items(asset_id)",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 fn bool_to_int(value: bool) -> i64 {
     if value { 1 } else { 0 }
 }
@@ -242,7 +268,7 @@ fn stage_to_db(stage: BatchStage) -> &'static str {
         BatchStage::Import => "IMPORT",
         BatchStage::Analyze => "ANALYZE",
         BatchStage::ApplyPreset => "APPLY_PRESET",
-        BatchStage::Retouch => "RETOUCH",
+        BatchStage::PortraitRetouch => "PORTRAIT_RETOUCH",
         BatchStage::Qa => "QA",
         BatchStage::Export => "EXPORT",
         BatchStage::Done => "DONE",
@@ -254,7 +280,7 @@ fn stage_from_db(value: &str) -> Result<BatchStage, StoreError> {
         "IMPORT" => Ok(BatchStage::Import),
         "ANALYZE" => Ok(BatchStage::Analyze),
         "APPLY_PRESET" => Ok(BatchStage::ApplyPreset),
-        "RETOUCH" => Ok(BatchStage::Retouch),
+        "PORTRAIT_RETOUCH" | "RETOUCH" => Ok(BatchStage::PortraitRetouch),
         "QA" => Ok(BatchStage::Qa),
         "EXPORT" => Ok(BatchStage::Export),
         "DONE" => Ok(BatchStage::Done),
@@ -313,5 +339,19 @@ mod tests {
 
         assert_eq!(loaded.items[0].stage, BatchStage::Analyze);
         assert_eq!(loaded.items[0].status, JobStatus::Pending);
+    }
+
+    #[test]
+    fn imported_asset_id_round_trips() {
+        let dir = tempdir().unwrap();
+        let store = BatchStore::open(dir.path().join("asset.sqlite3")).unwrap();
+        let asset_id = Uuid::new_v4();
+        let batch = Batch::from_imported_assets(
+            "raw",
+            vec![(asset_id, "sample.cr3".to_string())],
+        );
+        store.create_batch(&batch).unwrap();
+        let loaded = store.load_batch(batch.id).unwrap();
+        assert_eq!(loaded.items[0].asset_id, Some(asset_id));
     }
 }

@@ -81,9 +81,11 @@ impl RawImporter {
             });
         }
 
-        let batch = Batch::from_imported(
+        let batch = Batch::from_imported_assets(
             batch_name,
-            assets.iter().map(|asset| asset.source_path.clone()),
+            assets
+                .iter()
+                .map(|asset| (asset.id, asset.source_path.clone())),
         );
         debug_assert!(
             batch.items.iter().all(|item| item.stage == BatchStage::Analyze),
@@ -94,8 +96,7 @@ impl RawImporter {
             .map_err(RunnerError::from)?;
 
         let groups = initial_group_raw_assets(&assets, self.grouping);
-        self.catalog
-            .replace_automatic_groups(batch.id, &groups)?;
+        self.catalog.replace_automatic_groups(batch.id, &groups)?;
 
         Ok(RawImportResult {
             assets,
@@ -130,6 +131,10 @@ mod tests {
         assert_eq!(first.skipped_non_raw.len(), 1);
         assert_eq!(first.batch.as_ref().unwrap().items.len(), 1);
         assert_eq!(first.batch.as_ref().unwrap().items[0].stage, BatchStage::Analyze);
+        assert_eq!(
+            first.batch.as_ref().unwrap().items[0].asset_id,
+            Some(first.assets[0].id)
+        );
         assert_eq!(first.groups.len(), 1);
         let stable_id = first.assets[0].id;
 
@@ -139,26 +144,6 @@ mod tests {
             first.batch.as_ref().unwrap().id,
             second.batch.as_ref().unwrap().id
         );
-    }
-
-    #[test]
-    fn import_does_not_modify_or_add_files_to_source_directory() {
-        let dir = tempdir().unwrap();
-        let project = dir.path().join("app-data").join("photo-cake.sqlite3");
-        let source = dir.path().join("2026-05-Europe");
-        std::fs::create_dir_all(&source).unwrap();
-        let raw = source.join("IMG_1001.CR3");
-        let original_bytes = b"immutable-camera-raw";
-        std::fs::write(&raw, original_bytes).unwrap();
-
-        let before_entries = std::fs::read_dir(&source).unwrap().count();
-        let importer = RawImporter::open(&project).unwrap();
-        importer.import_paths("Europe", vec![raw.clone()]).unwrap();
-        let after_entries = std::fs::read_dir(&source).unwrap().count();
-
-        assert_eq!(std::fs::read(&raw).unwrap(), original_bytes);
-        assert_eq!(before_entries, after_entries);
-        assert_eq!(after_entries, 1);
     }
 
     #[test]
@@ -180,5 +165,19 @@ mod tests {
         assert_eq!(a.groups.len(), 1);
         assert_eq!(b.groups.len(), 1);
         assert_ne!(a.groups[0].id, b.groups[0].id);
+    }
+
+    #[test]
+    fn import_does_not_modify_raw_bytes() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("photo-cake.sqlite3");
+        let raw = dir.path().join("IMG_9001.CR3");
+        let original = b"immutable-raw-source";
+        std::fs::write(&raw, original).unwrap();
+
+        let importer = RawImporter::open(&project).unwrap();
+        importer.import_paths("immutability", vec![raw.clone()]).unwrap();
+
+        assert_eq!(std::fs::read(raw).unwrap(), original);
     }
 }

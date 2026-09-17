@@ -31,12 +31,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile=false
 
+      - name: Fetch pinned local models
+        run: node scripts/fetch-models.mjs android
+
       - name: Initialize generated Android project
         working-directory: apps/android
         run: pnpm tauri android init
 
-      - name: Build Android APK
-        run: pnpm build:android
+      - name: Build Android APK with bundled models
+        run: pnpm --filter @photo-cake/android tauri android build --apk --config src-tauri/tauri.release.conf.json
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4

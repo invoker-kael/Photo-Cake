@@ -4,6 +4,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub trait StageExecutor {
+    fn should_execute(&self, _item: &BatchItem) -> Result<bool, String> {
+        Ok(true)
+    }
+
     fn execute(&mut self, item: &BatchItem) -> Result<(), String>;
 }
 
@@ -21,6 +25,10 @@ impl StageExecutor for NoopStageExecutor {
 pub enum RunStep {
     Idle,
     Completed {
+        item_id: Uuid,
+        stage: BatchStage,
+    },
+    Skipped {
         item_id: Uuid,
         stage: BatchStage,
     },
@@ -94,7 +102,25 @@ impl<E: StageExecutor> AutomationRunner<E> {
         if stage == BatchStage::Qa && !auto_qa {
             item.complete_stage();
             self.store.update_item(batch_id, item)?;
-            return Ok(RunStep::Completed { item_id, stage });
+            return Ok(RunStep::Skipped { item_id, stage });
+        }
+
+        match self.executor.should_execute(item) {
+            Ok(false) => {
+                item.complete_stage();
+                self.store.update_item(batch_id, item)?;
+                return Ok(RunStep::Skipped { item_id, stage });
+            }
+            Ok(true) => {}
+            Err(message) => {
+                item.fail(message.clone());
+                self.store.update_item(batch_id, item)?;
+                return Ok(RunStep::Failed {
+                    item_id,
+                    stage,
+                    message,
+                });
+            }
         }
 
         match self.executor.execute(item) {
@@ -265,5 +291,30 @@ mod tests {
         let resumed = runner.resume_batch(batch.id).unwrap();
         assert_eq!(resumed.items[0].stage, BatchStage::Import);
         assert_eq!(resumed.items[0].status, JobStatus::Pending);
+    }
+
+    struct SkipPortrait;
+
+    impl StageExecutor for SkipPortrait {
+        fn should_execute(&self, item: &BatchItem) -> Result<bool, String> {
+            Ok(item.stage != BatchStage::PortraitRetouch)
+        }
+
+        fn execute(&mut self, _item: &BatchItem) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn skipped_stage_advances_without_failure() {
+        let dir = tempdir().unwrap();
+        let store = BatchStore::open(dir.path().join("skip.sqlite3")).unwrap();
+        let mut runner = AutomationRunner::new(store, SkipPortrait);
+        let batch = runner
+            .create_batch("test", vec!["sample.raw".to_string()])
+            .unwrap();
+        let finished = runner.run_until_idle(batch.id).unwrap();
+        assert_eq!(finished.items[0].stage, BatchStage::Done);
+        assert_eq!(finished.items[0].status, JobStatus::Done);
     }
 }

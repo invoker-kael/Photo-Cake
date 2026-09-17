@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "../../../models/manifest.json": "models/manifest.json",
+      "../../../models/runtime/windows/": "models/"
+    }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "online_inference_policy": "DISABLED",
+  "models": [
+    {
+      "id": "mediapipe-blaze-face-short-range",
+      "version": "1",
+      "task": "FACE_DETECTION",
+      "license": "Apache-2.0",
+      "homepage": "https://ai.google.dev/edge/mediapipe/solutions/vision/face_detector",
+      "labels": ["face"],
+      "variants": [
+        {
+          "platform": "SHARED",
+          "format": "TFLITE",
+          "file": "blaze_face_short_range.tflite",
+          "source_url": "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite",
+          "sha256": "b4578f35940bf5a1a655214a1cce5cab13eba73c1297cd78e1a04c2380b0152f",
+          "size_bytes": 229746
+        }
+      ]
+    },
+    {
+      "id": "mediapipe-selfie-multiclass-256",
+      "version": "1",
+      "task": "SEGMENTATION",
+      "license": "Apache-2.0",
+      "homepage": "https://ai.google.dev/edge/mediapipe/solutions/vision/image_segmenter",
+      "labels": ["background", "hair", "body_skin", "face_skin", "clothes", "other"],
+      "variants": [
+        {
+          "platform": "SHARED",
+          "format": "TFLITE",
+          "file": "selfie_multiclass_256x256.tflite",
+          "source_url": "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite",
+          "sha256": "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0",
+          "size_bytes": 16371837
+        }
+      ]
+    },
+    {
+      "id": "dinov2-small",
+      "version": "onnx-08c606e",
+      "task": "IMAGE_EMBEDDING",
+      "license": "Apache-2.0",
+      "homepage": "https://github.com/facebookresearch/dinov2",
+      "labels": [],
+      "variants": [
+        {
+          "platform": "WINDOWS",
+          "format": "ONNX_FP16",
+          "file": "dinov2-small-fp16.onnx",
+          "source_url": "https://huggingface.co/onnx-community/dinov2-small-ONNX/resolve/08c606e3123472a388efa59181b677d428f69bbd/onnx/model_fp16.onnx?download=true",
+          "sha256": "e6ab6a3e681f842a3d6ca57ecd302820a700c41a9be5e40f69ec8e019b8d8e94",
+          "size_bytes": 45453331
+        },
+        {
+          "platform": "ANDROID",
+          "format": "ONNX_INT8",
+          "file": "dinov2-small-int8.onnx",
+          "source_url": "https://huggingface.co/onnx-community/dinov2-small-ONNX/resolve/08c606e3123472a388efa59181b677d428f69bbd/onnx/model_int8.onnx?download=true",
+          "sha256": "e48d69984ee26d089e5c690cb39a727e38b95e2a525d7269f5ac366b02a6c22a",
+          "size_bytes": 24427763
+        }
+      ]
+    }
+  ]
+}

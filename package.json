@@ -10,6 +10,8 @@
     "android:init": "pnpm --filter @photo-cake/android android:init",
     "build:windows": "pnpm --filter @photo-cake/windows build",
     "build:android": "pnpm --filter @photo-cake/android build",
+    "models:windows": "node scripts/fetch-models.mjs windows",
+    "models:android": "node scripts/fetch-models.mjs android",
     "check": "pnpm check:windows && pnpm check:android",
     "check:windows": "pnpm --filter @photo-cake/windows check",
     "check:android": "pnpm --filter @photo-cake/android check",

@@ -1,13 +1,16 @@
 use photo_core::{
-    AutomationRunner, Batch, BatchStore, NoopStageExecutor, RawImportResult, RawImporter,
+    AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor, ClassificationStore,
+    ModelBundleManifest, NoopStageExecutor, RawImportResult, RawImporter,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 use uuid::Uuid;
 
+type AppRunner = AutomationRunner<ClassificationRoutingExecutor<NoopStageExecutor>>;
+
 struct AppState {
-    runner: Mutex<AutomationRunner<NoopStageExecutor>>,
+    runner: Mutex<AppRunner>,
     raw_importer: RawImporter,
 }
 
@@ -17,7 +20,7 @@ fn parse_batch_id(value: &str) -> Result<Uuid, String> {
 
 fn with_runner<T>(
     state: &State<'_, AppState>,
-    operation: impl FnOnce(&mut AutomationRunner<NoopStageExecutor>) -> Result<T, photo_core::RunnerError>,
+    operation: impl FnOnce(&mut AppRunner) -> Result<T, photo_core::RunnerError>,
 ) -> Result<T, String> {
     let mut runner = state
         .runner
@@ -66,6 +69,11 @@ fn import_raw_directory(
 }
 
 #[tauri::command]
+fn bundled_models() -> Result<ModelBundleManifest, String> {
+    ModelBundleManifest::bundled().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn run_batch(batch_id: String, state: State<'_, AppState>) -> Result<Batch, String> {
     let batch_id = parse_batch_id(&batch_id)?;
     with_runner(&state, |runner| runner.run_until_idle(batch_id))
@@ -103,7 +111,9 @@ pub fn run() {
             std::fs::create_dir_all(&data_dir)?;
             let database = data_dir.join("photo-cake.sqlite3");
             let store = BatchStore::open(&database)?;
-            let runner = AutomationRunner::new(store, NoopStageExecutor);
+            let classification_store = ClassificationStore::open(&database)?;
+            let executor = ClassificationRoutingExecutor::new(NoopStageExecutor, classification_store);
+            let runner = AutomationRunner::new(store, executor);
             runner.recover_interrupted()?;
             let raw_importer = RawImporter::open(&database)?;
             app.manage(AppState {
@@ -117,6 +127,7 @@ pub fn run() {
             create_batch,
             import_raw_paths,
             import_raw_directory,
+            bundled_models,
             run_batch,
             retry_failed,
             pause_batch,

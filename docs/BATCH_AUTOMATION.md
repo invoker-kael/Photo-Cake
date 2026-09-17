@@ -1,136 +1,51 @@
-# Batch Automation
+# Batch automation
 
-Batch automation is a first-class product requirement, not a later add-on.
+Photo-Cake treats every imported photo as an independent, persistent job. The source RAW is immutable; only cache artifacts, analysis, edit state, QA state, and export state are written by the application.
 
-## Implemented foundation
-
-The current core now persists batches and per-photo jobs in SQLite. The Windows host opens `photo-cake.sqlite3` in the application data directory and recovers interrupted work on startup.
-
-Implemented behavior:
-
-- one independent persisted job per photo
-- checkpoint before stage execution (`RUNNING`)
-- checkpoint after success, failure, pause, resume, retry, or cancel
-- abnormal-exit recovery: `RUNNING` becomes `PENDING` at the same stage
-- explicit retry resumes the failed stage instead of restarting import
-- one failed photo does not block other pending photos by default
-- optional `stop_on_error` policy
-- automatic QA stage can be skipped by the batch contract
-- SQLite WAL mode for durable local state
-
-The actual image-processing stage implementations are still adapters; the current default executor is a no-op so the automation contract can be tested before RAW/AI engines are attached.
-
-## Default pipeline
+## Default local workflow
 
 ```text
 IMPORT
   -> ANALYZE
+     -> portrait / non-portrait classification
+     -> local image embedding
+     -> adaptive grouping
   -> APPLY_PRESET
-  -> RETOUCH
+  -> PORTRAIT_RETOUCH (portrait only)
   -> QA
   -> EXPORT
   -> DONE
 ```
 
-## Job states
+The product is designed around a project/batch workflow rather than a single blocking edit command. Importing RAW files creates a persistent batch and starts background analysis automatically. The UI remains available while the worker processes the queue.
 
-```text
-PENDING
-RUNNING
-PAUSED
-FAILED
-CANCELLED
-DONE
-```
+## Background worker behavior
 
-Stage and status are deliberately separate. If ANALYZE fails, retrying the job restarts ANALYZE rather than IMPORT.
+- One active worker is allowed per batch.
+- Work is checkpointed before and after every stage.
+- The worker executes one persisted stage at a time and emits batch updates to the UI after each transition.
+- Failed photos remain isolated. Other photos continue unless `stop_on_error` is enabled.
+- Pause and cancel are cooperative: the current stage is allowed to finish and persist safely, then the control request takes effect at the next stage boundary.
+- Resume wakes the same batch worker and continues from the stored stage rather than restarting the photo.
+- Retry returns failed photos to `PENDING` at the failed stage only.
+- An abnormal process exit changes persisted `RUNNING` items back to `PENDING` on next startup, preserving the stage. The app does not silently assume that every pending batch should auto-run after restart; persistent active/paused project intent will be added before automatic restart continuation is enabled.
 
-## Crash-safe transition
+## Batch-edit ergonomics
 
-```text
-PENDING / stage=ANALYZE
-        |
-        | persist before work
-        v
-RUNNING / stage=ANALYZE
-        |
-        +---- success ----> PENDING / stage=APPLY_PRESET
-        |
-        +---- failure ----> FAILED  / stage=ANALYZE
-        |
-        +---- process dies
-                         next launch
-                            |
-                            v
-                    PENDING / stage=ANALYZE
-```
+Photo-Cake follows a standard-photo / group / review pattern for large shoots:
 
-This prevents a crash from falsely marking an unfinished stage as complete and prevents already completed stages from being repeated.
+1. Import into an explicit project/batch without changing the source folder.
+2. Analyze previews locally and split photos by useful semantic/visual context.
+3. Establish or select a reference look for a group.
+4. Apply the intent across the group, resolving per-photo parameters instead of blindly copying raw numeric values.
+5. Run portrait-specific processing only where classification says it is useful.
+6. Perform automatic QA and surface exceptions for review.
+7. Export approved photos directly from Photo-Cake; Lightroom/Photoshop handoff remains secondary.
 
-## SQLite records
+This keeps repetitive work automatic while reserving manual attention for reference images, ambiguous classifications, QA exceptions, and high-value final refinements.
 
-`batches` stores batch-level policy. `batch_items` stores the ordered photo jobs with:
+## Persistence
 
-- stable UUID
-- source reference/path (portable asset IDs come later)
-- current stage
-- current status
-- attempt count
-- last error
+SQLite uses WAL mode. Batch records store the current stage/status, attempts, errors, and stable catalog asset identity. Preview and analysis caches include source/model/config revisions so unchanged evidence can be reused without rerunning earlier stages.
 
-Future migrations will extend this with edit revision/hash, model versions, input fingerprint, QA result and export records.
-
-## Runner API
-
-The shared Rust core exposes `AutomationRunner<E>` where `E: StageExecutor`. Windows, Android and future inference backends plug into the same runner contract.
-
-The runner supports:
-
-- create/list/load batches
-- run one checkpointed stage
-- run until no pending work remains
-- retry failed jobs
-- pause/resume a batch
-- cancel a batch
-- recover interrupted jobs
-
-## Automation recipes
-
-A future recipe will look conceptually like:
-
-```json
-{
-  "name": "Portrait Natural",
-  "watch": false,
-  "preset": "natural-v1",
-  "autoRetouch": true,
-  "autoQa": true,
-  "export": {
-    "format": "jpeg",
-    "quality": 95,
-    "colorSpace": "sRGB"
-  },
-  "failurePolicy": {
-    "retries": 2,
-    "continueBatch": true
-  }
-}
-```
-
-## Planned automation triggers
-
-- Manual selection
-- Folder import
-- Drag and drop
-- Optional watched folder
-- Re-run failed only
-- Re-run QA only
-- Export approved only
-
-Watched folders are intentionally optional because Photo-Cake is a personal editor, not a server daemon.
-
-## QA behavior
-
-QA does not silently delete or hide images. It will produce PASS / REVIEW / FAIL with reasons such as blur, closed eyes, overexposure, mask anomaly, excessive smoothing, or export failure.
-
-The safe initial export policy remains: export PASS images automatically and leave REVIEW/FAIL visible for manual confirmation.
+Future invalidation metadata will continue to be scoped: changing an output recipe must not rerun analysis or retouch; changing a model or semantic classification should invalidate only the dependent semantic/grouping/retouch work.

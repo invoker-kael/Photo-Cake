@@ -59,6 +59,17 @@ impl BatchItem {
         }
     }
 
+    pub fn imported(source_path: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            source_path: source_path.into(),
+            stage: BatchStage::Analyze,
+            status: JobStatus::Pending,
+            attempts: 0,
+            last_error: None,
+        }
+    }
+
     pub fn start(&mut self) {
         if !matches!(self.status, JobStatus::Cancelled | JobStatus::Done) {
             self.status = JobStatus::Running;
@@ -109,6 +120,16 @@ impl Batch {
         }
     }
 
+    pub fn from_imported(name: impl Into<String>, paths: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            items: paths.into_iter().map(BatchItem::imported).collect(),
+            auto_qa: true,
+            stop_on_error: false,
+        }
+    }
+
     pub fn progress(&self) -> f32 {
         if self.items.is_empty() {
             return 0.0;
@@ -137,5 +158,12 @@ mod tests {
         item.retry();
         assert_eq!(item.status, JobStatus::Pending);
         assert_eq!(item.stage, BatchStage::Analyze);
+    }
+
+    #[test]
+    fn imported_batch_starts_after_import_stage() {
+        let batch = Batch::from_imported("raw", vec!["sample.cr3".to_string()]);
+        assert_eq!(batch.items[0].stage, BatchStage::Analyze);
+        assert_eq!(batch.items[0].status, JobStatus::Pending);
     }
 }

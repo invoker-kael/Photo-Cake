@@ -70,21 +70,8 @@ impl LocalSemanticModels {
             return Err(LocalModelError::MissingFile(embedding_path));
         }
 
-        let segmenter = tract_tflite::tflite()
-            .model_for_path(&segment_path)
-            .map_err(inference_error)?
-            .into_optimized()
-            .map_err(inference_error)?
-            .into_runnable()
-            .map_err(inference_error)?;
-
-        let embedder = tract_tflite::tflite()
-            .model_for_path(&embedding_path)
-            .map_err(inference_error)?
-            .into_optimized()
-            .map_err(inference_error)?
-            .into_runnable()
-            .map_err(inference_error)?;
+        let segmenter = load_tflite_model(&segment_path, &seg_spec.id)?;
+        let embedder = load_tflite_model(&embedding_path, &emb_spec.id)?;
 
         Ok(Self {
             segmenter,
@@ -129,12 +116,12 @@ impl LocalSemanticModels {
         let outputs = self
             .segmenter
             .run(tvec!(input.into()))
-            .map_err(inference_error)?;
+            .map_err(|error| inference_error("run segmentation model", error))?;
         let output = outputs
             .first()
             .ok_or_else(|| LocalModelError::Output("segmentation model returned no output".into()))?
             .to_plain_array_view::<f32>()
-            .map_err(inference_error)?;
+            .map_err(|error| inference_error("read segmentation output", error))?;
         let shape = output.shape();
         if shape.len() != 4 || shape[0] != 1 || shape[3] != 6 {
             return Err(LocalModelError::Output(format!(
@@ -168,7 +155,7 @@ impl LocalSemanticModels {
         let outputs = self
             .embedder
             .run(tvec!(input.into()))
-            .map_err(inference_error)?;
+            .map_err(|error| inference_error("run image embedding model", error))?;
         let mut best = None::<Vec<f32>>;
         for value in &outputs {
             let Ok(view) = value.to_plain_array_view::<f32>() else {
@@ -183,6 +170,18 @@ impl LocalSemanticModels {
             LocalModelError::Output("image embedder returned no usable float embedding".into())
         })?)
     }
+}
+
+fn load_tflite_model(path: &Path, model_id: &str) -> Result<Arc<TypedRunnableModel>, LocalModelError> {
+    let model = tract_tflite::tflite()
+        .model_for_path(path)
+        .map_err(|error| inference_error(&format!("load {model_id} from {}", path.display()), error))?;
+    let model = model
+        .into_optimized()
+        .map_err(|error| inference_error(&format!("optimize {model_id}"), error))?;
+    model
+        .into_runnable()
+        .map_err(|error| inference_error(&format!("make {model_id} runnable"), error))
 }
 
 fn summarize_segmentation(
@@ -319,8 +318,8 @@ fn normalize_embedding(mut embedding: Vec<f32>) -> Result<Vec<f32>, LocalModelEr
     Ok(embedding)
 }
 
-fn inference_error(error: impl std::fmt::Display) -> LocalModelError {
-    LocalModelError::Inference(error.to_string())
+fn inference_error(context: &str, error: impl std::fmt::Display) -> LocalModelError {
+    LocalModelError::Inference(format!("{context}: {error:#}"))
 }
 
 #[cfg(test)]

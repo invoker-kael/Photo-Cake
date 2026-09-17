@@ -4,12 +4,10 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
-use tract_onnx::prelude::InferenceModelExt;
 use tract_tflite::prelude::*;
 
 const SEGMENT_SIZE: u32 = 256;
 const EMBEDDING_SIZE: u32 = 224;
-const DINO_HIDDEN: usize = 384;
 
 #[derive(Debug, Error)]
 pub enum LocalModelError {
@@ -80,13 +78,8 @@ impl LocalSemanticModels {
             .into_runnable()
             .map_err(inference_error)?;
 
-        let embedder = tract_onnx::onnx()
+        let embedder = tract_tflite::tflite()
             .model_for_path(&embedding_path)
-            .map_err(inference_error)?
-            .with_input_fact(
-                0,
-                f32::fact([1, 3, EMBEDDING_SIZE as usize, EMBEDDING_SIZE as usize]).into(),
-            )
             .map_err(inference_error)?
             .into_optimized()
             .map_err(inference_error)?
@@ -155,59 +148,41 @@ impl LocalSemanticModels {
     }
 
     pub fn embed(&self, image: &DynamicImage) -> Result<Vec<f32>, LocalModelError> {
-        let input = dino_input(image);
+        let rgb = image.to_rgb8();
+        let side = rgb.width().min(rgb.height()).max(1);
+        let left = (rgb.width().saturating_sub(side)) / 2;
+        let top = (rgb.height().saturating_sub(side)) / 2;
+        let crop = image::imageops::crop_imm(&rgb, left, top, side, side).to_image();
+        let resized = image::imageops::resize(
+            &crop,
+            EMBEDDING_SIZE,
+            EMBEDDING_SIZE,
+            FilterType::Triangle,
+        );
+        let input: Tensor = tract_ndarray::Array4::from_shape_fn(
+            (1, EMBEDDING_SIZE as usize, EMBEDDING_SIZE as usize, 3),
+            |(_, y, x, c)| f32::from(resized[(x as u32, y as u32)][c]) / 255.0,
+        )
+        .into();
+
         let outputs = self
             .embedder
             .run(tvec!(input.into()))
             .map_err(inference_error)?;
-
-        let mut fallback = None;
+        let mut best = None::<Vec<f32>>;
         for value in &outputs {
             let Ok(view) = value.to_plain_array_view::<f32>() else {
                 continue;
             };
-            let shape = view.shape();
-            if shape.len() == 2 && shape[0] == 1 && shape[1] == DINO_HIDDEN {
-                return normalize_embedding(view.iter().copied().collect());
-            }
-            if shape.len() == 3 && shape[0] == 1 && shape[2] == DINO_HIDDEN {
-                fallback = Some(view.iter().take(DINO_HIDDEN).copied().collect::<Vec<_>>());
+            let values = view.iter().copied().collect::<Vec<_>>();
+            if values.len() >= 128 && best.as_ref().is_none_or(|current| values.len() > current.len()) {
+                best = Some(values);
             }
         }
-
-        fallback
-            .ok_or_else(|| {
-                LocalModelError::Output(
-                    "DINOv2 output did not expose a 384-dimensional pooled/CLS embedding".into(),
-                )
-            })
-            .and_then(normalize_embedding)
+        normalize_embedding(best.ok_or_else(|| {
+            LocalModelError::Output("image embedder returned no usable float embedding".into())
+        })?)
     }
-}
-
-fn dino_input(image: &DynamicImage) -> Tensor {
-    let rgb = image.to_rgb8();
-    let side = rgb.width().min(rgb.height()).max(1);
-    let left = (rgb.width().saturating_sub(side)) / 2;
-    let top = (rgb.height().saturating_sub(side)) / 2;
-    let crop = image::imageops::crop_imm(&rgb, left, top, side, side).to_image();
-    let resized = image::imageops::resize(
-        &crop,
-        EMBEDDING_SIZE,
-        EMBEDDING_SIZE,
-        FilterType::Triangle,
-    );
-    const MEAN: [f32; 3] = [0.485, 0.456, 0.406];
-    const STD: [f32; 3] = [0.229, 0.224, 0.225];
-
-    tract_ndarray::Array4::from_shape_fn(
-        (1, 3, EMBEDDING_SIZE as usize, EMBEDDING_SIZE as usize),
-        |(_, c, y, x)| {
-            let value = f32::from(resized[(x as u32, y as u32)][c]) / 255.0;
-            (value - MEAN[c]) / STD[c]
-        },
-    )
-    .into()
 }
 
 fn summarize_segmentation(
@@ -224,8 +199,8 @@ fn summarize_segmentation(
     }
 
     let mut classes = vec![0u8; pixels];
-    let mut foreground_confidence = 0.0f32;
-    let mut foreground_pixels = 0usize;
+    let mut person_confidence = 0.0f32;
+    let mut person_pixels = 0usize;
     let mut face_pixels = 0usize;
 
     for pixel in 0..pixels {
@@ -238,20 +213,20 @@ fn summarize_segmentation(
             .max_by(|left, right| left.1.total_cmp(&right.1))
             .unwrap_or((0, 0.0));
         classes[pixel] = class as u8;
-        if class != 0 {
-            foreground_pixels += 1;
-            foreground_confidence += score;
+        if is_person_class(class as u8) {
+            person_pixels += 1;
+            person_confidence += score;
         }
         if class == 3 {
             face_pixels += 1;
         }
     }
 
-    let foreground_components = connected_components(&classes, width, height, |class| class != 0);
+    let person_components = connected_components(&classes, width, height, is_person_class);
     let face_components = connected_components(&classes, width, height, |class| class == 3);
     let min_person_area = (pixels / 500).max(24);
     let min_face_area = (pixels / 2500).max(8);
-    let person_components = foreground_components
+    let person_components = person_components
         .iter()
         .copied()
         .filter(|area| *area >= min_person_area)
@@ -267,12 +242,12 @@ fn summarize_segmentation(
         .max()
         .map(|area| area as f32 / pixels as f32)
         .unwrap_or(0.0);
-    let foreground_ratio = foreground_pixels as f32 / pixels as f32;
+    let foreground_ratio = person_pixels as f32 / pixels as f32;
     let face_skin_ratio = face_pixels as f32 / pixels as f32;
-    let people_confidence = if foreground_pixels == 0 {
+    let people_confidence = if person_pixels == 0 {
         0.0
     } else {
-        (foreground_confidence / foreground_pixels as f32).clamp(0.0, 1.0)
+        (person_confidence / person_pixels as f32).clamp(0.0, 1.0)
     };
 
     Ok(SegmentationSummary {
@@ -285,11 +260,15 @@ fn summarize_segmentation(
     })
 }
 
+fn is_person_class(class: u8) -> bool {
+    matches!(class, 1 | 2 | 3 | 4)
+}
+
 fn connected_components(
     classes: &[u8],
     width: usize,
     height: usize,
-    matches: impl Fn(u8) -> bool,
+    matches: impl Fn(u8) -> bool + Copy,
 ) -> Vec<usize> {
     let mut visited = vec![false; classes.len()];
     let mut components = Vec::new();
@@ -349,7 +328,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn segmentation_summary_ignores_tiny_noise_and_keeps_main_subject() {
+    fn segmentation_summary_ignores_other_class_and_keeps_main_subject() {
         let width = 20usize;
         let height = 20usize;
         let mut values = vec![0.0f32; width * height * 6];
@@ -368,6 +347,13 @@ mod tests {
                 let pixel = y * width + x;
                 values[pixel * 6 + 4] = 0.01;
                 values[pixel * 6 + 3] = 0.98;
+            }
+        }
+        for y in 0..3 {
+            for x in 0..3 {
+                let pixel = y * width + x;
+                values[pixel * 6] = 0.01;
+                values[pixel * 6 + 5] = 0.99;
             }
         }
         let summary = summarize_segmentation(&values, width, height).unwrap();

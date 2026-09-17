@@ -13,7 +13,6 @@ thiserror.workspace = true
 image.workspace = true
 sha2.workspace = true
 tract-tflite.workspace = true
-tract-onnx.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

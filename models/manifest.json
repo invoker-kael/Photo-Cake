@@ -39,28 +39,20 @@
       ]
     },
     {
-      "id": "dinov2-small",
-      "version": "onnx-08c606e",
+      "id": "mediapipe-mobilenet-v3-small-embedder",
+      "version": "1",
       "task": "IMAGE_EMBEDDING",
       "license": "Apache-2.0",
-      "homepage": "https://github.com/facebookresearch/dinov2",
+      "homepage": "https://ai.google.dev/edge/mediapipe/solutions/vision/image_embedder",
       "labels": [],
       "variants": [
         {
-          "platform": "WINDOWS",
-          "format": "ONNX_FP16",
-          "file": "dinov2-small-fp16.onnx",
-          "source_url": "https://huggingface.co/onnx-community/dinov2-small-ONNX/resolve/08c606e3123472a388efa59181b677d428f69bbd/onnx/model_fp16.onnx?download=true",
-          "sha256": "e6ab6a3e681f842a3d6ca57ecd302820a700c41a9be5e40f69ec8e019b8d8e94",
-          "size_bytes": 45453331
-        },
-        {
-          "platform": "ANDROID",
-          "format": "ONNX_INT8",
-          "file": "dinov2-small-int8.onnx",
-          "source_url": "https://huggingface.co/onnx-community/dinov2-small-ONNX/resolve/08c606e3123472a388efa59181b677d428f69bbd/onnx/model_int8.onnx?download=true",
-          "sha256": "e48d69984ee26d089e5c690cb39a727e38b95e2a525d7269f5ac366b02a6c22a",
-          "size_bytes": 24427763
+          "platform": "SHARED",
+          "format": "TFLITE",
+          "file": "mobilenet_v3_small_embedder.tflite",
+          "source_url": "https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_small/float32/1/mobilenet_v3_small.tflite",
+          "sha256": "e3fcbd44ab47a0b02d77c67f42f8e208e42baf0bb39ec078594019b709ad7a24",
+          "size_bytes": 10335220
         }
       ]
     }

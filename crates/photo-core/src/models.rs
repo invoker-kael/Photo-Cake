@@ -91,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn platform_specific_embedding_variants_are_distinct() {
+    fn embedding_model_is_shared_tflite_for_desktop_and_mobile() {
         let manifest = ModelBundleManifest::bundled().unwrap();
         let (_, windows) = manifest
             .variant_for(InferenceTask::ImageEmbedding, ModelPlatform::Windows)
@@ -99,8 +99,9 @@ mod tests {
         let (_, android) = manifest
             .variant_for(InferenceTask::ImageEmbedding, ModelPlatform::Android)
             .unwrap();
-        assert_ne!(windows.file, android.file);
-        assert_eq!(windows.format, "ONNX_FP16");
-        assert_eq!(android.format, "ONNX_INT8");
+        assert_eq!(windows.file, android.file);
+        assert_eq!(windows.format, "TFLITE");
+        assert_eq!(android.format, "TFLITE");
+        assert_eq!(windows.platform, ModelPlatform::Shared);
     }
 }

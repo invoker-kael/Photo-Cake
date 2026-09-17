@@ -2,51 +2,50 @@
 
 ## Scope
 
-Photo-Cake is intentionally a single-user local application. There is no application server, user account system, organization model, or cloud scheduler in the core design.
+Photo-Cake is intentionally a single-user local application. There is no account system, organization model, multi-tenant service, or mandatory cloud scheduler.
 
 ## Layers
 
 ```text
-Responsive React UI
-        |
-     Tauri IPC
-        |
-Photo-Cake Desktop Host
-        |
-   photo-core (Rust)
-        |
-+-------+-----------+-----------+
-|                   |           |
-Photo Pipeline   AI Adapter   Storage Adapter
-|                   |           |
-RAW/Color        ONNX/TRT      SQLite/files
-Render           Mobile AI     Cache/checkpoints
+              packages/ui
+          Responsive React UI
+                   |
+          +--------+--------+
+          |                 |
+   apps/windows        apps/android
+    Tauri host          Tauri host
+          |                 |
+          +--------+--------+
+                   |
+            crates/photo-core
+        batch / project / QA
+                   |
+        +----------+----------+
+        |                     |
+ platform storage      inference adapter
+        |                     |
+ Windows filesystem     Windows GPU backend
+ Android SAF            Android NPU/GPU backend
 ```
 
-## Platform strategy
+## Platform contract
 
-### Windows
+Windows and Android are separate deliverables, not separate codebases. Shared batch state, edit semantics, QA rules, project schema, and responsive UI belong in shared packages/crates.
 
-Primary target. Local GPU acceleration will prefer NVIDIA CUDA/TensorRT when available, with ONNX Runtime/DirectML and CPU fallbacks considered later.
+Platform shells own only platform behavior such as file picking, drag/drop, touch/stylus integration, packaging, thermal/resource policy, and hardware acceleration bindings.
 
-### High-end tablets
+## Windows
 
-The React UI is touch-first and Tauri 2 keeps a path open for Android/iOS packaging. The domain layer does not depend on CUDA. Platform-specific AI backends will implement the same adapter interface.
+Primary development target. Future acceleration should prefer NVIDIA CUDA/TensorRT where useful, with ONNX Runtime/DirectML and CPU fallbacks as appropriate.
+
+## Android
+
+High-end tablet target. The Android shell uses the same UI and domain contracts, while mobile-specific adapters handle Storage Access Framework, lifecycle/suspend-resume, thermal limits, and NNAPI/QNN/Vulkan-class inference backends.
 
 ## Non-destructive editing
 
-Original files are immutable. A project stores:
-
-- original file references
-- edit parameters
-- generated masks
-- previews
-- AI analysis cache
-- job/checkpoint state
-- export recipes
-
-The final full-resolution image is rendered only for export or an explicit high-quality preview.
+Original files are immutable. A project stores original references, edit parameters, masks, previews, AI analysis cache, job/checkpoint state, and export recipes. Platform-specific caches may be regenerated.
 
 ## First milestone
 
-The first milestone is not image quality. It is a reliable automation substrate that can process a large directory without losing state when the app closes, crashes, sleeps, or encounters a bad photo.
+The first milestone is a reliable automation substrate that can process large batches without losing state when the app closes, crashes, sleeps, or encounters a bad photo.

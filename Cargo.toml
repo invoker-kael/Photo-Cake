@@ -1,8 +1,9 @@
 [workspace]
 members = [
   "crates/photo-core",
-  "apps/desktop/src-tauri"
+  "apps/windows/src-tauri"
 ]
+exclude = ["apps/android/src-tauri"]
 resolver = "2"
 
 [workspace.package]

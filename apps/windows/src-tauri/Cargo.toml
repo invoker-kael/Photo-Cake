@@ -1,5 +1,5 @@
 [package]
-name = "photo-cake-app"
+name = "photo-cake-windows"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

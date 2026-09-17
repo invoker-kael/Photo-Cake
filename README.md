@@ -1,49 +1,33 @@
 # Photo-Cake
 
-Local-first AI photo workflow for Windows and high-end tablets, focused on non-destructive editing and reliable batch automation.
+Local-first AI photo workflow focused on reliable batch automation, non-destructive editing, and Windows/Android support.
 
-## Product direction
+## Product shape
 
-Photo-Cake is designed for a single user. The desktop/tablet UI stays lightweight while the photo pipeline handles large batches safely and resumably.
+Photo-Cake is a single-user application with two platform packages built from one `main` branch:
 
-### Core principles
+- **Photo-Cake Windows** — primary desktop build, future CUDA/TensorRT/DirectML acceleration.
+- **Photo-Cake Android** — high-end tablet build, future NNAPI/QNN/Vulkan acceleration.
 
-- Local-first: photos remain on the device by default.
-- Single-user: no accounts, teams, cloud control plane, or multi-tenant services.
-- Non-destructive: originals are never modified.
-- Batch-first: import, analyze, edit, QA, and export are queueable jobs.
-- Resumable: interrupted batches continue from checkpoints.
-- Adaptive: one reference edit can be applied intelligently across a batch.
-- Touch-friendly: the UI is designed for mouse/keyboard and large touch screens.
-- Replaceable AI: models are isolated behind stable interfaces.
+Shared behavior must stay in common packages/crates instead of being copied between platform branches.
 
-## Initial scope
+## Repository layout
 
-### v0.1
-
-- Project/library shell
-- JPG/PNG import first; RAW pipeline interface reserved
-- Responsive desktop/tablet UI
-- Non-destructive edit model
-- Batch queue and state machine
-- Pause/resume/cancel/retry
-- Per-photo checkpoints
-- Preset application
-- Automatic QA stage
-- Export stage
-- Local project persistence interface
-- Tauri 2 + React + TypeScript shell
-- Rust `photo-core` library for workflow logic
-
-### Later
-
-- RAW decoding and color management
-- Face and skin masks
-- Portrait retouching
-- Reference-based batch consistency
-- GPU inference via ONNX Runtime / TensorRT on Windows
-- Tablet-specific inference backends
-- AI culling and duplicate grouping
+```text
+Photo-Cake/
+├─ apps/
+│  ├─ windows/              # Tauri Windows shell
+│  └─ android/              # Tauri Android shell
+├─ packages/
+│  └─ ui/                   # Shared responsive React UI
+├─ crates/
+│  └─ photo-core/           # Shared batch/domain logic
+├─ docs/
+│  ├─ ARCHITECTURE.md
+│  ├─ BATCH_AUTOMATION.md
+│  └─ PLATFORMS.md
+└─ .github/workflows/
+```
 
 ## Batch pipeline
 
@@ -55,29 +39,9 @@ IMPORT
   -> QA
   -> EXPORT
   -> DONE
-
-Any stage can become:
-  PAUSED / FAILED / CANCELLED
-
-FAILED jobs can be retried from the last completed checkpoint.
 ```
 
-A batch is intentionally represented as many independent photo jobs instead of one monolithic task. One bad image must not stop the rest of the batch.
-
-## Repository layout
-
-```text
-Photo-Cake/
-├─ apps/
-│  └─ desktop/            # Tauri + React application (Windows first, mobile-ready)
-├─ crates/
-│  └─ photo-core/         # Core project/batch/domain logic
-├─ docs/
-│  ├─ ARCHITECTURE.md
-│  └─ BATCH_AUTOMATION.md
-├─ .github/workflows/
-└─ package.json
-```
+Each photo is an independent resumable job. A failed image does not stop the rest of the batch by default.
 
 ## Development
 
@@ -86,19 +50,51 @@ Requirements:
 - Node.js 22+
 - pnpm 10+
 - Rust stable
-- Windows: WebView2 and Tauri build prerequisites
+- Windows build prerequisites for Tauri
+- Android Studio/SDK/NDK for Android packaging
+
+Install dependencies:
 
 ```bash
 pnpm install
-pnpm dev
 ```
 
-Rust core only:
+Windows:
 
 ```bash
-cargo test --manifest-path crates/photo-core/Cargo.toml
+pnpm dev:windows
+pnpm build:windows
 ```
 
-## Status
+Android first-time initialization:
 
-Foundation stage. The first implementation target is a working batch queue with persistence before image-processing models are added.
+```bash
+pnpm android:init
+```
+
+Then:
+
+```bash
+pnpm dev:android
+pnpm build:android
+```
+
+Checks:
+
+```bash
+pnpm check
+cargo test --workspace
+```
+
+## Git and releases
+
+Use `main` plus short-lived `feature/*`, `fix/*`, and `platform/*` branches. Do not maintain long-lived Windows/Android branches.
+
+Release tags are independent:
+
+```text
+windows-v0.1.0
+android-v0.1.0
+```
+
+See `docs/PLATFORMS.md` for the platform contract.

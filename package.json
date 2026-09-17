@@ -4,10 +4,15 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.17.1",
   "scripts": {
-    "dev": "pnpm --filter @photo-cake/desktop dev",
-    "build": "pnpm --filter @photo-cake/desktop build",
-    "tauri": "pnpm --filter @photo-cake/desktop tauri",
-    "check": "pnpm --filter @photo-cake/desktop check",
+    "dev": "pnpm dev:windows",
+    "dev:windows": "pnpm --filter @photo-cake/windows dev",
+    "dev:android": "pnpm --filter @photo-cake/android dev",
+    "android:init": "pnpm --filter @photo-cake/android android:init",
+    "build:windows": "pnpm --filter @photo-cake/windows build",
+    "build:android": "pnpm --filter @photo-cake/android build",
+    "check": "pnpm check:windows && pnpm check:android",
+    "check:windows": "pnpm --filter @photo-cake/windows check",
+    "check:android": "pnpm --filter @photo-cake/android check",
     "test:core": "cargo test --workspace"
   }
 }

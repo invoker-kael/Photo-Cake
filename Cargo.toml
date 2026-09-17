@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/photo-core",
+  "crates/photo-inference",
   "apps/windows/src-tauri"
 ]
 exclude = ["apps/android/src-tauri"]
@@ -18,3 +19,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 thiserror = "2"
 rusqlite = { version = "0.37", features = ["bundled"] }
 tempfile = "3"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+sha2 = "0.10"
+tract-tflite = "=0.23.4"
+tract-onnx = "=0.23.4"

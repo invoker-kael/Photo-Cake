@@ -1,13 +1,15 @@
 use photo_core::{
     AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor, ClassificationStore,
-    ModelBundleManifest, NoopStageExecutor, RawImportResult, RawImporter,
+    ModelBundleManifest, ModelPlatform, RawImportResult, RawImporter,
 };
+use photo_inference::LocalAnalyzeExecutor;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 use uuid::Uuid;
 
-type AppRunner = AutomationRunner<ClassificationRoutingExecutor<NoopStageExecutor>>;
+type AppExecutor = ClassificationRoutingExecutor<LocalAnalyzeExecutor>;
+type AppRunner = AutomationRunner<AppExecutor>;
 
 struct AppState {
     runner: Mutex<AppRunner>,
@@ -110,9 +112,21 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let database = data_dir.join("photo-cake.sqlite3");
+            let cache_root = data_dir.join("cache");
+            let model_root = std::env::var_os("PHOTO_CAKE_MODEL_DIR")
+                .map(PathBuf::from)
+                .unwrap_or(app.path().resource_dir()?.join("models"));
+
             let store = BatchStore::open(&database)?;
             let classification_store = ClassificationStore::open(&database)?;
-            let executor = ClassificationRoutingExecutor::new(NoopStageExecutor, classification_store);
+            let analyze_executor = LocalAnalyzeExecutor::new(
+                &database,
+                &cache_root,
+                &model_root,
+                ModelPlatform::Windows,
+            )?;
+            let executor =
+                ClassificationRoutingExecutor::new(analyze_executor, classification_store);
             let runner = AutomationRunner::new(store, executor);
             runner.recover_interrupted()?;
             let raw_importer = RawImporter::open(&database)?;

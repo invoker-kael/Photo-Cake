@@ -38,5 +38,18 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Rust tests
         run: cargo test --workspace
+
+      - name: Fetch and verify pinned Windows models
+        run: node scripts/fetch-models.mjs windows
+
+      - name: Run bundled local-model smoke test
+        env:
+          PHOTO_CAKE_MODEL_DIR: ${{ github.workspace }}\models\runtime\windows
+        run: cargo test -p photo-inference bundled_models_smoke -- --ignored --nocapture

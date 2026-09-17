@@ -1,0 +1,28 @@
+# Node
+node_modules/
+dist/
+.vite/
+
+# Rust
+/target/
+**/target/
+
+# Tauri
+**/src-tauri/gen/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local Photo-Cake data
+*.photocake/
+.photo-cake/
+cache/
+exports/
+
+# Environment
+.env
+.env.*
+!.env.example

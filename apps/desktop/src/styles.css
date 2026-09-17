@@ -1,0 +1,150 @@
+:root {
+  font-family: "DengXian", "Microsoft YaHei UI", system-ui, sans-serif;
+  color: #edf0f2;
+  background: #0d0f10;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: #0d0f10; }
+button, input { font: inherit; }
+button { color: inherit; }
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 310px;
+  grid-template-rows: 72px minmax(0, 1fr);
+  grid-template-areas:
+    "top top top"
+    "side work auto";
+}
+
+.topbar {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid #24282b;
+  background: #111315;
+}
+.brand { font-size: 20px; font-weight: 700; letter-spacing: .2px; }
+.subtitle { margin-top: 3px; color: #81888e; font-size: 12px; }
+.top-actions, .batch-controls { display: flex; gap: 10px; }
+
+.button {
+  min-height: 40px;
+  border-radius: 8px;
+  padding: 0 16px;
+  border: 1px solid #343a3e;
+  background: #1a1e20;
+  cursor: pointer;
+}
+.button:hover { background: #22272a; }
+.button.primary { color: #101315; background: #e8ecef; border-color: #e8ecef; font-weight: 700; }
+.button.secondary { color: #d9dde0; }
+
+.sidebar {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px 12px;
+  border-right: 1px solid #24282b;
+  background: #111315;
+}
+.sidebar nav { display: grid; gap: 6px; }
+.nav-item {
+  min-height: 44px;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 14px;
+  background: transparent;
+  color: #9ba2a7;
+  cursor: pointer;
+}
+.nav-item.active { color: #fff; background: #22272a; }
+.sidebar-foot { display: flex; justify-content: space-between; color: #70777c; font-size: 12px; padding: 12px; }
+.sidebar-foot strong { color: #b8bec2; }
+
+.workspace {
+  grid-area: work;
+  min-width: 0;
+  padding: 26px;
+  overflow: auto;
+}
+.batch-head { display: flex; justify-content: space-between; align-items: end; gap: 18px; margin-bottom: 22px; }
+.eyebrow { margin: 0 0 8px; color: #777f84; font-size: 11px; letter-spacing: 1.3px; }
+h1, h2 { margin: 0; }
+h1 { font-size: clamp(25px, 3vw, 38px); }
+h2 { font-size: 19px; }
+.batch-head p:not(.eyebrow) { margin: 8px 0 0; color: #858d92; }
+
+.queue-card { border: 1px solid #252a2d; border-radius: 12px; background: #121517; overflow: hidden; }
+.queue-title { display: flex; justify-content: space-between; padding: 17px 18px; border-bottom: 1px solid #252a2d; }
+.queue-title span { color: #737b80; font-size: 12px; }
+.job-list { display: grid; }
+.job-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 48px; gap: 14px; align-items: center; padding: 14px 18px; border-bottom: 1px solid #1f2325; }
+.job-row:last-child { border-bottom: 0; }
+.thumb { width: 52px; height: 42px; border-radius: 6px; display: grid; place-items: center; background: #252b2f; color: #717a80; font-size: 10px; }
+.job-main { min-width: 0; }
+.job-title-line { display: flex; align-items: center; gap: 10px; }
+.job-title-line strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status { padding: 3px 6px; border-radius: 4px; background: #242a2d; color: #9fa7ac; font-size: 9px; }
+.status-running { color: #e9edef; }
+.status-failed { color: #efb2b2; background: #361f21; }
+.status-done { color: #b9dbc0; background: #1c3022; }
+.job-meta { display: flex; gap: 12px; margin-top: 5px; min-height: 16px; color: #6f777c; font-size: 11px; white-space: nowrap; overflow: hidden; }
+.error-text { color: #c88787; overflow: hidden; text-overflow: ellipsis; }
+.progress { height: 3px; margin-top: 9px; border-radius: 999px; background: #272c2f; overflow: hidden; }
+.progress span { display: block; height: 100%; background: #c8cdd0; }
+.job-percent { color: #777f84; font-size: 11px; text-align: right; }
+
+.automation-panel {
+  grid-area: auto;
+  padding: 26px 22px;
+  border-left: 1px solid #24282b;
+  background: #111315;
+  overflow: auto;
+}
+.panel-note { color: #777f84; font-size: 12px; line-height: 1.55; margin: 9px 0 22px; }
+.setting-row { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #212527; font-size: 13px; }
+.toggle { width: 42px; height: 24px; border: 0; border-radius: 999px; padding: 3px; background: #303639; cursor: pointer; }
+.toggle span { display: block; width: 18px; height: 18px; border-radius: 50%; background: #939ba0; transition: transform .15s ease; }
+.toggle-on { background: #e4e8ea; }
+.toggle-on span { transform: translateX(18px); background: #151719; }
+.setting-block { border-top: 1px solid #212527; padding: 14px 0; display: grid; gap: 9px; font-size: 12px; color: #9ba2a7; }
+.setting-block input { width: 76px; height: 34px; border: 1px solid #343a3e; border-radius: 6px; background: #171a1c; color: #edf0f2; padding: 0 10px; }
+.automation-flow { margin-top: 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: #646c71; font-size: 9px; }
+.automation-flow span { padding: 5px 6px; border-radius: 4px; background: #1b1f21; }
+.automation-flow i { font-style: normal; }
+
+@media (max-width: 1050px) {
+  .app-shell {
+    grid-template-columns: 76px minmax(0, 1fr);
+    grid-template-areas: "top top" "side work";
+  }
+  .automation-panel { display: none; }
+  .nav-item { padding: 0 8px; text-align: center; font-size: 11px; }
+  .sidebar-foot { display: none; }
+}
+
+@media (max-width: 720px) {
+  .app-shell { display: block; padding-bottom: 66px; }
+  .topbar { min-height: 64px; padding: 10px 14px; }
+  .subtitle { display: none; }
+  .top-actions .secondary { display: none; }
+  .sidebar { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; height: 62px; padding: 5px 8px; border: 0; border-top: 1px solid #24282b; }
+  .sidebar nav { grid-template-columns: repeat(5, 1fr); }
+  .nav-item { min-height: 50px; }
+  .workspace { padding: 18px 12px; }
+  .batch-head { align-items: stretch; flex-direction: column; }
+  .batch-controls { width: 100%; }
+  .batch-controls .button { flex: 1; }
+  .queue-title span { display: none; }
+  .job-row { grid-template-columns: 44px minmax(0, 1fr); padding: 12px; }
+  .thumb { width: 44px; height: 40px; }
+  .job-percent { display: none; }
+}

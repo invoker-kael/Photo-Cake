@@ -27,8 +27,15 @@ impl RawAsset {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawScanMetadataRecord {
+    pub source_path: String,
+    pub evidence: crate::RawMetadataEvidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawImportScan {
     pub assets: Vec<RawAsset>,
+    pub metadata: Vec<RawScanMetadataRecord>,
     pub skipped_non_raw: Vec<String>,
 }
 
@@ -42,6 +49,7 @@ pub fn is_supported_raw(path: impl AsRef<Path>) -> bool {
 
 pub fn scan_raw_paths(paths: impl IntoIterator<Item = PathBuf>) -> RawImportScan {
     let mut assets = Vec::new();
+    let mut metadata_records = Vec::new();
     let mut skipped_non_raw = Vec::new();
 
     for path in paths {
@@ -66,21 +74,27 @@ pub fn scan_raw_paths(paths: impl IntoIterator<Item = PathBuf>) -> RawImportScan
             .and_then(|metadata| metadata.modified().ok())
             .and_then(system_time_to_ms);
         let metadata = crate::read_raw_metadata(&path);
+        let source_path = path.to_string_lossy().into_owned();
 
         assets.push(RawAsset {
             id: Uuid::new_v4(),
-            source_path: path.to_string_lossy().into_owned(),
+            source_path: source_path.clone(),
             filename: filename.clone(),
             extension,
-            camera_id: metadata.camera_id,
+            camera_id: metadata.camera_id.clone(),
             capture_time_ms: metadata.capture_time_ms,
             file_time_ms,
             sequence_number: extract_sequence_number(&filename),
+        });
+        metadata_records.push(RawScanMetadataRecord {
+            source_path,
+            evidence: metadata,
         });
     }
 
     RawImportScan {
         assets,
+        metadata: metadata_records,
         skipped_non_raw,
     }
 }
@@ -154,7 +168,9 @@ mod tests {
 
         let scan = scan_raw_directory(dir.path(), false).unwrap();
         assert_eq!(scan.assets.len(), 1);
+        assert_eq!(scan.metadata.len(), 1);
         assert_eq!(scan.assets[0].filename, "IMG_0001.CR3");
+        assert_eq!(scan.metadata[0].source_path, scan.assets[0].source_path);
         assert_eq!(scan.skipped_non_raw.len(), 1);
     }
 }

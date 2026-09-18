@@ -40,6 +40,7 @@ export type {
 } from "./batch";
 
 type WorkspaceView = "library" | "cull" | "groups" | "reference" | "review" | "lightroom";
+type CullViewMode = "TRIAGE" | "ALL";
 
 const stageProgress: Record<BatchStage, number> = {
   IMPORT: 5,
@@ -174,6 +175,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [culling, setCulling] = useState<BackendGroupCullingResult[]>([]);
   const [cullingReviews, setCullingReviews] = useState<Record<string, CullingUserDecision>>({});
   const [cullingLoading, setCullingLoading] = useState(false);
+  const [cullViewMode, setCullViewMode] = useState<CullViewMode>("TRIAGE");
   const [groupRevision, setGroupRevision] = useState(0);
   const [groupRefining, setGroupRefining] = useState(false);
   const [groupRefinementNote, setGroupRefinementNote] = useState<string | null>(null);
@@ -487,6 +489,43 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     const values = culling.flatMap((group) => group.recommendations);
     return new Map(values.map((item) => [item.asset_id, item]));
   }, [culling]);
+
+  const cullingGroupNumbers = useMemo(
+    () => new Map(culling.map((group, index) => [group.group_id, index + 1])),
+    [culling],
+  );
+
+  const visibleCulling = useMemo(() => {
+    if (cullViewMode === "ALL") return culling;
+
+    return culling
+      .map((group) => ({
+        ...group,
+        recommendations: group.recommendations
+          .filter(
+            (item) =>
+              !cullingReviews[item.asset_id] &&
+              item.decision !== "KEEP",
+          )
+          .slice()
+          .sort((left, right) => {
+            const priority = (decision: CullingDecision) =>
+              decision === "REJECT_SUGGESTION" ? 0 : decision === "REVIEW" ? 1 : 2;
+            const byDecision = priority(left.decision) - priority(right.decision);
+            if (byDecision !== 0) return byDecision;
+            const byQuality = left.quality_score - right.quality_score;
+            if (Math.abs(byQuality) > 0.0001) return byQuality;
+            return left.group_rank - right.group_rank;
+          }),
+        pending_asset_ids: group.pending_asset_ids.filter(
+          (assetId) => !cullingReviews[assetId],
+        ),
+      }))
+      .filter(
+        (group) =>
+          group.recommendations.length > 0 || group.pending_asset_ids.length > 0,
+      );
+  }, [cullViewMode, culling, cullingReviews]);
 
   const referenceCandidatesForGroup = (assetIds: string[]) =>
     assetIds
@@ -933,15 +972,38 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           <strong>Smart culling</strong>
           <span>Group-relative quality + near-duplicate evidence · never deletes originals</span>
         </div>
+        <div className="cull-toolbar">
+          <span>
+            {cullViewMode === "TRIAGE"
+              ? "Triage shows unconfirmed Review / Reject suggestions and analysis-pending photos first."
+              : "All shows the complete culling set, including AI Keep and already confirmed photos."}
+          </span>
+          <div className="cull-view-switch" role="group" aria-label="Culling view mode">
+            {(["TRIAGE", "ALL"] as CullViewMode[]).map((viewMode) => (
+              <button
+                className={cullViewMode === viewMode ? "active" : ""}
+                key={viewMode}
+                onClick={() => setCullViewMode(viewMode)}
+              >
+                {viewMode === "TRIAGE" ? "Triage" : "All"}
+              </button>
+            ))}
+          </div>
+        </div>
         {cullingLoading && <div className="panel-note">Refreshing cached culling evidence…</div>}
         {!cullingLoading && culling.length === 0 && (
           <div className="panel-note">Import and analyze RAW photos before culling.</div>
         )}
         <div className="cull-groups">
-          {culling.map((group, groupIndex) => (
+          {!cullingLoading && culling.length > 0 && visibleCulling.length === 0 && (
+            <div className="panel-note">
+              Triage is clear. Switch to All to review the complete culling set.
+            </div>
+          )}
+          {visibleCulling.map((group) => (
             <div className="cull-group" key={group.group_id}>
               <div className="cull-group-head">
-                <strong>Group {groupIndex + 1}</strong>
+                <strong>Group {cullingGroupNumbers.get(group.group_id) ?? "—"}</strong>
                 <span>
                   {group.recommendations.length} scored · {group.pending_asset_ids.length} pending
                 </span>

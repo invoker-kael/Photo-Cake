@@ -8,6 +8,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: #0d0f10; }
 button, input { font: inherit; }
+button:disabled { opacity: .55; cursor: not-allowed; }
 button { color: inherit; }
 
 .app-shell {
@@ -98,6 +99,7 @@ h2 { font-size: 19px; }
 .status-done { color: #b9dbc0; background: #1c3022; }
 .job-meta { display: flex; gap: 12px; margin-top: 5px; min-height: 16px; color: #6f777c; font-size: 11px; white-space: nowrap; overflow: hidden; }
 .error-text { color: #c88787; overflow: hidden; text-overflow: ellipsis; }
+.success-text { color: #9fc8aa !important; }
 .progress { height: 3px; margin-top: 9px; border-radius: 999px; background: #272c2f; overflow: hidden; }
 .progress span { display: block; height: 100%; background: #c8cdd0; }
 .job-percent { color: #777f84; font-size: 11px; text-align: right; }
@@ -110,16 +112,15 @@ h2 { font-size: 19px; }
   overflow: auto;
 }
 .panel-note { color: #777f84; font-size: 12px; line-height: 1.55; margin: 9px 0 22px; }
-.setting-row { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #212527; font-size: 13px; }
-.toggle { width: 42px; height: 24px; border: 0; border-radius: 999px; padding: 3px; background: #303639; cursor: pointer; }
-.toggle span { display: block; width: 18px; height: 18px; border-radius: 50%; background: #939ba0; transition: transform .15s ease; }
-.toggle-on { background: #e4e8ea; }
-.toggle-on span { transform: translateX(18px); background: #151719; }
-.setting-block { border-top: 1px solid #212527; padding: 14px 0; display: grid; gap: 9px; font-size: 12px; color: #9ba2a7; }
-.setting-block input { width: 76px; height: 34px; border: 1px solid #343a3e; border-radius: 6px; background: #171a1c; color: #edf0f2; padding: 0 10px; }
-.automation-flow { margin-top: 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; color: #646c71; font-size: 9px; }
-.automation-flow span { padding: 5px 6px; border-radius: 4px; background: #1b1f21; }
-.automation-flow i { font-style: normal; }
+.workflow-list { display: grid; gap: 0; border-top: 1px solid #212527; }
+.workflow-step { min-height: 58px; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: center; border-bottom: 1px solid #212527; }
+.workflow-number { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: #242a2d; color: #b7bec2; font-size: 10px; }
+.workflow-step div { display: grid; gap: 3px; }
+.workflow-step strong { font-size: 13px; font-weight: 600; }
+.workflow-step small { color: #747c81; font-size: 11px; line-height: 1.35; }
+.storage-note { margin-top: 20px; padding: 13px; display: grid; gap: 6px; border: 1px solid #282d30; border-radius: 8px; background: #15181a; }
+.storage-note strong { font-size: 11px; color: #b8bec2; }
+.storage-note span { font-size: 11px; color: #747c81; line-height: 1.45; }
 
 @media (max-width: 1050px) {
   .app-shell {

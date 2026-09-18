@@ -98,10 +98,10 @@ At every run inspect what is already implemented and take the smallest complete 
 
 1. compile/test/CI regressions;
 2. end-to-end wiring between existing core modules;
-3. persist per-photo Recipe review overrides around the now-connected editable StyleProfile → Reference → ExposureAnalysis → Recipe → explicit XMP path;
-4. strengthen Lightroom/Camera Raw compatibility and round-trip tests;
-5. add reliable RAW/metadata white-balance evidence when available, without blocking exposure-only workflow;
-6. richer culling evidence (eyes/expression) and before/after compare UX;
+3. strengthen Lightroom/Camera Raw compatibility and round-trip tests for the now-connected editable StyleProfile → Reference → ExposureAnalysis → Recipe → per-photo ReviewOverride → explicit XMP path;
+4. add reliable RAW/metadata white-balance evidence when available, without blocking exposure-only workflow;
+5. richer culling evidence (eyes/expression) and true before/after compare UX;
+6. persist/refine semantic grouping where current project behavior still depends on recomputation;
 7. shared/Android review/reference UX;
 8. direct export polish and richer local AI/edit controls.
 
@@ -155,3 +155,8 @@ The workstation now has an explicit per-group XMP write action. Keep it user-tri
 ## Preview Reuse Rule
 
 Cull and Reference now display cached PreviewStore artifacts through the Windows local asset protocol. Reuse that cache. Do not add another preview extraction pipeline or full-size JPEG/TIFF working copies for review UI. Missing preview means placeholder/pending, not a second decode path.
+
+
+## Per-photo Review Override Rule
+
+Use `RecipeReviewStore` only for photographer exceptions after group-level Reference/StyleProfile adaptation. Store additive deltas by stable target asset ID, not a frozen copy of the whole Recipe. At preview and XMP handoff time regenerate the base Recipe first, then apply the override. Clearing the override must return the photo to the current group-derived Recipe; changing the reference/style must not erase intentional per-photo exceptions.

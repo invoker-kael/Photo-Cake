@@ -167,3 +167,19 @@ RAW preview
 ```
 
 Unknown semantic evidence such as expression or composition remains absent rather than being given invented neutral scores. If an asset has no cached quality evidence yet, the Cull view reports it as pending. Near-duplicate comparison stays inside the current Photo Group and only demotes lower-ranked alternatives to Review; originals are never deleted.
+
+
+## Culling Review Persistence
+
+`CullingReviewStore` persists photographer decisions independently from model suggestions:
+
+```text
+cached evidence -> AI recommendation
+                     +
+              photographer override
+                     |
+                     v
+        effective review state
+```
+
+The review is keyed by stable RAW asset ID so re-importing the same source keeps the photographer's decision. Clearing a review restores the current AI suggestion. Reject remains metadata/state and never removes the source file.

@@ -1,127 +1,103 @@
 # Photo-Cake Architecture
 
-## Scope
+## Product Shape
 
-Photo-Cake is a local-first semi-automatic photography workflow assistant.
-
-The architecture follows the real photographer workflow:
+Photo-Cake is a local-first, semi-automatic photography workflow assistant. It keeps the original RAW as the source asset, uses small non-destructive editing metadata as the normal working output, and keeps direct JPEG/TIFF export available on demand.
 
 ```text
-RAW Collection
-    |
-Catalog
-    |
-Metadata + Preview
-    |
-Smart Culling
-    |
-Photo Group
-    |
-Reference Set
-    |
-Style Profile
-    |
-Group Color Intent
-    |
-Per-photo Adaptive Recipe
-    |
-XMP Mapping
-    |
-+----------+
-|          |
-XMP     Direct Export
+RAW collection
+  -> catalog + preview + analysis
+  -> conservative moment grouping
+  -> semantic similarity refinement
+  -> smart culling / review
+  -> reference set + style profile
+  -> group color intent
+  -> adaptive per-photo recipe
+  -> same-basename XMP -> Lightroom
+       or
+     direct export
 ```
 
-The goal is reducing repetitive editing while keeping RAW files, Lightroom compatibility and photographer control.
+The editing unit is a Photo Group, but the final numeric adjustments are resolved per photo. A reference defines visual intent; Photo-Cake must not blindly copy one photo's numeric settings across a group.
 
----
+## Existing Workspace
 
-# Existing Code Reuse
-
-The existing workspace remains the foundation.
+Keep the current workspace and extend it rather than creating a second implementation.
 
 ```text
 apps/
- ├── windows
- └── android
+  windows/   primary workstation UI
+  android/   mobile companion UI
 
 crates/
- ├── photo-core
- └── photo-inference
+  photo-core/       shared workflow and persistence
+  photo-inference/  local analysis/model execution
 ```
 
-Extend existing modules before creating parallel systems.
+Windows is the primary large-RAW/batch/Lightroom workflow. Android shares the same core concepts and is optimized for selection, preview, references and lightweight local work.
 
----
+## photo-core Responsibilities
 
-# Core Workflow Objects
+The existing modules are the implementation backbone:
+
+- `raw`, `importer`, `catalog`: source references, stable asset identity and persistence.
+- `preview`, `analysis`, `classification`: reusable evidence for later decisions.
+- `grouping`: fast metadata/time/sequence moment groups.
+- `semantic_grouping`: portrait/scene similarity refinement inside a parent moment group; promote results through `SemanticPhotoGroup::to_photo_group`.
+- `culling`: Keep / Review / RejectSuggestion only; never destructive deletion.
+- `reference`: `ReferenceSet` and `StyleProfile`; a reference may be outside the target group.
+- `color_sync`: shared style intent resolved against each target photo.
+- `recipe`: one target-bound Recipe per photo; Recipe is the source of editing decisions.
+- `xmp`: same-basename Lightroom sidecar generation.
+- `export` / renderer / workers: optional final rendered output, not the editing source of truth.
+- batch / stores / runner: resumable background execution and persistence.
+
+## Two-stage Grouping
 
 ```text
-Photo Asset
-    |
-Photo Group
-    |
-Reference Set
-    |
-Style Profile
-    |
-Recipe
-    |
-XMP Mapping
-    |
-Lightroom / Export
+capture time + camera + filename sequence
+  -> Moment PhotoGroup
+  -> local classification + embedding
+  -> SemanticPhotoGroup
+  -> Similar PhotoGroup (SEMANTIC_SIMILARITY)
 ```
 
-A group of photos is the main editing unit, not an isolated image.
+Semantic refinement stays scoped to its parent moment group so visually similar photographs from unrelated trips/events are not globally merged. Manual grouping/locking remains authoritative.
 
----
-
-# Reference Driven Editing
+## Reference-driven Adaptive Editing
 
 ```text
-Favorite Photos
+selected reference photo analysis
+        +
+StyleProfile preferences
         |
         v
-Reference Set
+GroupColorIntent
         |
         v
-Style Profile
+color_sync resolves each target photo
         |
         v
-Recipe
+Recipe::materialize_group
         |
         v
-XMP Mapping
-        |
-        v
-Lightroom
+one Recipe per target asset
 ```
 
-The system learns photographer preference from selected references instead of replacing decisions.
+`StyleProfile` is an editable preference layer on top of measured reference values. `color_sync` is the only group color resolution engine; do not add a parallel preset-copy system.
 
----
+References may come from the target group or from another compatible group. In-group reference promotion still validates membership.
 
-# Recipe and Lightroom Bridge
-
-Recipe is the source of editing decisions.
-
-RAW files remain immutable.
-
-Flow:
+## Lightroom Bridge
 
 ```text
 Recipe
-  |
-  v
-XMP Mapping
-  |
-  v
-Lightroom
+  -> XmpEditState
+  -> IMG_0001.xmp beside IMG_0001.CR3
+  -> Lightroom / Camera Raw
 ```
 
-Direct export uses the same Recipe model and does not require additional editing data.
-
-Initial supported adjustments:
+Current mapped adjustments:
 
 - exposure
 - contrast
@@ -131,111 +107,38 @@ Initial supported adjustments:
 - tint
 - saturation
 
-Future:
+XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. RAW bytes are never changed.
 
-- HSL
-- tone curve
-- skin tone preference
-- personal style profile
+Future mappings such as HSL, tone curve, masks and richer skin/color controls extend the Recipe/XMP model rather than creating a second editing model.
 
----
+## Storage and Safety
 
-# Development Priority
+Default storage behavior:
 
-```text
-Catalog
- -> Preview
- -> Photo Group
- -> Culling
- -> Reference Set
- -> Style Profile
- -> Recipe
- -> XMP Mapping
- -> Export
- -> Advanced AI
-```
+- keep existing RAW files in place;
+- create previews/caches in managed application data;
+- create small XMP sidecars only when the user applies/handoffs edits;
+- do not automatically create full-size TIFF/JPEG working copies;
+- direct export creates rendered files only when requested.
 
-Foundation:
+## Platform Boundary
+
+Shared business logic belongs in `photo-core` and `photo-inference`. Platform shells own file access, UI, packaging, acceleration bindings and device resource policy. Windows and Android must not maintain separate photography logic.
+
+## Development Order
+
+Close gaps in the existing workflow instead of restarting phases:
 
 ```text
-RAW -> Reference -> Recipe -> XMP -> Lightroom
+catalog/preview
+ -> two-stage grouping
+ -> culling evidence
+ -> reference/style
+ -> adaptive per-photo recipes
+ -> XMP handoff
+ -> review UI
+ -> direct export polish
+ -> richer local AI/edit controls
 ```
 
-
----
-
-# Adaptive Group Editing
-
-Existing `color_sync` is reused as the bridge between group style and individual photos.
-
-```text
-Reference Set / Style Profile
-        |
-        v
-Group Color Intent
-        |
-        v
-Analyze each photo
-        |
-        v
-Resolved per-photo edits
-        |
-        v
-Per-photo Recipe
-        |
-        v
-Same-basename XMP
-```
-
-The group shares visual intent, but each photo receives its own exposure correction and other resolved values. Do not blindly copy one reference photo's numeric settings across the whole group.
-
-
----
-
-# Reference Style Resolution
-
-`ReferenceSet` is now an active workflow object, not only metadata. Its `StyleProfile` combines small photographer preferences with measured values from a selected reference photo, producing the existing `GroupColorIntent` used by `color_sync`.
-
-```text
-Reference photo analysis
-        +
-StyleProfile preferences
-        |
-        v
-GroupColorIntent
-        |
-        v
-Adaptive per-photo resolution
-        |
-        v
-Per-photo Recipe -> XMP
-```
-
-This keeps the look consistent while allowing each photo to receive different numeric corrections.
-
-
----
-
-# Two-stage Photo Grouping
-
-Reuse both existing grouping layers instead of replacing either one:
-
-```text
-RAW metadata / capture time / sequence
-        |
-        v
-Moment PhotoGroup
-        |
-classification + embedding
-        |
-        v
-SemanticPhotoGroup refinement
-        |
-        v
-Shared PhotoGroup (SIMILAR / SEMANTIC_SIMILARITY)
-        |
-        v
-Reference -> adaptive Recipe
-```
-
-The metadata pass is cheap and immediate. Semantic refinement is local-AI assisted and stays scoped to the parent moment group, preventing unrelated trips or events from being merged globally.
+Full RAW-engine replacement, cloud editing, accounts and a Lightroom database/plugin integration are not early dependencies.

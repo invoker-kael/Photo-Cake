@@ -876,6 +876,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         <small>
                           Quality {Math.round(item.quality_score * 100)}% · Suggested {cullingLabel(item.decision)}
                         </small>
+                        {item.portrait_evidence && (
+                          <small>
+                            People {item.portrait_evidence.person_count} · Faces {item.portrait_evidence.face_count}
+                            {" · "}Subject {Math.round(item.portrait_evidence.primary_subject_ratio * 100)}%
+                            {" · "}People confidence {Math.round(item.portrait_evidence.people_confidence * 100)}%
+                          </small>
+                        )}
                       </div>
                       <div className="cull-review-controls">
                         {(["KEEP", "REVIEW", "REJECT"] as CullingUserDecision[]).map((decision) => (

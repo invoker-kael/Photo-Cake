@@ -15,6 +15,7 @@ pub enum InferenceTask {
     FaceEmbedding,
     Segmentation,
     QualityScoring,
+    ExposureAnalysis,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,6 +260,7 @@ fn task_to_db(task: InferenceTask) -> &'static str {
         InferenceTask::FaceEmbedding => "FACE_EMBEDDING",
         InferenceTask::Segmentation => "SEGMENTATION",
         InferenceTask::QualityScoring => "QUALITY_SCORING",
+        InferenceTask::ExposureAnalysis => "EXPOSURE_ANALYSIS",
     }
 }
 

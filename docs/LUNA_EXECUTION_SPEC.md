@@ -216,3 +216,10 @@ The next Android gap is transport of project DB/state and preview artifacts betw
 ## Explainable Cull Rule
 
 Cull must explain suggestions from measured evidence without creating a parallel score. Reuse `CullingRecommendation.reasons`; do not infer subjective composition quality, eye state or expression when those signals were not measured. Explanation changes must not alter photographer authority or delete/exclude files automatically.
+
+
+## Companion Transport Rule
+
+Use `CompanionSnapshot` / `CompanionDecisionPatch` as the cross-device domain boundary. Do not copy RAW absolute paths, full AnalysisCache databases or workstation editing state into the mobile contract. Snapshot assets use stable IDs plus portable metadata only; previews are represented by transport indexes.
+
+Before applying a mobile patch, validate schema version, base snapshot ID, batch ID, asset/group membership, duplicate changes, rejected-reference invariants and concurrent workstation culling/reference edits. Reject conflicts instead of last-writer-wins. Keep the actual transport mechanism separate from this contract.

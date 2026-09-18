@@ -46,7 +46,7 @@ The existing modules are the implementation backbone:
 - `semantic_grouping`: portrait/scene similarity refinement inside a parent moment group; promote results through `SemanticPhotoGroup::to_photo_group`.
 - `culling`: Keep / Review / RejectSuggestion only; never destructive deletion.
 - `reference`: `ReferenceSet` and `StyleProfile`; a reference may be outside the target group.
-- `reference_store`: persistent ReferenceSet storage and active group→reference binding; changing the selected photo preserves the set's StyleProfile.
+- `reference_store`: persistent ReferenceSet storage, active group→reference binding and StyleProfile updates; changing the selected photo preserves the set's photographer preferences.
 - `color_sync`: shared style intent resolved against each target photo.
 - `recipe`: one target-bound Recipe per photo; Recipe is the source of editing decisions.
 - `xmp`: same-basename Lightroom sidecar generation.
@@ -87,7 +87,7 @@ one Recipe per target asset
 
 `StyleProfile` is an editable preference layer on top of measured reference values. `color_sync` is the only group color resolution engine; do not add a parallel preset-copy system.
 
-References may come from the target group or from another compatible group. In-group reference promotion still validates membership. The workstation now persists the selected reference for each group before any adaptive edit is applied.
+References may come from the target group or from another compatible group. In-group reference promotion still validates membership. The workstation now persists the selected reference and editable exposure/contrast/saturation StyleProfile for each group before any adaptive edit is applied.
 
 Reference selection is intentionally separated from unsupported color guesses. Analyze now records preview-relative exposure evidence, so a selected reference can safely produce per-photo exposure Recipes from the cache. Embedded JPEG previews do not provide a sufficiently reliable RAW white-balance/temperature measurement, so temperature/tint remain optional and are omitted from Recipe/XMP until reliable RAW/metadata evidence exists.
 
@@ -193,3 +193,8 @@ The review is keyed by stable RAW asset ID so re-importing the same source keeps
 ## Partial Evidence Rule
 
 `PhotoColorAnalysis`, `GroupColorIntent` and resolved edits support missing white-balance evidence. Preview-relative exposure can drive adaptive exposure immediately; absent temperature/tint stays `None` all the way through Recipe and XMP. XMP serialization therefore writes only supported/measured fields rather than filling unknown values with defaults.
+
+
+## Preview Presentation Boundary
+
+`photo-inference` extracts the embedded RAW JPEG once and `PreviewStore` owns the cached artifact. Windows exposes those same artifacts to the UI through the local Tauri asset protocol; Cull and Reference consume them as thumbnails. Do not add a second thumbnail decoder or duplicate full-size working files. UI refresh follows Analyze progress, while missing artifacts remain placeholders.

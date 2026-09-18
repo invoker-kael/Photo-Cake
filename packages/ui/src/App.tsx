@@ -1440,7 +1440,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   );
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell mode-${mode}`}>
       <header className="topbar">
         <div>
           <div className="brand">Photo-Cake</div>

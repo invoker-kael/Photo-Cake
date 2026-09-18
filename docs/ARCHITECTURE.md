@@ -1,180 +1,137 @@
-# Architecture
+# Photo-Cake Architecture
 
 ## Scope
 
-Photo-Cake is a single-user local-first semi-automatic AI photo workflow application.
+Photo-Cake is a single-user local-first AI photography workflow application.
 
-The goal is to reduce repetitive Lightroom-style manual editing while keeping RAW files immutable and maintaining professional workflow compatibility.
+The architecture is designed around professional RAW processing workflow, not a simple image converter.
 
-## Layers
-
-```text
-              packages/ui
-          Responsive React UI
-                   |
-          +--------+--------+
-          |                 |
-   apps/windows        apps/android
-    Tauri host          Tauri host
-          |                 |
-          +--------+--------+
-                   |
-            crates/photo-core
- project / catalog / jobs / edits / QA
-                   |
-        +----------+----------+
-        |                     |
- platform storage      inference adapter
-        |                     |
- Windows filesystem     CUDA/DirectML/CPU
- Android SAF            NNAPI/QNN/Vulkan
-```
-
-## Platform contract
-
-Windows and Android are separate deliverables, not separate application logic.
-
-Shared behavior:
-
-- project schema
-- catalog and asset identity
-- batch jobs and checkpoints
-- edit graph semantics
-- QA rules
-- responsive UI contracts
-
-Platform-specific:
-
-- file picking
-- drag/drop
-- touch/stylus
-- packaging
-- hardware acceleration bindings
-- thermal/resource policy
-
-## Product workflow architecture
+## Core Pipeline
 
 ```text
-IMPORT RAW
-  -> ANALYZE
-  -> AI CULLING
-  -> GROUPING
-  -> REFERENCE STYLE SELECTION
-  -> RECIPE GENERATION
-  -> AI RETOUCH PLAN
-  -> EDIT GRAPH
-  -> QA REVIEW
-  -> XMP / EXPORT
+RAW Catalog
+    |
+    v
+Metadata Layer
+    |
+    v
+Analysis Layer
+    |
+ +----------------+
+ |                |
+Quality       Similarity
+Face          Scene
+Focus         Exposure
+    |
+    v
+Photo Group Layer
+    |
+    v
+Reference Style Layer
+    |
+    v
+Recipe / Edit Graph
+    |
+ +-------------+
+ |             |
+ v             v
+XMP          Export
 ```
 
-The system optimizes for photo groups instead of isolated images.
+## Data Model
 
-## Non-destructive editing
-
-Original files are immutable.
-
-Stored project data:
-
-- original references
-- asset identity/hash
-- metadata
-- previews
-- AI analysis cache
-- grouping results
-- reference style data
-- edit graph
-- masks
-- job/checkpoint state
-- export recipes
-
-RAW files are never modified. Lightroom-compatible XMP output remains a primary workflow.
-
-## Batch execution model
-
-Each imported photo belongs to a persistent batch job.
-
-Rules:
-
-- one active worker per batch
-- checkpoint before and after stages
-- failed photos are isolated
-- retry resumes from failed stage
-- pause/cancel take effect at safe stage boundaries
-- abnormal termination restores incomplete work safely
-
-Export uses atomic writes:
+Primary objects:
 
 ```text
-render
- -> partial file
- -> verification
- -> atomic rename
- -> DONE
+Project
+ |
+Catalog
+ |
+Photo
+ |
+Photo Group
+ |
+Recipe
+ |
+Edit Graph
 ```
 
-## Local inference architecture
+Photo Group is a first-class object because real photography sessions contain different scenes and lighting conditions.
 
-Photo-Cake is offline-first.
+## Non-destructive Editing
 
-Normal operations must work without cloud AI:
+Original RAW files are immutable.
 
-- ingest
-- classification
-- grouping
-- color analysis
-- portrait analysis
-- masks
+Stored information:
+
+- Asset identity
+- Metadata
+- Preview cache
+- Analysis results
+- Grouping information
+- Reference style information
+- Recipe
+- Edit Graph
+- Export state
+
+RAW is never modified.
+
+## Recipe System
+
+Recipe is shared by all outputs:
+
+```text
+Recipe
+ |
+ +------+
+ |      |
+XMP   Export
+```
+
+The same editing decision can continue in Lightroom or generate final images.
+
+## Batch Processing
+
+Large photo sets are processed as jobs.
+
+Requirements:
+
+- Checkpoint stages
+- Resume after failure
+- Isolate failed items
+- Safe export
+- No corruption of source files
+
+## Local AI Architecture
+
+Offline-first operations:
+
+- Photo analysis
+- Grouping
+- Similarity search
+- Portrait analysis
+- Style analysis
 - QA
-- export
 
-Principles:
+Models and cache are versioned.
 
-- online inference disabled by default
-- deterministic processing preferred when models are unnecessary
-- lightweight reusable local vision models preferred
-- inference results are versioned and cached
-- only affected tasks are recomputed
+## Platform
 
-Shared artifacts:
+Windows and Android share core logic.
 
-- person/face detection
-- image embeddings
-- duplicate detection
-- face embeddings
-- segmentation masks
+Platform differences:
 
-Cache identity:
+- File access
+- Hardware acceleration
+- UI interaction
+- Packaging
 
-- asset ID
-- source fingerprint
-- preview revision
-- inference task
-- model ID/version
-- configuration hash
+## Future Expansion
 
-Backend performance may vary, but semantic results must remain consistent.
+Later phases may add:
 
-## AI retouch direction
+- Advanced RAW processing
+- GPU acceleration
+- More advanced AI retouch planning
 
-AI produces editable intent, not destructive replacement:
-
-- exposure suggestions
-- white balance
-- portrait enhancement masks
-- skin refinement
-- lighting adjustment
-- background adjustment
-- group style recipes
-
-## First milestone
-
-Build the stable automation foundation:
-
-- background execution
-- persistent jobs
-- crash recovery
-- resumable stages
-- safe export
-- RAW + XMP workflow
-
-Advanced catalog, preview, grouping and AI retouch build on this foundation.
+These must not block the core RAW + XMP workflow.

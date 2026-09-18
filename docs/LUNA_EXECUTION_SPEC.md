@@ -184,3 +184,8 @@ A task is complete when:
 ## Adaptive Batch Rule
 
 For a Photo Group, preserve one shared style intent but resolve photo-specific adjustments from existing analysis. Reuse `color_sync`; do not introduce a second batch-style engine. Materialize one Recipe per target asset before XMP generation so differently exposed photos do not receive identical numeric corrections.
+
+
+## Reference Style Execution Rule
+
+Use the existing `ReferenceSet::color_intent_from_reference` path to turn a selected reference plus `StyleProfile` into `GroupColorIntent`. Then reuse `color_sync` to resolve individual photos and `Recipe::materialize_group` to create target-bound Recipes. Do not bypass this chain with blind preset copying.

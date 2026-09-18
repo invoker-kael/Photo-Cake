@@ -51,7 +51,7 @@ Photo Group is the main editing context.
 
 Grouping is two-stage:
 
-1. immediately create conservative moment groups from capture time, camera and filename sequence;
+1. immediately create conservative moment groups from RAW/EXIF capture time, camera identity and filename sequence; use filesystem modification time only when embedded metadata is unavailable;
 2. refine only inside those groups using local classification and visual embeddings.
 
 Moment groups remain persisted as parent structure. Semantic refinement is stored as child groups and becomes the effective editing/culling context only when evidence is complete. This keeps capture chronology available for future model/version re-refinement instead of destructively replacing it.
@@ -163,3 +163,8 @@ The workstation reuses the existing PreviewStore artifacts in Cull and Reference
 ## Before / After Review
 
 Review can render a small edited preview from the already-cached embedded RAW JPEG using the current canonical Recipe. It is explicitly an approximation for visual direction and exception review, not a replacement RAW renderer. The backend regenerates the Recipe from the current ReferenceSet, StyleProfile, cached evidence and per-photo override before rendering, so the preview cannot diverge from the decision chain used for XMP handoff. No full-size working copy is created.
+
+
+## RAW Metadata Evidence
+
+Import performs a best-effort, read-only EXIF metadata pass before initial grouping. Standard `DateTimeOriginal`/`DateTime` populates the capture timeline and Make/Model forms camera identity; unreadable or unsupported containers fall back to the existing file timestamp without blocking import. EXIF white-balance mode alone is not sufficient to synthesize Lightroom temperature/tint, so Photo-Cake still leaves WB untouched until reliable numeric RAW/color evidence exists.

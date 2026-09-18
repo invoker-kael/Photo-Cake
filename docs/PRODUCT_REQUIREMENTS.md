@@ -146,3 +146,8 @@ AI culling remains advisory. The workstation separates the suggested decision fr
 ## Partial Edit Evidence
 
 Photo-Cake may apply a subset of trustworthy adjustments. Current local preview analysis supports relative exposure adaptation between photos in the same photographic context. If RAW white-balance evidence is unavailable, temperature and tint remain untouched rather than guessed. Lightroom XMP contains only fields backed by the current Recipe/evidence.
+
+
+## Explicit Lightroom Delivery
+
+Lightroom delivery is a deliberate photographer action, not an automatic batch stage. Before writing, Photo-Cake shows the selected reference and adaptive Recipe count. Photographer-confirmed Reject photos are excluded; AI suggestions alone do not remove photos from delivery. If any target RAW already has a same-basename XMP, Photo-Cake stops the entire group before creating new sidecars so existing edits and group consistency are preserved.

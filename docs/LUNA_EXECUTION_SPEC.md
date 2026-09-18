@@ -98,10 +98,10 @@ At every run inspect what is already implemented and take the smallest complete 
 
 1. compile/test/CI regressions;
 2. end-to-end wiring between existing core modules;
-3. complete the persisted Reference → cached ExposureAnalysis → adaptive Recipe → explicit XMP handoff;
-4. add reliable RAW/metadata white-balance evidence when available, without blocking exposure-only workflow;
-5. Lightroom XMP compatibility and round-trip behavior;
-6. richer culling evidence (eyes/expression) and review UX;
+3. persist/edit StyleProfile and Recipe review state around the now-connected Reference → ExposureAnalysis → Recipe → explicit XMP path;
+4. strengthen Lightroom/Camera Raw compatibility and round-trip tests;
+5. add reliable RAW/metadata white-balance evidence when available, without blocking exposure-only workflow;
+6. richer culling evidence (eyes/expression) and preview/compare UX;
 7. shared/Android review/reference UX;
 8. direct export polish and richer local AI/edit controls.
 
@@ -145,3 +145,8 @@ The workstation already persists per-group reference selection through `Referenc
 ## Partial Color Evidence Rule
 
 `ExposureAnalysis` is intentionally preview-relative. It may drive group-relative exposure adaptation, but it is not camera-metering EV. White balance is optional in `PhotoColorAnalysis`; if temperature/tint are unavailable, preserve `None` through `GroupColorIntent`, Recipe and XMP. Never substitute 5500K/0 tint or infer Kelvin from the embedded JPEG just to populate fields.
+
+
+## Explicit Lightroom Handoff Rule
+
+The workstation now has an explicit per-group XMP write action. Keep it user-triggered. Build the target set from the Photo Group minus photographer-confirmed Reject items; AI RejectSuggestion alone must not silently exclude a source. Recompute Recipes from the persisted ReferenceSet and cached evidence at handoff time, then use the existing all-group XMP preflight. Never overwrite or partially replace an existing Lightroom sidecar.

@@ -6,6 +6,7 @@ import {
   type BackendCullingReview,
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
+  type BackendGroupReferenceStyle,
   type BackendLightroomHandoffResult,
   type BackendPhotoContext,
   type BackendReferenceBinding,
@@ -21,6 +22,7 @@ export type {
   BackendCullingReview,
   BackendGroupCullingResult,
   BackendGroupReferencePreview,
+  BackendGroupReferenceStyle,
   BackendLightroomHandoffResult,
   BackendPhotoContext,
   BackendRawImportResult,
@@ -84,6 +86,10 @@ function userDecisionLabel(decision: CullingUserDecision) {
   return decision === "KEEP" ? "Keep" : "Review";
 }
 
+function signed(value: number, decimals = 1) {
+  return `${value > 0 ? "+" : ""}${value.toFixed(decimals)}`;
+}
+
 function JobRow({ job }: { job: BatchJob }) {
   return (
     <div className="job-row">
@@ -131,7 +137,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [cullingReviews, setCullingReviews] = useState<Record<string, CullingUserDecision>>({});
   const [cullingLoading, setCullingLoading] = useState(false);
   const [referenceBindings, setReferenceBindings] = useState<Record<string, BackendReferenceBinding>>({});
+  const [referenceStyles, setReferenceStyles] = useState<Record<string, BackendGroupReferenceStyle>>({});
   const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
+  const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
   const [handoffRunning, setHandoffRunning] = useState<string | null>(null);
 
@@ -285,6 +293,30 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   }, [activeBatchId, bridge]);
 
   useEffect(() => {
+    if (!bridge?.loadReferenceStyles || !activeBatchId) {
+      setReferenceStyles({});
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadReferenceStyles(activeBatchId)
+      .then((styles) => {
+        if (disposed) return;
+        setReferenceStyles(
+          Object.fromEntries(styles.map((style) => [style.group_id, style])),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeBatchId, bridge, referenceBindings]);
+
+  useEffect(() => {
     if (!bridge?.loadReferencePreviews || !activeBatchId) {
       setReferencePreviews({});
       return;
@@ -306,7 +338,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     return () => {
       disposed = true;
     };
-  }, [activeBatchId, analysisRevision, bridge, referenceBindings]);
+  }, [activeBatchId, analysisRevision, bridge, referenceBindings, referenceStyles]);
 
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
@@ -492,6 +524,51 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     } catch (error) {
       setBackendError(String(error));
     }
+  };
+
+  const saveReferenceStyle = async (
+    groupId: string,
+    exposureBiasEv: number,
+    contrastPreference: number,
+    saturationPreference: number,
+  ) => {
+    if (!bridge?.updateReferenceStyle) return;
+    setStyleUpdating(groupId);
+    try {
+      const style = await bridge.updateReferenceStyle(
+        groupId,
+        exposureBiasEv,
+        contrastPreference,
+        saturationPreference,
+      );
+      setReferenceStyles((current) => ({ ...current, [groupId]: style }));
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setStyleUpdating(null);
+    }
+  };
+
+  const adjustReferenceStyle = (
+    groupId: string,
+    field: "exposure" | "contrast" | "saturation",
+    delta: number,
+  ) => {
+    const profile = referenceStyles[groupId]?.style_profile;
+    let exposure = profile?.exposure_bias_ev ?? 0;
+    let contrast = profile?.contrast_preference ?? 0;
+    let saturation = profile?.saturation_preference ?? 0;
+
+    if (field === "exposure") exposure = Math.max(-3, Math.min(3, exposure + delta));
+    if (field === "contrast") contrast = Math.max(-100, Math.min(100, contrast + delta));
+    if (field === "saturation") saturation = Math.max(-100, Math.min(100, saturation + delta));
+
+    void saveReferenceStyle(groupId, exposure, contrast, saturation);
+  };
+
+  const resetReferenceStyle = (groupId: string) => {
+    void saveReferenceStyle(groupId, 0, 0, 0);
   };
 
   const writeGroupXmp = async (groupId: string) => {
@@ -695,6 +772,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       <div className="reference-groups">
         {photoContext?.groups.map((group, index) => {
           const binding = referenceBindings[group.id];
+          const style = referenceStyles[group.id]?.style_profile;
           const preview = referencePreviews[group.id];
           const candidates = referenceCandidatesForGroup(group.asset_ids);
           const exposureValues = preview?.recipes
@@ -740,6 +818,69 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   )}
                 </div>
               </div>
+
+              {binding && (
+                <div className="reference-style">
+                  <div className="style-control">
+                    <span>Exposure bias</span>
+                    <div>
+                      <button
+                        className="style-step"
+                        disabled={styleUpdating != null}
+                        onClick={() => adjustReferenceStyle(group.id, "exposure", -0.1)}
+                      >−</button>
+                      <strong>{signed(style?.exposure_bias_ev ?? 0)} EV</strong>
+                      <button
+                        className="style-step"
+                        disabled={styleUpdating != null}
+                        onClick={() => adjustReferenceStyle(group.id, "exposure", 0.1)}
+                      >+</button>
+                    </div>
+                  </div>
+                  <div className="style-control">
+                    <span>Contrast</span>
+                    <div>
+                      <button
+                        className="style-step"
+                        disabled={styleUpdating != null}
+                        onClick={() => adjustReferenceStyle(group.id, "contrast", -5)}
+                      >−</button>
+                      <strong>{signed(style?.contrast_preference ?? 0, 0)}</strong>
+                      <button
+                        className="style-step"
+                        disabled={styleUpdating != null}
+                        onClick={() => adjustReferenceStyle(group.id, "contrast", 5)}
+                      >+</button>
+                    </div>
+                  </div>
+                  <div className="style-control">
+                    <span>Saturation</span>
+                    <div>
+                      <button
+                        className="style-step"
+                        disabled={styleUpdating != null}
+                        onClick={() => adjustReferenceStyle(group.id, "saturation", -5)}
+                      >−</button>
+                      <strong>{signed(style?.saturation_preference ?? 0, 0)}</strong>
+                      <button
+                        className="style-step"
+                        disabled={styleUpdating != null}
+                        onClick={() => adjustReferenceStyle(group.id, "saturation", 5)}
+                      >+</button>
+                    </div>
+                  </div>
+                  <button
+                    className="review-choice clear"
+                    disabled={styleUpdating != null}
+                    onClick={() => resetReferenceStyle(group.id)}
+                  >
+                    Reset style
+                  </button>
+                  <small>
+                    White balance controls remain locked until reliable RAW/metadata WB evidence exists.
+                  </small>
+                </div>
+              )}
 
               <div className="reference-candidates">
                 {candidates.slice(0, 10).map((assetId) => {

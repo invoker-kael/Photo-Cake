@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import App, {
   type BackendBatch,
+  type BackendGroupCullingResult,
   type BackendPhotoContext,
   type BackendRawImportResult,
   type BatchWorkerEvent,
@@ -25,6 +26,8 @@ const bridge: PhotoCakeBridge = {
   cancelBatch: (batchId) => invoke<BackendBatch>("cancel_batch", { batchId }),
   loadPhotoContext: (batchId) =>
     invoke<BackendPhotoContext>("batch_photo_context", { batchId }),
+  loadCulling: (batchId) =>
+    invoke<BackendGroupCullingResult[]>("batch_culling", { batchId }),
   importRawDirectory: async () => {
     const selected = await open({
       directory: true,

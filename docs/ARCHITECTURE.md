@@ -54,6 +54,74 @@ Lightroom
 
 ---
 
+# Reusable Code Architecture
+
+Existing implementation should be reused where it matches the workflow. Do not rewrite working foundations without reason.
+
+The repository is designed as:
+
+```text
+apps/
+ ├── windows
+ └── android
+
+crates/
+ ├── photo-core
+ └── photo-inference
+```
+
+Responsibilities:
+
+## photo-core
+
+Shared platform-independent logic:
+
+- project model
+- catalog
+- asset identity
+- metadata
+- photo groups
+- recipe model
+- edit graph
+- job state
+- import/export interfaces
+
+This is the primary reusable layer.
+
+## photo-inference
+
+AI capability layer:
+
+- image analysis
+- similarity
+- classification
+- style analysis
+- future culling models
+
+Models must remain replaceable.
+
+## apps/windows
+
+Desktop workflow:
+
+- large RAW library management
+- batch processing
+- Lightroom-oriented workflow
+- GPU acceleration
+
+## apps/android
+
+Mobile workflow:
+
+- photo selection
+- preview
+- lightweight analysis
+- mobile capture/import
+
+Android should not duplicate core logic.
+
+---
+
 # Core Data Model
 
 Primary objects:
@@ -81,14 +149,6 @@ Important design rule:
 Photo Group is a first-class object.
 
 A photography session contains different lighting and scenes. A single global adjustment is not sufficient.
-
-Examples:
-
-- Travel daytime
-- Landscape
-- Indoor family photos
-- Portrait
-- Night scene
 
 ---
 
@@ -173,18 +233,6 @@ Recipe
 XMP          Export
 ```
 
-Stored information:
-
-- Asset identity
-- Metadata
-- Preview cache
-- Analysis results
-- Grouping information
-- Reference style information
-- Recipe
-- Edit Graph
-- Export status
-
 RAW is never modified.
 
 ---
@@ -203,13 +251,7 @@ Recipe
 XMP   Export
 ```
 
-This allows:
-
-- Lightroom continuation
-- Direct JPEG/TIFF export
-- Future editing features
-
-without changing the workflow model.
+This allows Lightroom continuation and direct export without changing workflow design.
 
 ---
 
@@ -247,16 +289,16 @@ Large generated files should not be created unless explicitly requested.
 
 # Platform Boundary
 
-Windows and Android share workflow concepts.
+Windows and Android share the same workflow model.
 
-Platform differences:
+Platform-specific code must stay isolated:
 
 - File access
 - Hardware acceleration
 - UI
 - Packaging
 
-Core logic should remain reusable.
+Business logic belongs in shared crates whenever possible.
 
 ---
 
@@ -267,7 +309,7 @@ Later phases may add:
 - Advanced RAW processing
 - GPU acceleration
 - AI retouch planning
-- More intelligent personal style learning
+- Personal style learning
 
 These must not block the core workflow:
 

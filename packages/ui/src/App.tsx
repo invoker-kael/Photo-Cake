@@ -12,6 +12,7 @@ import {
   type BackendReferenceBinding,
   type BackendRecipeReviewOverride,
   type BackendReviewRenderResult,
+  type BackendSemanticRefinementReport,
   type BatchJob,
   type BatchStage,
   type CullingDecision,
@@ -31,6 +32,7 @@ export type {
   BackendReferenceBinding,
   BackendRecipeReviewOverride,
   BackendReviewRenderResult,
+  BackendSemanticRefinementReport,
   BatchWorkerEvent,
   PhotoCakeBridge,
 } from "./batch";
@@ -140,6 +142,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [culling, setCulling] = useState<BackendGroupCullingResult[]>([]);
   const [cullingReviews, setCullingReviews] = useState<Record<string, CullingUserDecision>>({});
   const [cullingLoading, setCullingLoading] = useState(false);
+  const [groupRevision, setGroupRevision] = useState(0);
+  const [groupRefining, setGroupRefining] = useState(false);
+  const [groupRefinementNote, setGroupRefinementNote] = useState<string | null>(null);
   const [referenceBindings, setReferenceBindings] = useState<Record<string, BackendReferenceBinding>>({});
   const [referenceStyles, setReferenceStyles] = useState<Record<string, BackendGroupReferenceStyle>>({});
   const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
@@ -221,7 +226,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     return () => {
       disposed = true;
     };
-  }, [activeBatchId, analysisRevision, bridge]);
+  }, [activeBatchId, analysisRevision, bridge, groupRevision]);
 
   useEffect(() => {
     if (!bridge?.loadCulling || !activeBatchId) {
@@ -249,7 +254,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     return () => {
       disposed = true;
     };
-  }, [activeBatchId, analysisRevision, bridge]);
+  }, [activeBatchId, analysisRevision, bridge, groupRevision]);
 
   useEffect(() => {
     if (!bridge?.loadCullingReviews || !activeBatchId) {
@@ -273,7 +278,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     return () => {
       disposed = true;
     };
-  }, [activeBatchId, bridge]);
+  }, [activeBatchId, bridge, groupRevision]);
 
   useEffect(() => {
     if (!bridge?.loadReferenceBindings || !activeBatchId) {
@@ -533,6 +538,30 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const cancelBatch = () => {
     if (bridge && activeBatch) {
       void runBackendAction(() => bridge.cancelBatch(activeBatch.id));
+    }
+  };
+
+  const refineGroups = async () => {
+    if (!bridge?.refineGroups || !activeBatch) return;
+    setGroupRefining(true);
+    setGroupRefinementNote(null);
+    try {
+      const report = await bridge.refineGroups(activeBatch.id);
+      setPhotoContext((current) =>
+        current ? { ...current, groups: report.effective_groups } : current,
+      );
+      setGroupRevision((value) => value + 1);
+      setEditedPreviews({});
+      setGroupRefinementNote(
+        report.pending_asset_ids.length
+          ? `${report.refined_parent_group_ids.length} parent groups refined · ${report.pending_asset_ids.length} photos still waiting for analysis`
+          : `${report.refined_parent_group_ids.length} parent groups refined · ${report.effective_groups.length} effective groups ready`,
+      );
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setGroupRefining(false);
     }
   };
 
@@ -926,8 +955,20 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     <section className="queue-card">
       <div className="queue-title">
         <strong>Photo Groups</strong>
-        <span>Moment groups are conservative; semantic refinement stays inside the parent group</span>
+        <div className="group-refine-actions">
+          <span>Moment parents are preserved; semantic children become the effective editing groups</span>
+          {bridge?.refineGroups && activeBatch && (
+            <button
+              className="button secondary"
+              disabled={groupRefining}
+              onClick={() => void refineGroups()}
+            >
+              {groupRefining ? "Refining…" : "Refine semantic groups"}
+            </button>
+          )}
+        </div>
       </div>
+      {groupRefinementNote && <div className="group-refine-note">{groupRefinementNote}</div>}
       <div className="group-detail-grid">
         {photoContext?.groups.map((group, index) => (
           <div className="group-detail-card" key={group.id}>

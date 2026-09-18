@@ -49,6 +49,8 @@ pub enum ReferenceStoreError {
     Uuid(#[from] uuid::Error),
     #[error("reference set not found: {0}")]
     ReferenceSetNotFound(Uuid),
+    #[error("photo group has no reference binding: {0}")]
+    GroupBindingNotFound(Uuid),
     #[error("selected reference asset {asset_id} is not part of reference set {reference_set_id}")]
     SelectedAssetOutsideSet {
         reference_set_id: Uuid,
@@ -236,7 +238,7 @@ impl ReferenceStore {
     ) -> Result<ReferenceSet, ReferenceStoreError> {
         let binding = self
             .group_binding(group_id)?
-            .ok_or(ReferenceStoreError::ReferenceSetNotFound(group_id))?;
+            .ok_or(ReferenceStoreError::GroupBindingNotFound(group_id))?;
         let mut set = self
             .get_set(binding.reference_set_id)?
             .ok_or(ReferenceStoreError::ReferenceSetNotFound(

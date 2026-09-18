@@ -69,9 +69,22 @@ export interface BackendPhotoGroup {
   manual_locked: boolean;
 }
 
+export interface BackendPreviewArtifact {
+  asset_id: string;
+  source_fingerprint: string;
+  revision: string;
+  cache_path: string;
+  mime_type: string;
+  width: number;
+  height: number;
+  source: "EMBEDDED_RAW_PREVIEW" | "RENDERED_RAW_PREVIEW";
+  preview_url?: string;
+}
+
 export interface BackendPhotoContext {
   assets: BackendRawAsset[];
   groups: BackendPhotoGroup[];
+  previews?: BackendPreviewArtifact[];
 }
 
 export interface BackendRawImportResult extends BackendPhotoContext {

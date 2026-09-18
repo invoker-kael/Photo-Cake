@@ -2,9 +2,9 @@
 
 ## Scope
 
-Photo-Cake is intentionally a single-user local application. There is no account system, organization model, multi-tenant service, or mandatory cloud scheduler.
+Photo-Cake is a single-user local-first semi-automatic AI photo workflow application.
 
-The product goal is a local-first semi-automatic AI photo workflow: reduce repetitive Lightroom-style manual editing by automating analysis, grouping, retouch planning, batch application, QA, and export.
+The goal is to reduce repetitive Lightroom-style manual editing while keeping RAW files immutable and maintaining professional workflow compatibility.
 
 ## Layers
 
@@ -32,7 +32,9 @@ The product goal is a local-first semi-automatic AI photo workflow: reduce repet
 
 ## Platform contract
 
-Windows and Android are separate deliverables, not separate codebases. Shared behavior belongs in common packages/crates:
+Windows and Android are separate deliverables, not separate application logic.
+
+Shared behavior:
 
 - project schema
 - catalog and asset identity
@@ -41,37 +43,37 @@ Windows and Android are separate deliverables, not separate codebases. Shared be
 - QA rules
 - responsive UI contracts
 
-Platform shells only own platform behavior:
+Platform-specific:
 
 - file picking
 - drag/drop
 - touch/stylus
 - packaging
-- thermal/resource policy
 - hardware acceleration bindings
+- thermal/resource policy
 
 ## Product workflow architecture
 
-The main workflow is:
-
 ```text
-IMPORT
+IMPORT RAW
   -> ANALYZE
-  -> CULL / GROUP
-  -> SELECT REFERENCE LOOK
+  -> AI CULLING
+  -> GROUPING
+  -> REFERENCE STYLE SELECTION
+  -> RECIPE GENERATION
   -> AI RETOUCH PLAN
-  -> APPLY EDIT GRAPH
+  -> EDIT GRAPH
   -> QA REVIEW
-  -> EXPORT
+  -> XMP / EXPORT
 ```
 
-The system optimizes for groups rather than isolated images. A user should be able to adjust one reference image or recipe and apply the intent across similar photos.
+The system optimizes for photo groups instead of isolated images.
 
 ## Non-destructive editing
 
 Original files are immutable.
 
-A project stores:
+Stored project data:
 
 - original references
 - asset identity/hash
@@ -79,32 +81,100 @@ A project stores:
 - previews
 - AI analysis cache
 - grouping results
+- reference style data
 - edit graph
 - masks
 - job/checkpoint state
 - export recipes
 
-Pixel output is generated only during rendering/export.
+RAW files are never modified. Lightroom-compatible XMP output remains a primary workflow.
+
+## Batch execution model
+
+Each imported photo belongs to a persistent batch job.
+
+Rules:
+
+- one active worker per batch
+- checkpoint before and after stages
+- failed photos are isolated
+- retry resumes from failed stage
+- pause/cancel take effect at safe stage boundaries
+- abnormal termination restores incomplete work safely
+
+Export uses atomic writes:
+
+```text
+render
+ -> partial file
+ -> verification
+ -> atomic rename
+ -> DONE
+```
+
+## Local inference architecture
+
+Photo-Cake is offline-first.
+
+Normal operations must work without cloud AI:
+
+- ingest
+- classification
+- grouping
+- color analysis
+- portrait analysis
+- masks
+- QA
+- export
+
+Principles:
+
+- online inference disabled by default
+- deterministic processing preferred when models are unnecessary
+- lightweight reusable local vision models preferred
+- inference results are versioned and cached
+- only affected tasks are recomputed
+
+Shared artifacts:
+
+- person/face detection
+- image embeddings
+- duplicate detection
+- face embeddings
+- segmentation masks
+
+Cache identity:
+
+- asset ID
+- source fingerprint
+- preview revision
+- inference task
+- model ID/version
+- configuration hash
+
+Backend performance may vary, but semantic results must remain consistent.
 
 ## AI retouch direction
 
-AI features should produce editable intent, not destructive replacements:
+AI produces editable intent, not destructive replacement:
 
-- exposure and white balance suggestions
+- exposure suggestions
+- white balance
 - portrait enhancement masks
-- skin refinement parameters
-- lighting adjustments
-- background adjustments
-- group-based style recipes
+- skin refinement
+- lighting adjustment
+- background adjustment
+- group style recipes
 
 ## First milestone
 
-The first milestone remains a reliable automation substrate:
+Build the stable automation foundation:
 
 - background execution
 - persistent jobs
 - crash recovery
 - resumable stages
 - safe export
+- RAW + XMP workflow
 
-After that, catalog, preview, grouping, and semi-automatic AI retouch are built on top of the stable execution model.
+Advanced catalog, preview, grouping and AI retouch build on this foundation.

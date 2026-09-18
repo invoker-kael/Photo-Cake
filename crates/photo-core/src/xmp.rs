@@ -327,6 +327,21 @@ mod tests {
     use crate::EditAdjustments;
     use tempfile::tempdir;
 
+    fn matching_xmp_sidecars(directory: &Path, stem: &str) -> usize {
+        std::fs::read_dir(directory)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_stem().and_then(|value| value.to_str()) == Some(stem)
+                    && path
+                        .extension()
+                        .and_then(|value| value.to_str())
+                        .is_some_and(|value| value.eq_ignore_ascii_case("xmp"))
+            })
+            .count()
+    }
+
     fn recipe(target_asset_id: Option<Uuid>) -> Recipe {
         Recipe {
             id: Uuid::nil(),
@@ -506,7 +521,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let raw_path = dir.path().join("IMG_0099.CR3");
         std::fs::write(&raw_path, b"raw").unwrap();
-        std::fs::write(dir.path().join("IMG_0099.XMP"), b"existing").unwrap();
+        let existing = dir.path().join("IMG_0099.XMP");
+        std::fs::write(&existing, b"existing").unwrap();
 
         let asset_id = Uuid::new_v4();
         let asset = RawAsset {
@@ -522,7 +538,8 @@ mod tests {
 
         let error = write_group_sidecars(&[asset], &[recipe(Some(asset_id))]).unwrap_err();
         assert!(matches!(error, XmpWriteError::ExistingSidecar(path) if path.ends_with("IMG_0099.XMP")));
-        assert!(!dir.path().join("IMG_0099.xmp").exists());
+        assert_eq!(std::fs::read(&existing).unwrap(), b"existing");
+        assert_eq!(matching_xmp_sidecars(dir.path(), "IMG_0099"), 1);
     }
 
     #[test]
@@ -530,7 +547,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let raw_path = dir.path().join("IMG_0100.CR3");
         std::fs::write(&raw_path, b"raw").unwrap();
-        std::fs::write(dir.path().join("IMG_0100.XmP"), b"existing").unwrap();
+        let existing = dir.path().join("IMG_0100.XmP");
+        std::fs::write(&existing, b"existing").unwrap();
 
         let asset_id = Uuid::new_v4();
         let asset = RawAsset {
@@ -546,7 +564,8 @@ mod tests {
 
         let error = write_group_sidecars(&[asset], &[recipe(Some(asset_id))]).unwrap_err();
         assert!(matches!(error, XmpWriteError::ExistingSidecar(path) if path.ends_with("IMG_0100.XmP")));
-        assert!(!dir.path().join("IMG_0100.xmp").exists());
+        assert_eq!(std::fs::read(&existing).unwrap(), b"existing");
+        assert_eq!(matching_xmp_sidecars(dir.path(), "IMG_0100"), 1);
     }
 
     #[test]

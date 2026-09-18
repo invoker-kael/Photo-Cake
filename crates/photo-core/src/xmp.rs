@@ -5,8 +5,8 @@
 //! Lightroom-compatible sidecars without touching source RAW bytes.
 
 use crate::{RawAsset, Recipe};
-use std::fs;
-use std::io;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
@@ -30,6 +30,8 @@ pub enum XmpWriteError {
     MissingTargetAsset(Uuid),
     #[error("target asset {0} is missing from the supplied RAW assets")]
     MissingRawAsset(Uuid),
+    #[error("XMP sidecar already exists and will not be overwritten: {0}")]
+    ExistingSidecar(PathBuf),
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -92,7 +94,9 @@ pub fn sidecar_path_for_raw(raw_path: &Path) -> PathBuf {
 
 pub fn write_recipe_sidecar(raw_path: &Path, recipe: &Recipe) -> io::Result<PathBuf> {
     let path = sidecar_path_for_raw(raw_path);
-    fs::write(&path, XmpEditState::from_recipe(recipe).to_xmp_document())?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&path)?;
+    file.write_all(XmpEditState::from_recipe(recipe).to_xmp_document().as_bytes())?;
+    file.sync_all()?;
     Ok(path)
 }
 
@@ -104,8 +108,10 @@ pub fn write_group_sidecars(
     assets: &[RawAsset],
     recipes: &[Recipe],
 ) -> Result<Vec<PathBuf>, XmpWriteError> {
-    let mut written = Vec::with_capacity(recipes.len());
+    let mut planned = Vec::with_capacity(recipes.len());
 
+    // Preflight the whole group before writing anything so an existing
+    // Lightroom sidecar cannot leave a partially updated group.
     for recipe in recipes {
         let target_id = recipe
             .target_asset_id
@@ -114,9 +120,18 @@ pub fn write_group_sidecars(
             .iter()
             .find(|asset| asset.id == target_id)
             .ok_or(XmpWriteError::MissingRawAsset(target_id))?;
-        written.push(write_recipe_sidecar(Path::new(&asset.source_path), recipe)?);
+        let raw_path = PathBuf::from(&asset.source_path);
+        let sidecar = sidecar_path_for_raw(&raw_path);
+        if sidecar.exists() {
+            return Err(XmpWriteError::ExistingSidecar(sidecar));
+        }
+        planned.push((raw_path, recipe));
     }
 
+    let mut written = Vec::with_capacity(planned.len());
+    for (raw_path, recipe) in planned {
+        written.push(write_recipe_sidecar(&raw_path, recipe)?);
+    }
     Ok(written)
 }
 
@@ -158,6 +173,54 @@ mod tests {
         assert_eq!(
             sidecar_path_for_raw(Path::new("IMG_0001.CR3")),
             PathBuf::from("IMG_0001.xmp")
+        );
+    }
+
+    #[test]
+    fn refuses_existing_lightroom_sidecar_before_group_write() {
+        let dir = tempdir().unwrap();
+        let first_path = dir.path().join("IMG_0001.CR3");
+        let second_path = dir.path().join("IMG_0002.CR3");
+        fs::write(&first_path, b"raw-one").unwrap();
+        fs::write(&second_path, b"raw-two").unwrap();
+        fs::write(dir.path().join("IMG_0002.xmp"), b"lightroom-edit").unwrap();
+
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let assets = vec![
+            RawAsset {
+                id: first_id,
+                source_path: first_path.to_string_lossy().into_owned(),
+                filename: "IMG_0001.CR3".into(),
+                extension: "cr3".into(),
+                camera_id: None,
+                capture_time_ms: None,
+                file_time_ms: None,
+                sequence_number: Some(1),
+            },
+            RawAsset {
+                id: second_id,
+                source_path: second_path.to_string_lossy().into_owned(),
+                filename: "IMG_0002.CR3".into(),
+                extension: "cr3".into(),
+                camera_id: None,
+                capture_time_ms: None,
+                file_time_ms: None,
+                sequence_number: Some(2),
+            },
+        ];
+
+        let error = write_group_sidecars(
+            &assets,
+            &[recipe(Some(first_id)), recipe(Some(second_id))],
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, XmpWriteError::ExistingSidecar(_)));
+        assert!(!dir.path().join("IMG_0001.xmp").exists());
+        assert_eq!(
+            fs::read(dir.path().join("IMG_0002.xmp")).unwrap(),
+            b"lightroom-edit"
         );
     }
 

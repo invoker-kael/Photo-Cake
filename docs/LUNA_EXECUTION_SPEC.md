@@ -99,7 +99,7 @@ At every run inspect what is already implemented and take the smallest complete 
 1. compile/test/CI regressions;
 2. end-to-end wiring between existing core modules;
 3. add reliable RAW/metadata white-balance evidence when available, without blocking exposure-only workflow;
-4. richer culling evidence (eyes/expression) and more accurate review-preview evaluation where evidence/rendering supports it;
+4. add dedicated eye/expression evidence only when a reliable local model exists; current Cull already surfaces segmentation-based people/face/subject evidence without folding it into quality scoring;
 5. validate emitted XMP against real Lightroom/Camera Raw fixtures in addition to the implemented local parse-back gate;
 6. shared/Android review/reference UX;
 7. direct export polish and richer local AI/edit controls.

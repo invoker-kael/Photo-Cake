@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::export_store::{partial_output_path, remove_file_if_exists};
 use crate::{ExportCheckpoint, ExportStatus, ExportStore};
 
 #[derive(Debug, Error)]
@@ -52,36 +53,111 @@ where
     ) -> Result<ExportCheckpoint, ExportWorkerError> {
         let checkpoint = store
             .reserve(job.batch_id, job.item_id, &job.source)
-            .map_err(|e| ExportWorkerError::Store(e.to_string()))?;
+            .map_err(|error| ExportWorkerError::Store(error.to_string()))?;
+
+        if checkpoint.status == ExportStatus::Done {
+            return Ok(checkpoint);
+        }
 
         let running = store
             .mark_running(checkpoint)
-            .map_err(|e| ExportWorkerError::Store(e.to_string()))?;
+            .map_err(|error| ExportWorkerError::Store(error.to_string()))?;
+        let temporary = partial_output_path(&running.output_path);
 
-        let temporary = running.output_path.with_extension("partial");
-
-        let result = self.renderer.render(&job.source, &temporary);
-
-        if let Err(error) = result {
-            let _ = store.mark_failed(running, error.to_string());
-            return Err(error);
+        if let Some(parent) = temporary
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                return Err(record_failure(
+                    store,
+                    running,
+                    ExportWorkerError::Output(error.to_string()),
+                    &temporary,
+                ));
+            }
         }
 
-        std::fs::rename(&temporary, &running.output_path)
-            .map_err(|e| ExportWorkerError::Output(e.to_string()))?;
+        if let Err(error) = remove_file_if_exists(&temporary) {
+            return Err(record_failure(
+                store,
+                running,
+                ExportWorkerError::Output(error.to_string()),
+                &temporary,
+            ));
+        }
 
-        let metadata = std::fs::metadata(&running.output_path)
-            .map_err(|e| ExportWorkerError::Verify(e.to_string()))?;
-        if metadata.len() == 0 {
-            let failed = store
-                .mark_failed(running, "empty exported file")
-                .map_err(|e| ExportWorkerError::Store(e.to_string()))?;
-            return Err(ExportWorkerError::Verify(format!("{}", failed.output_path.display())));
+        if let Err(error) = self.renderer.render(&job.source, &temporary) {
+            return Err(record_failure(store, running, error, &temporary));
+        }
+
+        let temporary_metadata = match std::fs::metadata(&temporary) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                return Err(record_failure(
+                    store,
+                    running,
+                    ExportWorkerError::Verify(error.to_string()),
+                    &temporary,
+                ))
+            }
+        };
+        if temporary_metadata.len() == 0 {
+            return Err(record_failure(
+                store,
+                running,
+                ExportWorkerError::Verify("temporary output is empty".to_string()),
+                &temporary,
+            ));
+        }
+
+        if let Err(error) = std::fs::rename(&temporary, &running.output_path) {
+            return Err(record_failure(
+                store,
+                running,
+                ExportWorkerError::Output(error.to_string()),
+                &temporary,
+            ));
+        }
+
+        let output_metadata = match std::fs::metadata(&running.output_path) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                let _ = remove_file_if_exists(&running.output_path);
+                return Err(record_failure(
+                    store,
+                    running,
+                    ExportWorkerError::Verify(error.to_string()),
+                    &temporary,
+                ));
+            }
+        };
+        if output_metadata.len() == 0 {
+            let _ = remove_file_if_exists(&running.output_path);
+            return Err(record_failure(
+                store,
+                running,
+                ExportWorkerError::Verify("final output is empty".to_string()),
+                &temporary,
+            ));
         }
 
         store
             .mark_done(running)
-            .map_err(|e| ExportWorkerError::Store(e.to_string()))
+            .map_err(|error| ExportWorkerError::Store(error.to_string()))
+    }
+}
+
+fn record_failure(
+    store: &ExportStore,
+    running: ExportCheckpoint,
+    error: ExportWorkerError,
+    temporary: &Path,
+) -> ExportWorkerError {
+    let _ = remove_file_if_exists(temporary);
+    match store.mark_failed(running, error.to_string()) {
+        Ok(_) => error,
+        Err(store_error) => ExportWorkerError::Store(store_error.to_string()),
     }
 }
 

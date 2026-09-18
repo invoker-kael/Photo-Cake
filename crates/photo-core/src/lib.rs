@@ -32,17 +32,42 @@ pub use classification::{
     ClassificationInvalidation, ClassificationInvalidationScope, ClassificationSignals,
     PhotoCategory, PhotoClassification, PortraitClassificationPolicy, ProcessingRoute, SceneTag,
 };
-pub use classification_store::{ClassificationRoutingExecutor, ClassificationStore, ClassificationStoreError};
+pub use classification_store::{
+    ClassificationRoutingExecutor, ClassificationStore, ClassificationStoreError,
+};
+pub use color_sync::{
+    build_adaptive_group_plan, build_auto_group_plan, choose_reference_candidate,
+    derive_auto_group_intent, promote_group_reference, ColorSyncError, GroupColorIntent,
+    GroupColorInvalidation, GroupColorInvalidationScope, GroupColorSyncPlan, GroupSyncMode,
+    PhotoColorAnalysis, ResolvedColorEdit, SemanticColorIntent, SemanticRegion,
+};
 pub use color_sync_store::{ColorSyncStore, ColorSyncStoreError};
-pub use export::{collision_safe_output, plan_export, ExportColorSpace, ExportFormat, ExportPlan, ExportPlanError, ExportRecipe, ResizeRecipe};
+pub use export::{
+    collision_safe_output, plan_export, ExportColorSpace, ExportFormat, ExportPlan,
+    ExportPlanError, ExportRecipe, ResizeRecipe,
+};
 pub use export_store::{ExportCheckpoint, ExportStatus, ExportStore, ExportStoreError};
-pub use export_worker::{ExportJob, ExportRenderer, ExportWorker, ExportWorkerError, recover_interrupted_export};
-pub use grouping::{initial_group_raw_assets, GroupingBasis, InitialGroupingConfig, PhotoGroup, PhotoGroupKind};
+pub use export_worker::{
+    recover_interrupted_export, ExportJob, ExportRenderer, ExportWorker, ExportWorkerError,
+};
+pub use grouping::{
+    initial_group_raw_assets, GroupingBasis, InitialGroupingConfig, PhotoGroup, PhotoGroupKind,
+};
+pub use handoff::{
+    plan_finish, xmp_sidecar_path, EditCompatibility, FallbackReason, FinishPlan, FinishTarget,
+    HandoffColorSpace, HandoffError, HandoffMode, RenderedHandoffPreset, TiffCompression,
+};
 pub use handoff_store::{HandoffStore, HandoffStoreError};
 pub use importer::{RawImportError, RawImportResult, RawImporter};
 pub use models::{BundledModelSpec, ModelBundleManifest, ModelPlatform, ModelVariant};
 pub use preview::{preview_cache_path, PreviewArtifact, PreviewSource, PreviewStore, PreviewStoreError};
-pub use raw::{extract_sequence_number, is_supported_raw, scan_raw_directory, scan_raw_paths, RawAsset, RawImportScan};
+pub use raw::{
+    extract_sequence_number, is_supported_raw, scan_raw_directory, scan_raw_paths, RawAsset,
+    RawImportScan,
+};
 pub use runner::{AutomationRunner, NoopStageExecutor, RunStep, RunnerError, StageExecutor};
-pub use semantic_grouping::{refine_group_by_similarity, ImageEmbedding, SemanticGroupKind, SemanticGroupingConfig, SemanticGroupingError, SemanticPhotoGroup};
+pub use semantic_grouping::{
+    refine_group_by_similarity, ImageEmbedding, SemanticGroupKind, SemanticGroupingConfig,
+    SemanticGroupingError, SemanticPhotoGroup,
+};
 pub use store::{BatchStore, StoreError};

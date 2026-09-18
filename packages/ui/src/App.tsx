@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  defaultRecipe,
   demoJobs,
-  type AutomationRecipe,
   type BackendBatch,
   type BackendBatchItem,
   type BatchJob,
@@ -10,14 +8,19 @@ import {
   type PhotoCakeBridge,
 } from "./batch";
 
-export type { BackendBatch, BatchWorkerEvent, PhotoCakeBridge } from "./batch";
+export type {
+  BackendBatch,
+  BackendRawImportResult,
+  BatchWorkerEvent,
+  PhotoCakeBridge,
+} from "./batch";
 
 const stageProgress: Record<BatchStage, number> = {
   IMPORT: 5,
-  ANALYZE: 25,
-  APPLY_PRESET: 45,
-  PORTRAIT_RETOUCH: 65,
-  QA: 82,
+  ANALYZE: 55,
+  APPLY_PRESET: 70,
+  PORTRAIT_RETOUCH: 78,
+  QA: 86,
   EXPORT: 95,
   DONE: 100,
 };
@@ -39,21 +42,20 @@ function jobFromItem(item: BackendBatchItem): BatchJob {
 }
 
 function stageLabel(stage: BatchStage) {
-  return stage.replaceAll("_", " ");
+  const labels: Record<BatchStage, string> = {
+    IMPORT: "Import",
+    ANALYZE: "Local analysis",
+    APPLY_PRESET: "Legacy preset",
+    PORTRAIT_RETOUCH: "Legacy portrait stage",
+    QA: "Legacy QA",
+    EXPORT: "Direct export",
+    DONE: "Ready for review",
+  };
+  return labels[stage];
 }
 
-function Toggle({ value, onChange }: { value: boolean; onChange: (next: boolean) => void }) {
-  return (
-    <button
-      className={`toggle ${value ? "toggle-on" : ""}`}
-      type="button"
-      role="switch"
-      aria-checked={value}
-      onClick={() => onChange(!value)}
-    >
-      <span />
-    </button>
-  );
+function statusLabel(job: BatchJob) {
+  return job.status === "DONE" ? "READY" : job.status;
 }
 
 function JobRow({ job }: { job: BatchJob }) {
@@ -63,11 +65,10 @@ function JobRow({ job }: { job: BatchJob }) {
       <div className="job-main">
         <div className="job-title-line">
           <strong>{job.filename}</strong>
-          <span className={`status status-${job.status.toLowerCase()}`}>{job.status}</span>
+          <span className={`status status-${job.status.toLowerCase()}`}>{statusLabel(job)}</span>
         </div>
         <div className="job-meta">
           <span>{stageLabel(job.stage)}</span>
-          {job.qa && <span>QA {job.qa}</span>}
           {job.error && <span className="error-text">{job.error}</span>}
         </div>
         <div className="progress"><span style={{ width: `${job.progress}%` }} /></div>
@@ -87,15 +88,17 @@ function upsertBatch(current: BackendBatch[], batch: BackendBatch) {
 
 export interface AppProps {
   bridge?: PhotoCakeBridge;
+  mode?: "workstation" | "companion";
 }
 
-export default function App({ bridge }: AppProps) {
+export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [demoState, setDemoState] = useState(demoJobs);
   const [batches, setBatches] = useState<BackendBatch[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
-  const [recipe, setRecipe] = useState<AutomationRecipe>(defaultRecipe);
   const [demoPaused, setDemoPaused] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [importNote, setImportNote] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (!bridge) return;
@@ -159,10 +162,6 @@ export default function App({ bridge }: AppProps) {
     ? summary.paused > 0 && summary.running === 0 && summary.pending === 0
     : demoPaused;
 
-  const updateRecipe = <K extends keyof AutomationRecipe>(key: K, value: AutomationRecipe[K]) => {
-    setRecipe((current) => ({ ...current, [key]: value }));
-  };
-
   const applyBackendBatch = (batch: BackendBatch) => {
     setBatches((current) => upsertBatch(current, batch));
     setActiveBatchId(batch.id);
@@ -174,6 +173,25 @@ export default function App({ bridge }: AppProps) {
       applyBackendBatch(await action());
     } catch (error) {
       setBackendError(String(error));
+    }
+  };
+
+  const importRawDirectory = async () => {
+    if (!bridge?.importRawDirectory) return;
+    setImporting(true);
+    setImportNote(null);
+    try {
+      const result = await bridge.importRawDirectory();
+      if (!result) return;
+      if (result.batch) applyBackendBatch(result.batch);
+      setImportNote(
+        `${result.assets.length} RAW imported · ${result.groups.length} moment groups` +
+          (result.skipped_non_raw.length ? ` · ${result.skipped_non_raw.length} non-RAW skipped` : ""),
+      );
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -218,24 +236,31 @@ export default function App({ bridge }: AppProps) {
       <header className="topbar">
         <div>
           <div className="brand">Photo-Cake</div>
-          <div className="subtitle">Local AI photo workflow</div>
+          <div className="subtitle">
+            {mode === "workstation"
+              ? "RAW → adaptive recipe → Lightroom XMP"
+              : "Mobile selection & reference companion"}
+          </div>
         </div>
         <div className="top-actions">
-          <button className="button secondary">Import Photos</button>
-          <button className="button primary">New Batch</button>
+          {mode === "workstation" && bridge?.importRawDirectory && (
+            <button className="button primary" disabled={importing} onClick={() => void importRawDirectory()}>
+              {importing ? "Importing…" : "Import RAW Folder"}
+            </button>
+          )}
         </div>
       </header>
 
       <aside className="sidebar">
         <nav>
-          <button className="nav-item active">Batch</button>
-          <button className="nav-item">Library</button>
-          <button className="nav-item">Edit</button>
-          <button className="nav-item">Review</button>
-          <button className="nav-item">Export</button>
+          <button className="nav-item active">Library</button>
+          <button className="nav-item">Cull</button>
+          <button className="nav-item">Groups</button>
+          <button className="nav-item">Reference</button>
+          <button className="nav-item">Lightroom</button>
         </nav>
         <div className="sidebar-foot">
-          <span>Device</span>
+          <span>{mode === "workstation" ? "Workstation" : "Companion"}</span>
           <strong>Local</strong>
         </div>
       </aside>
@@ -243,14 +268,15 @@ export default function App({ bridge }: AppProps) {
       <main className="workspace">
         <section className="batch-head">
           <div>
-            <p className="eyebrow">ACTIVE BATCH</p>
-            <h1>{activeBatch?.name ?? (bridge ? "No batch loaded" : "Portrait Session")}</h1>
-            <p>{summary.done}/{summary.total} complete · {summary.running} running · {summary.failed} failed</p>
+            <p className="eyebrow">RAW PREPARATION</p>
+            <h1>{activeBatch?.name ?? (bridge ? "Import a RAW folder" : "Photography workflow")}</h1>
+            <p>{summary.done}/{summary.total} ready · {summary.running} analyzing · {summary.failed} failed</p>
+            {importNote && <p className="success-text">{importNote}</p>}
             {backendError && <p className="error-text">{backendError}</p>}
           </div>
           <div className="batch-controls">
             {bridge && activeBatch && summary.pending > 0 && summary.running === 0 && !isPaused && (
-              <button className="button primary" onClick={startOrContinue}>Start / Continue</button>
+              <button className="button primary" onClick={startOrContinue}>Analyze / Continue</button>
             )}
             {summary.failed > 0 && <button className="button secondary" onClick={retryFailed}>Retry failed</button>}
             {jobs.length > 0 && (
@@ -266,54 +292,47 @@ export default function App({ bridge }: AppProps) {
 
         <section className="queue-card">
           <div className="queue-title">
-            <strong>Background processing queue</strong>
-            <span>Checkpoint after every stage · current stage finishes before pause/cancel</span>
+            <strong>RAW preparation queue</strong>
+            <span>Import and local analysis only · editing starts after photos are ready</span>
           </div>
           <div className="job-list">
             {jobs.length > 0
               ? jobs.map((job) => <JobRow job={job} key={job.id} />)
-              : <div className="panel-note">Import RAW photos to create a persistent batch.</div>}
+              : <div className="panel-note">Import an existing RAW folder. Source RAW files stay in place.</div>}
           </div>
         </section>
       </main>
 
       <aside className="automation-panel">
-        <p className="eyebrow">AUTOMATION</p>
-        <h2>{recipe.name}</h2>
-        <p className="panel-note">Stages keep running in the background. Failed photos remain isolated while the rest of the batch can continue.</p>
+        <p className="eyebrow">PHOTOGRAPHY WORKFLOW</p>
+        <h2>Semi-automatic, reference driven</h2>
+        <p className="panel-note">
+          Background analysis prepares reusable evidence. Photo-Cake then helps you review groups,
+          choose a reference look, adapt it per photo and hand tiny XMP sidecars to Lightroom.
+        </p>
 
-        {([
-          ["autoAnalyze", "Analyze"],
-          ["autoPreset", "Apply preset"],
-          ["autoRetouch", "AI retouch"],
-          ["autoQa", "Automatic QA"],
-          ["autoExportPass", "Export QA PASS"],
-        ] as const).map(([key, label]) => (
-          <div className="setting-row" key={key}>
-            <span>{label}</span>
-            <Toggle value={recipe[key]} onChange={(value) => updateRecipe(key, value)} />
-          </div>
-        ))}
-
-        <div className="setting-block">
-          <label htmlFor="retries">Retries per failed stage</label>
-          <input
-            id="retries"
-            type="number"
-            min="0"
-            max="10"
-            value={recipe.retries}
-            onChange={(event) => updateRecipe("retries", Number(event.target.value))}
-          />
+        <div className="workflow-list">
+          {[
+            ["1", "Import & analyze", "Keep RAW untouched"],
+            ["2", "Cull", "Keep / Review / Reject suggestion"],
+            ["3", "Group", "Moment → semantic similarity"],
+            ["4", "Reference look", "Your preferred photo/style"],
+            ["5", "Adaptive recipe", "Different correction per photo"],
+            ["6", "Lightroom XMP", "Or direct export on demand"],
+          ].map(([number, title, detail]) => (
+            <div className="workflow-step" key={number}>
+              <span className="workflow-number">{number}</span>
+              <div>
+                <strong>{title}</strong>
+                <small>{detail}</small>
+              </div>
+            </div>
+          ))}
         </div>
 
-        <div className="setting-row">
-          <span>Continue on error</span>
-          <Toggle value={recipe.continueOnError} onChange={(value) => updateRecipe("continueOnError", value)} />
-        </div>
-
-        <div className="automation-flow">
-          <span>IMPORT</span><i>→</i><span>ANALYZE</span><i>→</i><span>PRESET</span><i>→</i><span>RETOUCH</span><i>→</i><span>QA</span><i>→</i><span>EXPORT</span>
+        <div className="storage-note">
+          <strong>Default storage</strong>
+          <span>Original RAW + small XMP. No automatic TIFF/JPEG working copies.</span>
         </div>
       </aside>
     </div>

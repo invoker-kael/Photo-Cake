@@ -7,6 +7,7 @@ import {
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
   type BackendGroupReferenceStyle,
+  type BackendLightroomHandoffPreflight,
   type BackendLightroomHandoffResult,
   type BackendPhotoContext,
   type BackendRawMetadataEvidence,
@@ -28,6 +29,7 @@ export type {
   BackendGroupCullingResult,
   BackendGroupReferencePreview,
   BackendGroupReferenceStyle,
+  BackendLightroomHandoffPreflight,
   BackendLightroomHandoffResult,
   BackendPhotoContext,
   BackendRawImportResult,
@@ -189,6 +191,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [editedPreviews, setEditedPreviews] = useState<Record<string, BackendReviewRenderResult>>({});
   const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
   const [reviewUpdating, setReviewUpdating] = useState<string | null>(null);
+  const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
+  const [handoffPreflightLoading, setHandoffPreflightLoading] = useState(false);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
   const [handoffRunning, setHandoffRunning] = useState<string | null>(null);
 
@@ -422,6 +426,64 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     referenceBindings,
     referenceStyles,
     groupRevision,
+  ]);
+
+  useEffect(() => {
+    if (
+      activeView !== "lightroom" ||
+      !bridge?.preflightGroupXmp ||
+      !photoContext?.groups.length
+    ) {
+      if (activeView !== "lightroom") setHandoffPreflights({});
+      return;
+    }
+
+    const groups = photoContext.groups.filter((group) => {
+      const preview = referencePreviews[group.id];
+      return (
+        referenceBindings[group.id] != null &&
+        preview != null &&
+        preview.pending_asset_id == null &&
+        preview.recipes.length > 0
+      );
+    });
+    if (groups.length === 0) {
+      setHandoffPreflights({});
+      return;
+    }
+
+    let disposed = false;
+    setHandoffPreflightLoading(true);
+    Promise.all(
+      groups.map(async (group) => {
+        const preflight = await bridge.preflightGroupXmp!(group.id);
+        return [group.id, preflight] as const;
+      }),
+    )
+      .then((entries) => {
+        if (!disposed) {
+          setHandoffPreflights(Object.fromEntries(entries));
+          setBackendError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      })
+      .finally(() => {
+        if (!disposed) setHandoffPreflightLoading(false);
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    activeView,
+    bridge,
+    cullingReviews,
+    photoContext,
+    recipeReviews,
+    referenceBindings,
+    referencePreviews,
   ]);
 
   const jobs = useMemo(
@@ -1724,15 +1786,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         {photoContext?.groups.map((group, index) => {
           const binding = referenceBindings[group.id];
           const preview = referencePreviews[group.id];
+          const preflight = handoffPreflights[group.id];
           const result = handoffResults[group.id];
           const targetedRecipes =
             preview?.recipes.filter((recipe) => recipe.target_asset_id != null) ?? [];
-          const deliverableRecipes = targetedRecipes.filter(
-            (recipe) =>
-              recipe.target_asset_id != null &&
-              cullingReviews[recipe.target_asset_id] !== "REJECT",
-          );
-          const rejectedCount = targetedRecipes.length - deliverableRecipes.length;
+          const deliverableRecipes = targetedRecipes;
+          const rejectedCount = group.asset_ids.filter(
+            (assetId) => cullingReviews[assetId] === "REJECT",
+          ).length;
           const exceptionCount = deliverableRecipes.filter(
             (recipe) =>
               recipe.target_asset_id != null && recipeReviews[recipe.target_asset_id] != null,
@@ -1742,11 +1803,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               recipe.target_asset_id != null &&
               recipeReviewPriority(recipe.target_asset_id) < 10,
           ).length;
+          const conflictCount = preflight?.existing_sidecars.length ?? 0;
+          const preflightReady = !bridge?.preflightGroupXmp || preflight != null;
           const ready =
             binding != null &&
             preview != null &&
             preview.pending_asset_id == null &&
-            deliverableRecipes.length > 0;
+            deliverableRecipes.length > 0 &&
+            preflightReady &&
+            conflictCount === 0;
           const writesWhiteBalance = deliverableRecipes.some(
             (recipe) =>
               recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
@@ -1777,6 +1842,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           .join(" · ")
                       : "Resolve adaptive Recipes first"}
                 </small>
+                {conflictCount > 0 && (
+                  <small className="error-text">
+                    Existing XMP: {preflight!.existing_sidecars
+                      .slice(0, 3)
+                      .map(filenameFromPath)
+                      .join(", ")}
+                    {conflictCount > 3 ? ` +${conflictCount - 3} more` : ""}
+                  </small>
+                )}
               </div>
 
               <div className="handoff-actions">
@@ -1794,9 +1868,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     >
                       {handoffRunning === group.id
                         ? "Writing XMP…"
-                        : ready
-                          ? `Write ${deliverableRecipes.length} XMP`
-                          : "Not ready"}
+                        : conflictCount > 0
+                          ? "Existing XMP conflict"
+                          : !preflightReady && handoffPreflightLoading
+                            ? "Checking XMP…"
+                            : ready
+                              ? `Write ${deliverableRecipes.length} XMP`
+                              : "Not ready"}
                     </button>
                     <small>No overwrite: any existing same-basename XMP stops the group before writing.</small>
                   </>

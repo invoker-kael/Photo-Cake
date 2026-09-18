@@ -205,6 +205,12 @@ export interface BackendGroupReferencePreview {
   reviewed_asset_ids: string[];
 }
 
+export interface BackendLightroomHandoffPreflight {
+  group_id: string;
+  target_sidecars: string[];
+  existing_sidecars: string[];
+}
+
 export interface BackendLightroomHandoffResult {
   group_id: string;
   written_sidecars: string[];
@@ -265,6 +271,7 @@ export interface PhotoCakeBridge {
     saturationPreference: number,
   ): Promise<BackendGroupReferenceStyle>;
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
+  preflightGroupXmp?(groupId: string): Promise<BackendLightroomHandoffPreflight>;
   writeGroupXmp?(groupId: string): Promise<BackendLightroomHandoffResult>;
   subscribeBatchUpdates?(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }

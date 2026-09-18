@@ -1,7 +1,8 @@
 use photo_core::{
     apply_companion_patch as apply_companion_patch_core,
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
-    refine_collection_semantic_groups, render_recipe_preview, write_group_sidecars, AnalysisCache,
+    preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
+    write_group_sidecars, AnalysisCache,
     AssetMetadataEvidence, AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor,
     ClassificationStore, CompanionDecisionPatch, CompanionPatchApplyReport, CompanionSnapshot,
     CompanionSnapshotStore, CullingReview, CullingReviewStore, CullingUserDecision,
@@ -80,6 +81,13 @@ struct GroupReferencePreview {
     recipes: Vec<Recipe>,
     pending_asset_id: Option<Uuid>,
     reviewed_asset_ids: Vec<Uuid>,
+}
+
+#[derive(Clone, Serialize)]
+struct LightroomHandoffPreflight {
+    group_id: Uuid,
+    target_sidecars: Vec<String>,
+    existing_sidecars: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -956,13 +964,10 @@ fn render_group_recipe_preview(
     })
 }
 
-#[tauri::command]
-fn write_group_reference_xmp(
-    group_id: String,
-    state: State<'_, AppState>,
-) -> Result<LightroomHandoffResult, String> {
-    let group_id = Uuid::parse_str(&group_id)
-        .map_err(|error| format!("invalid group id: {error}"))?;
+fn resolve_lightroom_handoff(
+    group_id: Uuid,
+    state: &AppState,
+) -> Result<(Vec<RawAsset>, Vec<Recipe>), String> {
     let group = state
         .catalog
         .find_group(group_id)
@@ -1001,6 +1006,7 @@ fn write_group_reference_xmp(
         )
         .map_err(|error| error.to_string())?;
     apply_recipe_reviews(&mut resolved.recipes, &state.recipe_reviews)?;
+
     let editable_ids = editable.asset_ids.iter().copied().collect::<HashSet<_>>();
     let assets = state
         .catalog
@@ -1009,7 +1015,47 @@ fn write_group_reference_xmp(
         .into_iter()
         .filter(|asset| editable_ids.contains(&asset.id))
         .collect::<Vec<_>>();
-    let written = write_group_sidecars(&assets, &resolved.recipes)
+
+    Ok((assets, resolved.recipes))
+}
+
+#[tauri::command]
+fn preflight_group_reference_xmp(
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<LightroomHandoffPreflight, String> {
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let (assets, recipes) = resolve_lightroom_handoff(group_id, &state)?;
+    let targets = preflight_group_sidecars(&assets, &recipes)
+        .map_err(|error| error.to_string())?;
+
+    Ok(LightroomHandoffPreflight {
+        group_id,
+        target_sidecars: targets
+            .iter()
+            .map(|target| target.sidecar_path.to_string_lossy().into_owned())
+            .collect(),
+        existing_sidecars: targets
+            .into_iter()
+            .filter_map(|target| {
+                target
+                    .existing_sidecar
+                    .map(|path| path.to_string_lossy().into_owned())
+            })
+            .collect(),
+    })
+}
+
+#[tauri::command]
+fn write_group_reference_xmp(
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<LightroomHandoffResult, String> {
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let (assets, recipes) = resolve_lightroom_handoff(group_id, &state)?;
+    let written = write_group_sidecars(&assets, &recipes)
         .map_err(|error| error.to_string())?;
 
     Ok(LightroomHandoffResult {
@@ -1231,6 +1277,7 @@ pub fn run() {
             set_recipe_reviewed,
             clear_recipe_reviewed,
             render_group_recipe_preview,
+            preflight_group_reference_xmp,
             write_group_reference_xmp,
             create_batch,
             import_raw_paths,

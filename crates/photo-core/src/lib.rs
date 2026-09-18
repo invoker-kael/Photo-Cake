@@ -124,6 +124,7 @@ pub use semantic_grouping::{
 };
 pub use store::{BatchStore, StoreError};
 pub use xmp::{
-    sidecar_path_for_raw, validate_recipe_xmp, write_group_sidecars, write_recipe_sidecar,
-    XmpEditState, XmpParseError, XmpWriteError,
+    preflight_group_sidecars, sidecar_path_for_raw, validate_recipe_xmp,
+    write_group_sidecars, write_recipe_sidecar, XmpEditState, XmpParseError,
+    XmpSidecarPreflight, XmpWriteError,
 };

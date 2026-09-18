@@ -9,6 +9,7 @@ import App, {
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
   type BackendGroupReferenceStyle,
+  type BackendLightroomHandoffPreflight,
   type BackendLightroomHandoffResult,
   type BackendPhotoContext,
   type BackendRawImportResult,
@@ -104,6 +105,8 @@ const bridge: PhotoCakeBridge = {
     }),
   loadReferencePreviews: (batchId) =>
     invoke<BackendGroupReferencePreview[]>("batch_reference_previews", { batchId }),
+  preflightGroupXmp: (groupId) =>
+    invoke<BackendLightroomHandoffPreflight>("preflight_group_reference_xmp", { groupId }),
   writeGroupXmp: (groupId) =>
     invoke<BackendLightroomHandoffResult>("write_group_reference_xmp", { groupId }),
   importRawDirectory: async () => {

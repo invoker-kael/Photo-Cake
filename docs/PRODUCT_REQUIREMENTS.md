@@ -242,3 +242,9 @@ A matching confirmation removes that photo from Recipe Triage. If the Reference,
 
 The existing direct-export core provides collision-safe planning, checkpoints and a baseline raster renderer for already-decoded images. It is not yet a production RAW demosaic/edit renderer. The Windows photography workflow must therefore keep Lightroom XMP as the real RAW handoff and must not expose a misleading "Direct Export" action until canonical Recipe evaluation can be rendered from RAW with reliable color/metadata behavior.
 
+### Lightroom XMP preflight
+
+Opening the Lightroom handoff view performs a read-only group preflight against the same target-bound Recipes used for writing. It resolves the actual sidecar paths and reports existing same-basename XMP files, including mixed-case extensions, before any write starts.
+
+A detected conflict disables the write action and shows the conflicting filenames. The final writer still repeats the same whole-group preflight immediately before create-new writes, so an XMP created externally after the UI check cannot cause a silent overwrite or partial group update.
+

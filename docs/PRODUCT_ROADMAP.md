@@ -140,3 +140,5 @@ Review completion is now explicit: "Looks good" confirmations are persisted agai
 
 Direct Export remains a guarded gap rather than a fake workstation feature. The reusable export coordinator/checkpoint/raster pieces exist, but production Windows Direct Export should wait for a real RAW demosaic + canonical Recipe renderer with trustworthy color and metadata handling.
 
+Lightroom handoff now has a visible read-only preflight: the workstation resolves the actual XMP targets when the handoff view opens, surfaces existing-sidecar conflicts before write, and keeps the final core write-time preflight as the authoritative race-safe guard. The handoff summary also counts photographer-confirmed Rejects from group membership rather than from the already-filtered Recipe list, so skipped-photo reporting remains accurate.
+

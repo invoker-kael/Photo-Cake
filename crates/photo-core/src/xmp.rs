@@ -33,6 +33,14 @@ pub enum XmpParseError {
     MissingRecipeId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XmpSidecarPreflight {
+    pub asset_id: Uuid,
+    pub raw_path: PathBuf,
+    pub sidecar_path: PathBuf,
+    pub existing_sidecar: Option<PathBuf>,
+}
+
 #[derive(Debug, Error)]
 pub enum XmpWriteError {
     #[error("recipe {0} is not bound to a target asset")]
@@ -279,18 +287,14 @@ pub fn write_recipe_sidecar(
     Ok(path)
 }
 
-/// Write one same-basename XMP sidecar for each target-bound Recipe.
-///
-/// The caller supplies catalog assets, so Photo-Cake never needs to copy RAW
-/// files into a managed library just to hand edits to Lightroom.
-pub fn write_group_sidecars(
+/// Resolve every target-bound Recipe to its RAW and same-basename XMP path
+/// without writing anything. Existing sidecars are reported so the UI can
+/// surface conflicts before the photographer starts handoff.
+pub fn preflight_group_sidecars(
     assets: &[RawAsset],
     recipes: &[Recipe],
-) -> Result<Vec<PathBuf>, XmpWriteError> {
-    let mut planned = Vec::with_capacity(recipes.len());
-
-    // Preflight the whole group before writing anything so an existing
-    // Lightroom sidecar cannot leave a partially updated group.
+) -> Result<Vec<XmpSidecarPreflight>, XmpWriteError> {
+    let mut targets = Vec::with_capacity(recipes.len());
     for recipe in recipes {
         let target_id = recipe
             .target_asset_id
@@ -300,15 +304,38 @@ pub fn write_group_sidecars(
             .find(|asset| asset.id == target_id)
             .ok_or(XmpWriteError::MissingRawAsset(target_id))?;
         let raw_path = PathBuf::from(&asset.source_path);
-        if let Some(sidecar) = existing_sidecar_path(&raw_path) {
-            return Err(XmpWriteError::ExistingSidecar(sidecar));
-        }
-        planned.push((raw_path, recipe));
+        targets.push(XmpSidecarPreflight {
+            asset_id: target_id,
+            sidecar_path: sidecar_path_for_raw(&raw_path),
+            existing_sidecar: existing_sidecar_path(&raw_path),
+            raw_path,
+        });
+    }
+    Ok(targets)
+}
+
+/// Write one same-basename XMP sidecar for each target-bound Recipe.
+///
+/// The caller supplies catalog assets, so Photo-Cake never needs to copy RAW
+/// files into a managed library just to hand edits to Lightroom.
+pub fn write_group_sidecars(
+    assets: &[RawAsset],
+    recipes: &[Recipe],
+) -> Result<Vec<PathBuf>, XmpWriteError> {
+    let preflight = preflight_group_sidecars(assets, recipes)?;
+
+    // Repeat the whole-group conflict gate at write time so a sidecar created
+    // after the UI preflight still cannot be overwritten.
+    if let Some(existing) = preflight
+        .iter()
+        .find_map(|target| target.existing_sidecar.clone())
+    {
+        return Err(XmpWriteError::ExistingSidecar(existing));
     }
 
-    let mut written = Vec::with_capacity(planned.len());
-    for (raw_path, recipe) in planned {
-        match write_recipe_sidecar(&raw_path, recipe) {
+    let mut written = Vec::with_capacity(preflight.len());
+    for (target, recipe) in preflight.into_iter().zip(recipes.iter()) {
+        match write_recipe_sidecar(&target.raw_path, recipe) {
             Ok(path) => written.push(path),
             Err(error) => {
                 for path in &written {
@@ -466,6 +493,55 @@ mod tests {
             sidecar_path_for_raw(Path::new("IMG_0001.CR3")),
             PathBuf::from("IMG_0001.xmp")
         );
+    }
+
+    #[test]
+    fn preflight_reports_existing_sidecars_without_writing() {
+        let dir = tempdir().unwrap();
+        let first_path = dir.path().join("IMG_0001.CR3");
+        let second_path = dir.path().join("IMG_0002.CR3");
+        std::fs::write(&first_path, b"raw-one").unwrap();
+        std::fs::write(&second_path, b"raw-two").unwrap();
+        let existing = dir.path().join("IMG_0002.XMP");
+        std::fs::write(&existing, b"lightroom-edit").unwrap();
+
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let assets = vec![
+            RawAsset {
+                id: first_id,
+                source_path: first_path.to_string_lossy().into_owned(),
+                filename: "IMG_0001.CR3".into(),
+                extension: "cr3".into(),
+                camera_id: None,
+                capture_time_ms: None,
+                file_time_ms: None,
+                sequence_number: Some(1),
+            },
+            RawAsset {
+                id: second_id,
+                source_path: second_path.to_string_lossy().into_owned(),
+                filename: "IMG_0002.CR3".into(),
+                extension: "cr3".into(),
+                camera_id: None,
+                capture_time_ms: None,
+                file_time_ms: None,
+                sequence_number: Some(2),
+            },
+        ];
+
+        let result = preflight_group_sidecars(
+            &assets,
+            &[recipe(Some(first_id)), recipe(Some(second_id))],
+        )
+        .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].sidecar_path, dir.path().join("IMG_0001.xmp"));
+        assert!(result[0].existing_sidecar.is_none());
+        assert_eq!(result[1].existing_sidecar.as_deref(), Some(existing.as_path()));
+        assert!(!dir.path().join("IMG_0001.xmp").exists());
+        assert_eq!(std::fs::read(existing).unwrap(), b"lightroom-edit");
     }
 
     #[test]

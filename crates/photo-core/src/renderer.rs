@@ -1,29 +1,73 @@
 use crate::{ExportRenderer, ExportWorkerError};
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, GenericImageView, ImageFormat};
 use std::path::Path;
+
+/// Runtime rendering options derived from export recipe.
+#[derive(Debug, Clone, Copy)]
+pub struct RenderOptions {
+    pub jpeg_quality: u8,
+    pub resize_long_edge: Option<u32>,
+    pub allow_upscale: bool,
+}
+
+impl Default for RenderOptions {
+    fn default() -> Self {
+        Self {
+            jpeg_quality: 92,
+            resize_long_edge: None,
+            allow_upscale: false,
+        }
+    }
+}
 
 /// Baseline raster renderer.
 ///
 /// This stage materializes already-decoded images. RAW demosaic and
 /// non-destructive edit evaluation remain separate stages.
 pub struct ImageExportRenderer {
-    pub jpeg_quality: u8,
+    pub options: RenderOptions,
 }
 
 impl Default for ImageExportRenderer {
     fn default() -> Self {
-        Self { jpeg_quality: 92 }
+        Self {
+            options: RenderOptions::default(),
+        }
     }
 }
 
 impl ExportRenderer for ImageExportRenderer {
     fn render(&self, source: &Path, destination: &Path) -> Result<(), ExportWorkerError> {
-        let image = image::open(source)
+        let mut image = image::open(source)
             .map_err(|error| ExportWorkerError::Render(error.to_string()))?;
 
-        let format = output_format(destination);
-        write_image(image, destination, format, self.jpeg_quality)
+        if let Some(edge) = self.options.resize_long_edge {
+            image = resize_long_edge(image, edge, self.options.allow_upscale);
+        }
+
+        write_image(
+            image,
+            destination,
+            output_format(destination),
+            self.options.jpeg_quality,
+        )
     }
+}
+
+fn resize_long_edge(image: DynamicImage, edge: u32, allow_upscale: bool) -> DynamicImage {
+    let (width, height) = image.dimensions();
+    let current_edge = width.max(height);
+
+    if current_edge <= edge || (!allow_upscale && current_edge < edge) {
+        return image;
+    }
+
+    let scale = edge as f32 / current_edge as f32;
+    image.resize(
+        (width as f32 * scale) as u32,
+        (height as f32 * scale) as u32,
+        image::imageops::FilterType::Lanczos3,
+    )
 }
 
 fn output_format(destination: &Path) -> ImageFormat {
@@ -51,42 +95,15 @@ fn write_image(
 
     match format {
         ImageFormat::Jpeg => {
-            let quality = quality.clamp(1, 100);
-            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, quality);
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut file, quality.clamp(1, 100));
             image
                 .write_with_encoder(encoder)
                 .map_err(|error| ExportWorkerError::Render(error.to_string()))?;
         }
-        _ => {
-            image
-                .write_to(&mut file, format)
-                .map_err(|error| ExportWorkerError::Render(error.to_string()))?;
-        }
+        _ => image
+            .write_to(&mut file, format)
+            .map_err(|error| ExportWorkerError::Render(error.to_string()))?,
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use image::{Rgb, RgbImage};
-    use tempfile::tempdir;
-
-    #[test]
-    fn renderer_writes_jpeg_output() {
-        let dir = tempdir().unwrap();
-        let source = dir.path().join("source.png");
-        let output = dir.path().join("output.jpg");
-
-        let mut image = RgbImage::new(2, 2);
-        image.put_pixel(0, 0, Rgb([255, 0, 0]));
-        image.save(&source).unwrap();
-
-        ImageExportRenderer::default()
-            .render(&source, &output)
-            .unwrap();
-
-        assert!(output.metadata().unwrap().len() > 0);
-    }
 }

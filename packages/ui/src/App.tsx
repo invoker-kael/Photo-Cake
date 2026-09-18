@@ -571,6 +571,12 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         };
         const byClass = score(left) - score(right);
         if (byClass !== 0) return byClass;
+
+        const byQuality =
+          (cullingRecommendations.get(right)?.quality_score ?? -1) -
+          (cullingRecommendations.get(left)?.quality_score ?? -1);
+        if (byQuality !== 0) return byQuality;
+
         return (
           (cullingRecommendations.get(left)?.group_rank ?? Number.MAX_SAFE_INTEGER) -
           (cullingRecommendations.get(right)?.group_rank ?? Number.MAX_SAFE_INTEGER)
@@ -1238,7 +1244,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     <section className="queue-card">
       <div className="queue-title">
         <strong>Reference look</strong>
-        <span>Selection is saved now; adaptive edits wait for reliable color evidence</span>
+        <span>Cull decisions lead the shortlist; measured technical quality and group rank break ties. Selection stays explicit and saved.</span>
       </div>
       <div className="reference-groups">
         {photoContext?.groups.map((group, index) => {
@@ -1246,6 +1252,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           const style = referenceStyles[group.id]?.style_profile;
           const preview = referencePreviews[group.id];
           const candidates = referenceCandidatesForGroup(group.asset_ids);
+          const recommendedReferenceAssetId =
+            candidates.find((assetId) => {
+              const user = cullingReviews[assetId];
+              if (user === "KEEP" || user === "REVIEW") return true;
+              const recommendation = cullingRecommendations.get(assetId);
+              return recommendation?.decision !== "REJECT_SUGGESTION";
+            }) ?? candidates[0];
           const exposureValues = preview?.recipes
             .map((recipe) => recipe.adjustments.exposure)
             .filter((value): value is number => value != null) ?? [];
@@ -1358,15 +1371,28 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   const user = cullingReviews[assetId];
                   const recommendation = cullingRecommendations.get(assetId);
                   const selected = binding?.selected_reference_asset_id === assetId;
+                  const recommended = recommendedReferenceAssetId === assetId;
                   const evidence =
                     user != null
                       ? `Your ${userDecisionLabel(user)}`
                       : recommendation
                         ? `AI ${cullingLabel(recommendation.decision)} · #${recommendation.group_rank}`
                         : "Pending evidence";
+                  const technicalEvidence = recommendation
+                    ? `Technical ${Math.round(recommendation.quality_score * 100)}/100`
+                    : null;
+                  const reasonEvidence = recommendation?.reasons
+                    ?.slice(0, 2)
+                    .map(cullingReasonLabel)
+                    .join(" · ");
+                  const portraitEvidence = recommendation?.portrait_evidence;
+                  const peopleEvidence =
+                    portraitEvidence && (portraitEvidence.person_count > 0 || portraitEvidence.face_count > 0)
+                      ? `${portraitEvidence.person_count} people · ${portraitEvidence.face_count} faces`
+                      : null;
                   return (
                     <button
-                      className={`reference-candidate ${selected ? "selected" : ""}`}
+                      className={`reference-candidate ${selected ? "selected" : ""} ${recommended ? "recommended" : ""}`}
                       key={assetId}
                       disabled={!bridge?.setGroupReference}
                       onClick={() => void setReferencePhoto(group.id, assetId)}
@@ -1381,8 +1407,22 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       ) : (
                         <div className="reference-candidate-placeholder">RAW</div>
                       )}
+                      <div className="reference-candidate-badges">
+                        {recommended && <em>Best starting point</em>}
+                        {selected && <em>Selected</em>}
+                      </div>
                       <span>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</span>
                       <small>{evidence}</small>
+                      {technicalEvidence && (
+                        <small className="reference-candidate-metric">
+                          {technicalEvidence}{reasonEvidence ? ` · ${reasonEvidence}` : ""}
+                        </small>
+                      )}
+                      {peopleEvidence && (
+                        <small className="reference-candidate-context">
+                          {peopleEvidence} · context only
+                        </small>
+                      )}
                     </button>
                   );
                 })}

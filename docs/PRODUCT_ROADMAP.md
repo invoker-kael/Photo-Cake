@@ -30,6 +30,7 @@ Current code already contains substantial reusable groundwork:
 - local model loading, segmentation and embeddings;
 - cached technical culling evidence, group-relative duplicate ranking and persisted photographer decisions;
 - ReferenceSet and StyleProfile, plus persistent per-group reference selection and editable exposure/contrast/saturation preferences;
+- reference candidate shortlist ordering that respects photographer Cull decisions first, then reuses measured technical quality and group rank, while showing people/face evidence as context only;
 - adaptive `color_sync`;
 - target-bound per-photo Recipe materialization plus persisted additive per-photo review overrides;
 - Lightroom XMP document and same-basename sidecar writing;
@@ -72,7 +73,7 @@ Acceptance: a large burst or event reduces to sensible Keep/Review/RejectSuggest
 - tune moment-group thresholds using real shoots;
 - use scene tags/embeddings/person evidence for semantic refinement;
 - preserve manual locks;
-- surface reference candidates;
+- surface and explain reference candidates; the workstation shortlist now prioritizes photographer decisions, then AI class, measured technical quality and group rank, while people/face evidence remains context-only;
 - support reusable external reference sets;
 - allow multiple looks for one project.
 

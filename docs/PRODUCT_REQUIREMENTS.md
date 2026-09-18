@@ -76,6 +76,8 @@ Multiple reference sets may coexist for different looks/scenes. The photographer
 
 Selecting a reference does not itself imply that edits are applied. On Windows the photographer can persist group-level exposure bias, contrast and saturation in the ReferenceSet StyleProfile; changing the selected reference preserves those preferences. White-balance controls remain unavailable until reliable RAW/metadata evidence exists, so Photo-Cake never fabricates Kelvin/tint merely to populate XMP.
 
+Reference candidate ordering must remain evidence-backed and photographer-first. Exclude photographer-confirmed Reject items, prioritize explicit photographer Keep decisions, then reuse the existing AI Keep/Review class, measured technical quality score and group-relative rank. Do not invent a separate reference-confidence score. Existing people/face evidence may be displayed as context but must not silently change candidate ranking. AI RejectSuggestion remains advisory and may stay available as a last-resort candidate when the photographer has not rejected it.
+
 ## Recipe Requirements
 
 Recipe is the canonical editable representation of Photo-Cake decisions.

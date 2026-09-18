@@ -140,6 +140,8 @@ Treat `CullingReviewStore` as authoritative for explicit photographer Keep/Revie
 
 The workstation already persists per-group reference selection through `ReferenceStore`. Preserve the selected `ReferenceSet` and its `StyleProfile` when the photographer changes the chosen photo. Do not generate adaptive white-balance/XMP values from an invented preview-derived Kelvin estimate; wire real color evidence first, then call the existing `ReferenceSet::resolve_group` → Recipe → XMP chain.
 
+For Reference candidate ordering, reuse Cull evidence rather than creating another inference path: photographer decisions are authoritative, AI Keep/Review/RejectSuggestion remains advisory, measured `quality_score` and `group_rank` may break ties, and people/face evidence is display-only context unless an explicit later rule says otherwise. Never convert segmentation evidence into a hidden preference for portraits.
+
 
 ## Partial Color Evidence Rule
 

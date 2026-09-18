@@ -118,6 +118,7 @@ Default storage behavior:
 - keep existing RAW files in place;
 - create previews/caches in managed application data;
 - create small XMP sidecars only when the user applies/handoffs edits;
+- preflight a batch before sidecar writing and never silently overwrite an existing Lightroom XMP;
 - do not automatically create full-size TIFF/JPEG working copies;
 - direct export creates rendered files only when requested.
 

@@ -13,7 +13,7 @@ use photo_core::{
     StyleProfile,
 };
 use photo_inference::LocalAnalyzeExecutor;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
@@ -100,6 +100,16 @@ struct LightroomHandoffResult {
 #[derive(Clone, Serialize)]
 struct LightroomBatchHandoffResult {
     groups: Vec<LightroomHandoffResult>,
+}
+#[derive(Clone, Deserialize)]
+struct RecipeReviewBatchItem {
+    group_id: String,
+    asset_id: String,
+}
+
+#[derive(Clone, Serialize)]
+struct RecipeReviewBatchResult {
+    asset_ids: Vec<Uuid>,
 }
 
 #[derive(Clone, Serialize)]
@@ -946,6 +956,57 @@ fn set_recipe_reviewed(
 }
 
 #[tauri::command]
+fn confirm_recipe_reviews(
+    items: Vec<RecipeReviewBatchItem>,
+    state: State<'_, AppState>,
+) -> Result<RecipeReviewBatchResult, String> {
+    if items.is_empty() {
+        return Err("no Recipe reviews selected for batch confirmation".to_string());
+    }
+
+    let mut seen_assets = HashSet::with_capacity(items.len());
+    let mut requested: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for item in items {
+        let group_id = Uuid::parse_str(&item.group_id)
+            .map_err(|error| format!("invalid group id: {error}"))?;
+        let asset_id = Uuid::parse_str(&item.asset_id)
+            .map_err(|error| format!("invalid asset id: {error}"))?;
+        if !seen_assets.insert(asset_id) {
+            return Err(format!("duplicate Recipe review asset: {asset_id}"));
+        }
+        requested.entry(group_id).or_default().push(asset_id);
+    }
+
+    let mut recipes_to_confirm = Vec::with_capacity(seen_assets.len());
+    for (group_id, asset_ids) in requested {
+        let (editable, recipes) = resolve_reviewed_group_recipes(group_id, &state)?;
+        for asset_id in asset_ids {
+            if !editable.asset_ids.contains(&asset_id) {
+                return Err(format!(
+                    "photo {asset_id} is not an editable member of group {group_id}"
+                ));
+            }
+            let recipe = recipes
+                .iter()
+                .find(|recipe| recipe.target_asset_id == Some(asset_id))
+                .ok_or_else(|| format!("adaptive Recipe not found for asset {asset_id}"))?;
+            recipes_to_confirm.push(recipe.clone());
+        }
+    }
+
+    let confirmations = state
+        .recipe_reviews
+        .confirm_recipes(&recipes_to_confirm)
+        .map_err(|error| error.to_string())?;
+    Ok(RecipeReviewBatchResult {
+        asset_ids: confirmations
+            .into_iter()
+            .map(|confirmation| confirmation.asset_id)
+            .collect(),
+    })
+}
+
+#[tauri::command]
 fn clear_recipe_reviewed(
     asset_id: String,
     state: State<'_, AppState>,
@@ -1368,6 +1429,7 @@ pub fn run() {
             copy_group_reference_style,
             batch_reference_previews,
             set_recipe_reviewed,
+            confirm_recipe_reviews,
             clear_recipe_reviewed,
             render_group_recipe_preview,
             preflight_group_reference_xmp,

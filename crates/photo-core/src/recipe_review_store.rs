@@ -1,6 +1,7 @@
 use crate::Recipe;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
@@ -119,6 +120,8 @@ pub enum RecipeReviewStoreError {
     Uuid(#[from] uuid::Error),
     #[error("recipe {0} is not bound to a target asset")]
     RecipeMissingTarget(Uuid),
+    #[error("duplicate recipe review confirmation for asset {0}")]
+    DuplicateConfirmation(Uuid),
     #[error(
         "recipe {recipe_id} targets {recipe_asset_id}, but review override belongs to {override_asset_id}"
     )]
@@ -222,32 +225,56 @@ impl RecipeReviewStore {
         &self,
         recipe: &Recipe,
     ) -> Result<RecipeReviewConfirmation, RecipeReviewStoreError> {
-        let asset_id = recipe
-            .target_asset_id
-            .ok_or(RecipeReviewStoreError::RecipeMissingTarget(recipe.id))?;
-        let recipe_fingerprint = recipe_review_fingerprint(recipe)?;
-        let confirmation = RecipeReviewConfirmation {
-            asset_id,
-            recipe_fingerprint,
-        };
-
-        let conn = self.connect()?;
-        conn.execute(
-            "INSERT INTO recipe_review_confirmations
-             (asset_id, recipe_fingerprint, updated_at_unix_ms)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(asset_id) DO UPDATE SET
-                 recipe_fingerprint = excluded.recipe_fingerprint,
-                 updated_at_unix_ms = excluded.updated_at_unix_ms",
-            params![
-                confirmation.asset_id.to_string(),
-                confirmation.recipe_fingerprint,
-                unix_time_ms()
-            ],
-        )?;
-        Ok(confirmation)
+        Ok(self
+            .confirm_recipes(std::slice::from_ref(recipe))?
+            .pop()
+            .expect("single recipe confirmation must produce one result"))
     }
 
+    pub fn confirm_recipes(
+        &self,
+        recipes: &[Recipe],
+    ) -> Result<Vec<RecipeReviewConfirmation>, RecipeReviewStoreError> {
+        if recipes.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut seen = HashSet::with_capacity(recipes.len());
+        let mut confirmations = Vec::with_capacity(recipes.len());
+        for recipe in recipes {
+            let asset_id = recipe
+                .target_asset_id
+                .ok_or(RecipeReviewStoreError::RecipeMissingTarget(recipe.id))?;
+            if !seen.insert(asset_id) {
+                return Err(RecipeReviewStoreError::DuplicateConfirmation(asset_id));
+            }
+            confirmations.push(RecipeReviewConfirmation {
+                asset_id,
+                recipe_fingerprint: recipe_review_fingerprint(recipe)?,
+            });
+        }
+
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        let updated_at = unix_time_ms();
+        for confirmation in &confirmations {
+            tx.execute(
+                "INSERT INTO recipe_review_confirmations
+                 (asset_id, recipe_fingerprint, updated_at_unix_ms)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(asset_id) DO UPDATE SET
+                     recipe_fingerprint = excluded.recipe_fingerprint,
+                     updated_at_unix_ms = excluded.updated_at_unix_ms",
+                params![
+                    confirmation.asset_id.to_string(),
+                    confirmation.recipe_fingerprint,
+                    updated_at
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(confirmations)
+    }
     pub fn is_recipe_confirmed(
         &self,
         recipe: &Recipe,
@@ -416,6 +443,48 @@ mod tests {
         assert!(!store.is_recipe_confirmed(&current).unwrap());
     }
 
+    #[test]
+    fn batch_confirmations_commit_together() {
+        let dir = tempdir().unwrap();
+        let store = RecipeReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let first = recipe(Uuid::new_v4());
+        let second = recipe(Uuid::new_v4());
+
+        let confirmed = store.confirm_recipes(&[first.clone(), second.clone()]).unwrap();
+        assert_eq!(confirmed.len(), 2);
+        assert!(store.is_recipe_confirmed(&first).unwrap());
+        assert!(store.is_recipe_confirmed(&second).unwrap());
+    }
+
+    #[test]
+    fn batch_confirmation_validates_every_recipe_before_write() {
+        let dir = tempdir().unwrap();
+        let store = RecipeReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let valid = recipe(Uuid::new_v4());
+        let mut invalid = recipe(Uuid::new_v4());
+        invalid.target_asset_id = None;
+
+        assert!(matches!(
+            store.confirm_recipes(&[valid.clone(), invalid]).unwrap_err(),
+            RecipeReviewStoreError::RecipeMissingTarget(_)
+        ));
+        assert!(!store.is_recipe_confirmed(&valid).unwrap());
+    }
+
+    #[test]
+    fn batch_confirmation_rejects_duplicate_assets_before_write() {
+        let dir = tempdir().unwrap();
+        let store = RecipeReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let first = recipe(Uuid::new_v4());
+        let mut duplicate = first.clone();
+        duplicate.id = Uuid::new_v4();
+
+        assert!(matches!(
+            store.confirm_recipes(&[first.clone(), duplicate]).unwrap_err(),
+            RecipeReviewStoreError::DuplicateConfirmation(asset_id) if asset_id == first.target_asset_id.unwrap()
+        ));
+        assert!(!store.is_recipe_confirmed(&first).unwrap());
+    }
     #[test]
     fn override_cannot_move_to_another_recipe_target() {
         let mut target = recipe(Uuid::new_v4());

@@ -238,6 +238,16 @@ A photographer can explicitly mark the current adaptive Recipe as "Looks good" w
 
 A matching confirmation removes that photo from Recipe Triage. If the Reference, group style, adaptive result or per-photo override changes, the fingerprint no longer matches and the photo automatically returns to attention. The photographer can also reopen a confirmed review manually. Lightroom handoff reports remaining review-attention items but does not block the photographer from writing XMP.
 
+### Batch Recipe review completion
+
+Recipe Review exposes an explicit `Confirm visible` action for large shoots. In Triage it confirms only the currently surfaced attention set; in All it confirms every currently visible, unconfirmed adaptive Recipe. Existing confirmations are skipped rather than rewritten.
+
+The UI sends only group and asset identities. The workstation resolves the current canonical final Recipes again from project state, validates that every requested photo is still editable and belongs to the requested group, rejects duplicate asset requests, and only then asks the core store to persist confirmations.
+
+The core computes every Recipe fingerprint before opening the write transaction and persists the complete set in one SQLite transaction. Any invalid Recipe, missing target, duplicate target or storage failure leaves the batch unconfirmed instead of producing a partial review state. Individual `Looks good` and `Reopen review` actions remain available for deliberate exceptions.
+
+Review exposes attention, confirmed, per-photo exception and skipped-Reject counts at a glance. Lightroom handoff carries the remaining attention count forward as delivery context, but it remains advisory rather than a hard XMP gate.
+
 ### Direct export boundary
 
 The existing direct-export core provides collision-safe planning, checkpoints and a baseline raster renderer for already-decoded images. It is not yet a production RAW demosaic/edit renderer. The Windows photography workflow must therefore keep Lightroom XMP as the real RAW handoff and must not expose a misleading "Direct Export" action until canonical Recipe evaluation can be rendered from RAW with reliable color/metadata behavior.

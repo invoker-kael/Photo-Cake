@@ -13,6 +13,8 @@ import {
   type BackendPhotoContext,
   type BackendRawMetadataEvidence,
   type BackendReferenceBinding,
+  type BackendRecipeReviewBatchItem,
+  type BackendRecipeReviewBatchResult,
   type BackendRecipeReviewOverride,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
@@ -36,6 +38,8 @@ export type {
   BackendPhotoContext,
   BackendRawImportResult,
   BackendReferenceBinding,
+  BackendRecipeReviewBatchItem,
+  BackendRecipeReviewBatchResult,
   BackendRecipeReviewOverride,
   BackendReviewRenderResult,
   BackendSemanticRefinementReport,
@@ -194,6 +198,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
   const [styleCopySources, setStyleCopySources] = useState<Record<string, string>>({});
   const [reviewUpdating, setReviewUpdating] = useState<string | null>(null);
+  const [reviewBatchUpdating, setReviewBatchUpdating] = useState(false);
   const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
   const [handoffPreflightLoading, setHandoffPreflightLoading] = useState(false);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
@@ -597,6 +602,44 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       return "AI cull: Review";
     }
     return "Adaptive Recipe";
+  };
+
+  const recipeReviewItems = (photoContext?.groups ?? []).flatMap((group) => {
+    const preview = referencePreviews[group.id];
+    if (!preview || preview.pending_asset_id) return [];
+    return preview.recipes.flatMap((recipe) => {
+      const assetId = recipe.target_asset_id;
+      if (!assetId || cullingReviews[assetId] === "REJECT") return [];
+      return [{
+        group_id: group.id,
+        asset_id: assetId,
+        reviewed: reviewedRecipeAssetIds.has(assetId),
+        attention: recipeReviewPriority(assetId) < 10,
+        exception: recipeReviews[assetId] != null,
+      }];
+    });
+  });
+
+  const visibleRecipeReviewItems: BackendRecipeReviewBatchItem[] = recipeReviewItems
+    .filter(
+      (item) =>
+        !item.reviewed &&
+        (reviewViewMode === "ALL" || item.attention),
+    )
+    .map(({ group_id, asset_id }) => ({ group_id, asset_id }));
+
+  const rejectedReviewCount = new Set(
+    (photoContext?.groups ?? []).flatMap((group) =>
+      group.asset_ids.filter((assetId) => cullingReviews[assetId] === "REJECT"),
+    ),
+  ).size;
+
+  const recipeReviewSummary = {
+    total: recipeReviewItems.length,
+    attention: recipeReviewItems.filter((item) => item.attention).length,
+    confirmed: recipeReviewItems.filter((item) => item.reviewed).length,
+    exceptions: recipeReviewItems.filter((item) => item.exception).length,
+    rejected: rejectedReviewCount,
   };
 
   const cullingGroupNumbers = useMemo(
@@ -1053,6 +1096,36 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       setBackendError(String(error));
     } finally {
       setReviewUpdating(null);
+    }
+  };
+
+  const confirmVisibleRecipeReviews = async () => {
+    if (!bridge?.confirmRecipeReviews || visibleRecipeReviewItems.length === 0) return;
+    setReviewBatchUpdating(true);
+    try {
+      const result: BackendRecipeReviewBatchResult =
+        await bridge.confirmRecipeReviews(visibleRecipeReviewItems);
+      const confirmed = new Set(result.asset_ids);
+      setReferencePreviews((current) => {
+        const next = { ...current };
+        for (const item of visibleRecipeReviewItems) {
+          if (!confirmed.has(item.asset_id)) continue;
+          const preview = next[item.group_id];
+          if (!preview) continue;
+          const reviewedIds = new Set(preview.reviewed_asset_ids ?? []);
+          reviewedIds.add(item.asset_id);
+          next[item.group_id] = {
+            ...preview,
+            reviewed_asset_ids: Array.from(reviewedIds),
+          };
+        }
+        return next;
+      });
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setReviewBatchUpdating(false);
     }
   };
 
@@ -1689,22 +1762,45 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <strong>Recipe review</strong>
         <span>Group style stays shared · only photo-specific exceptions are stored here</span>
       </div>
+      <div className="review-summary">
+        <div><span>Attention</span><strong>{recipeReviewSummary.attention}</strong></div>
+        <div><span>Confirmed</span><strong>{recipeReviewSummary.confirmed}</strong></div>
+        <div><span>Exceptions</span><strong>{recipeReviewSummary.exceptions}</strong></div>
+        <div><span>Reject skipped</span><strong>{recipeReviewSummary.rejected}</strong></div>
+      </div>
       <div className="cull-toolbar">
         <span>
           {reviewViewMode === "TRIAGE"
             ? "Triage reuses Cull decisions and saved per-photo exceptions so attention goes to uncertain photos first."
             : "All shows every adaptive Recipe, including photos already considered straightforward."}
         </span>
-        <div className="cull-view-switch" role="group" aria-label="Recipe review view mode">
-          {(["TRIAGE", "ALL"] as ReviewViewMode[]).map((viewMode) => (
-            <button
-              className={reviewViewMode === viewMode ? "active" : ""}
-              key={viewMode}
-              onClick={() => setReviewViewMode(viewMode)}
-            >
-              {viewMode === "TRIAGE" ? "Triage" : "All"}
-            </button>
-          ))}
+        <div className="cull-toolbar-actions">
+          <button
+            className="cull-batch-action"
+            disabled={
+              reviewBatchUpdating ||
+              reviewUpdating != null ||
+              !bridge?.confirmRecipeReviews ||
+              visibleRecipeReviewItems.length === 0
+            }
+            onClick={() => void confirmVisibleRecipeReviews()}
+          >
+            {reviewBatchUpdating
+              ? "Confirming…"
+              : `Confirm visible (${visibleRecipeReviewItems.length})`}
+          </button>
+          <div className="cull-view-switch" role="group" aria-label="Recipe review view mode">
+            {(["TRIAGE", "ALL"] as ReviewViewMode[]).map((viewMode) => (
+              <button
+                className={reviewViewMode === viewMode ? "active" : ""}
+                key={viewMode}
+                disabled={reviewBatchUpdating}
+                onClick={() => setReviewViewMode(viewMode)}
+              >
+                {viewMode === "TRIAGE" ? "Triage" : "All"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div className="recipe-review-groups">
@@ -1759,15 +1855,28 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         Number.MAX_SAFE_INTEGER)
                     );
                   });
+          const groupAttentionCount = recipesWithTargets.filter(
+            (recipe) =>
+              recipe.target_asset_id != null &&
+              recipeReviewPriority(recipe.target_asset_id) < 10,
+          ).length;
+          const groupConfirmedCount = recipesWithTargets.filter(
+            (recipe) =>
+              recipe.target_asset_id != null &&
+              reviewedRecipeAssetIds.has(recipe.target_asset_id),
+          ).length;
+          const groupExceptionCount = recipesWithTargets.filter(
+            (recipe) =>
+              recipe.target_asset_id != null &&
+              recipeReviews[recipe.target_asset_id] != null,
+          ).length;
 
           return (
             <div className="recipe-review-group" key={group.id}>
               <div className="recipe-review-head">
                 <strong>Group {groupIndex + 1}</strong>
                 <span>
-                  {reviewViewMode === "TRIAGE"
-                    ? `${reviewRecipes.length} attention · ${recipesWithTargets.length} total Recipes`
-                    : `${recipesWithTargets.length} adaptive Recipes`}
+                  {`${groupAttentionCount} attention · ${groupConfirmedCount} confirmed · ${groupExceptionCount} exceptions · ${recipesWithTargets.length} total`}
                 </span>
               </div>
               {reviewViewMode === "TRIAGE" && reviewRecipes.length === 0 && (
@@ -1810,7 +1919,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           ) : (
                             <button
                               className="recipe-preview-button"
-                              disabled={updating || !bridge?.renderRecipePreview}
+                              disabled={updating || reviewBatchUpdating || !bridge?.renderRecipePreview}
                               onClick={() => void renderEditedPreview(group.id, assetId)}
                             >
                               {updating ? "Rendering…" : "Render edited preview"}
@@ -1832,27 +1941,27 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       <div className="recipe-review-controls">
                         <div className="mini-adjust">
                           <span>Exposure</span>
-                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "exposure", -0.1)}>−</button>
+                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "exposure", -0.1)}>−</button>
                           <strong>{signed(review?.exposure_delta_ev ?? 0)} EV</strong>
-                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "exposure", 0.1)}>+</button>
+                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "exposure", 0.1)}>+</button>
                         </div>
                         <div className="mini-adjust">
                           <span>Contrast</span>
-                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "contrast", -5)}>−</button>
+                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "contrast", -5)}>−</button>
                           <strong>{signed(review?.contrast_delta ?? 0, 0)}</strong>
-                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "contrast", 5)}>+</button>
+                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "contrast", 5)}>+</button>
                         </div>
                         <div className="mini-adjust">
                           <span>Saturation</span>
-                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "saturation", -5)}>−</button>
+                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "saturation", -5)}>−</button>
                           <strong>{signed(review?.saturation_delta ?? 0, 0)}</strong>
-                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "saturation", 5)}>+</button>
+                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "saturation", 5)}>+</button>
                         </div>
                       </div>
                       <div className="recipe-review-actions">
                         <button
                           className={`review-choice ${reviewed ? "clear" : "keep"}`}
-                          disabled={updating}
+                          disabled={updating || reviewBatchUpdating}
                           onClick={() => void setRecipeReviewed(group.id, assetId, !reviewed)}
                         >
                           {reviewed ? "Reopen review" : "Looks good"}
@@ -1860,7 +1969,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         {review && (
                           <button
                             className="review-choice clear recipe-reset"
-                            disabled={updating}
+                            disabled={updating || reviewBatchUpdating}
                             onClick={() => void resetRecipeReview(assetId)}
                           >
                             Clear exception
@@ -1905,7 +2014,12 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           preflight.current_sidecars.length -
           preflight.conflicting_sidecars.length,
       );
-      return [{ groupId: group.id, conflicts, missing }];
+      const reviewAttention = preview.recipes.filter(
+        (recipe) =>
+          recipe.target_asset_id != null &&
+          recipeReviewPriority(recipe.target_asset_id) < 10,
+      ).length;
+      return [{ groupId: group.id, conflicts, missing, reviewAttention }];
     });
     const batchConflictCount = readyGroups.reduce((total, group) => total + group.conflicts, 0);
     const batchGroupIds = readyGroups
@@ -1913,6 +2027,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       .map((group) => group.groupId);
     const batchMissingCount = readyGroups.reduce(
       (total, group) => total + (group.conflicts === 0 ? group.missing : 0),
+      0,
+    );
+    const batchReviewAttentionCount = readyGroups.reduce(
+      (total, group) => total + group.reviewAttention,
       0,
     );
 
@@ -1929,6 +2047,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           <small>
             All selected groups are preflighted before the first new sidecar is created.
             Matching Photo-Cake XMP stays untouched.
+          </small>
+          <small className={batchReviewAttentionCount > 0 ? "attention-text" : "success-text"}>
+            {batchReviewAttentionCount > 0
+              ? `${batchReviewAttentionCount} Recipe review attention items remain; XMP handoff stays available by design.`
+              : "Recipe review attention is clear for ready groups."}
           </small>
           {batchConflictCount > 0 && (
             <small className="error-text">

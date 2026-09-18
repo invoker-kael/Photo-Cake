@@ -228,6 +228,15 @@ export interface BackendRecipeReviewOverride {
   saturation_delta: number;
 }
 
+export interface BackendRecipeReviewBatchItem {
+  group_id: string;
+  asset_id: string;
+}
+
+export interface BackendRecipeReviewBatchResult {
+  asset_ids: string[];
+}
+
 export interface BackendReviewRenderResult {
   asset_id: string;
   recipe_id: string;
@@ -266,6 +275,7 @@ export interface PhotoCakeBridge {
   ): Promise<BackendRecipeReviewOverride>;
   clearRecipeReview?(assetId: string): Promise<void>;
   setRecipeReviewed?(groupId: string, assetId: string): Promise<void>;
+  confirmRecipeReviews?(items: BackendRecipeReviewBatchItem[]): Promise<BackendRecipeReviewBatchResult>;
   clearRecipeReviewed?(assetId: string): Promise<void>;
   renderRecipePreview?(groupId: string, assetId: string): Promise<BackendReviewRenderResult>;
   loadReferenceStyles?(batchId: string): Promise<BackendGroupReferenceStyle[]>;

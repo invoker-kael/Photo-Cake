@@ -148,3 +148,6 @@ Lightroom handoff is now idempotent for Photo-Cake-owned edit state: matching ex
 
 
 Batch Lightroom handoff now closes the large-shoot delivery loop: the workstation can write all currently ready groups in one action, preflights the full selected set before the first write, preserves already-current Photo-Cake sidecars, and rolls back sidecars newly created earlier in the batch if a later group hits a race-time conflict or write failure.
+
+
+Recipe review now supports large-shoot completion as one explicit workflow unit: `Confirm visible` re-resolves canonical final Recipes on the workstation, validates the full requested set, and persists all fingerprints transactionally. Review surfaces attention/confirmed/exception/Reject-skipped counts, and Lightroom carries remaining review attention into the delivery summary without turning it into a mandatory gate.

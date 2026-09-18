@@ -19,6 +19,7 @@ pub mod handoff;
 pub mod handoff_store;
 pub mod importer;
 pub mod metadata;
+pub mod metadata_store;
 pub mod models;
 pub mod pipeline;
 pub mod preview;
@@ -82,7 +83,12 @@ pub use handoff::{
 };
 pub use handoff_store::{HandoffStore, HandoffStoreError};
 pub use importer::{RawImportError, RawImportResult, RawImporter};
-pub use metadata::{read_raw_metadata, RawMetadataEvidence};
+pub use metadata::{
+    read_raw_metadata, RawMetadataEvidence, RawRational, RawWhiteBalanceEvidence,
+};
+pub use metadata_store::{
+    AssetMetadataEvidence, RawMetadataStore, RawMetadataStoreError,
+};
 pub use models::{
     BundledModelSpec, ModelBundleManifest, ModelPlatform, ModelVariant,
 };

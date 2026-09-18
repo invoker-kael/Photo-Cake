@@ -168,3 +168,8 @@ Review can render a small edited preview from the already-cached embedded RAW JP
 ## RAW Metadata Evidence
 
 Import performs a best-effort, read-only EXIF metadata pass before initial grouping. Standard `DateTimeOriginal`/`DateTime` populates the capture timeline and Make/Model forms camera identity; unreadable or unsupported containers fall back to the existing file timestamp without blocking import. EXIF white-balance mode alone is not sufficient to synthesize Lightroom temperature/tint, so Photo-Cake still leaves WB untouched until reliable numeric RAW/color evidence exists.
+
+
+## Portrait Culling Evidence
+
+Cull may surface cached portrait evidence already produced by local segmentation: detected people/faces, primary-subject ratio and people confidence. These values are advisory context and do not replace technical quality scoring or photographer decisions. Photo-Cake must not label eyes as closed/open or infer expression quality until a dedicated reliable model provides that evidence.

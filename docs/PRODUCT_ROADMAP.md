@@ -156,3 +156,6 @@ Lightroom delivery is now exception-first as well: after writing, the core verif
 
 
 Reference consistency now scales beyond one target at a time: one group can act as a standard look and synchronize its StyleProfile to multiple selected referenced groups transactionally. The UI uses source-plus-multi-select ergonomics, omits already-matching groups, and then relies on the existing adaptive Recipe and exception-review path rather than introducing a preset-copy editing engine. This closes a common large travel/family workflow: establish look -> synchronize similar contexts -> review only exceptions -> Lightroom handoff.
+
+
+The workstation now has a workflow cockpit instead of a static process legend: canonical batch/project/XMP state is reduced to a deterministic next photographer focus and live per-stage counts. A Continue workflow action jumps directly to the current attention stage while all destructive or photographer-authoritative transitions remain explicit. This adopts the useful “guided batch flow” behavior of mature AI photo editors without adding a generic node builder or a second workflow engine.

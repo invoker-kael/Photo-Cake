@@ -18,6 +18,7 @@ import {
   type BackendRecipeReviewOverride,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
+  type BackendWorkflowStatus,
   type BackendStyleProfile,
   type BatchJob,
   type BatchStage,
@@ -25,6 +26,7 @@ import {
   type CullingReason,
   type CullingUserDecision,
   type PhotoCakeBridge,
+  type WorkflowFocus,
 } from "./batch";
 
 export type {
@@ -33,6 +35,7 @@ export type {
   BackendGroupCullingResult,
   BackendGroupReferencePreview,
   BackendGroupReferenceStyle,
+  BackendGroupReferenceStyleBatchResult,
   BackendLightroomBatchHandoffResult,
   BackendLightroomHandoffPreflight,
   BackendLightroomHandoffResult,
@@ -44,14 +47,73 @@ export type {
   BackendRecipeReviewOverride,
   BackendReviewRenderResult,
   BackendSemanticRefinementReport,
+  BackendWorkflowStatus,
   BatchWorkerEvent,
   PhotoCakeBridge,
+  WorkflowFocus,
 } from "./batch";
 
 type WorkspaceView = "library" | "cull" | "groups" | "reference" | "review" | "lightroom";
 type CullViewMode = "TRIAGE" | "ALL";
 type ReviewViewMode = "TRIAGE" | "ALL";
 type LightroomViewMode = "NEEDS_ACTION" | "ALL";
+
+const workflowFocusOrder: Record<WorkflowFocus, number> = {
+  PREPARE: 0,
+  CULL: 1,
+  REFERENCE: 3,
+  REVIEW: 5,
+  LIGHTROOM: 6,
+  COMPLETE: 7,
+};
+
+function workflowFocusLabel(focus: WorkflowFocus) {
+  const labels: Record<WorkflowFocus, string> = {
+    PREPARE: "Import & analyze",
+    CULL: "Cull attention",
+    REFERENCE: "Choose references",
+    REVIEW: "Review exceptions",
+    LIGHTROOM: "Lightroom handoff",
+    COMPLETE: "Delivery current",
+  };
+  return labels[focus];
+}
+
+function workflowFocusView(focus: WorkflowFocus): WorkspaceView {
+  switch (focus) {
+    case "PREPARE":
+      return "library";
+    case "CULL":
+      return "cull";
+    case "REFERENCE":
+      return "reference";
+    case "REVIEW":
+      return "review";
+    case "LIGHTROOM":
+    case "COMPLETE":
+      return "lightroom";
+  }
+}
+
+function workflowFocusDetail(status: BackendWorkflowStatus) {
+  const facts = status.facts;
+  switch (status.next_focus) {
+    case "PREPARE":
+      return facts.preparation_failed > 0
+        ? `${facts.preparation_failed} failed · ${facts.preparation_active} still preparing`
+        : `${facts.preparation_active} photos still preparing`;
+    case "CULL":
+      return `${facts.cull_attention} cull attention · ${facts.cull_pending} waiting for evidence`;
+    case "REFERENCE":
+      return `${facts.reference_attention_groups} groups need a usable Reference`;
+    case "REVIEW":
+      return `${facts.review_attention} Recipe attention · ${facts.review_pending_groups} groups waiting for evidence`;
+    case "LIGHTROOM":
+      return `${facts.lightroom_conflict_groups} conflict groups · ${facts.lightroom_missing_sidecars} missing XMP · ${facts.lightroom_unresolved_groups} unresolved`;
+    case "COMPLETE":
+      return `${facts.lightroom_current_groups} groups are current for Lightroom delivery`;
+  }
+}
 
 const stageProgress: Record<BatchStage, number> = {
   IMPORT: 5,
@@ -202,6 +264,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [importNote, setImportNote] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [photoContext, setPhotoContext] = useState<BackendPhotoContext | null>(null);
+  const [workflowStatus, setWorkflowStatus] = useState<BackendWorkflowStatus | null>(null);
   const [culling, setCulling] = useState<BackendGroupCullingResult[]>([]);
   const [cullingReviews, setCullingReviews] = useState<Record<string, CullingUserDecision>>({});
   const [cullingLoading, setCullingLoading] = useState(false);
@@ -523,6 +586,43 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   useEffect(() => {
     setHandoffResults({});
   }, [activeBatchId, cullingReviews, recipeReviews, referenceBindings, referenceStyles, groupRevision]);
+
+  useEffect(() => {
+    if (!bridge?.loadWorkflowStatus || !activeBatchId || mode !== "workstation") {
+      setWorkflowStatus(null);
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadWorkflowStatus(activeBatchId)
+      .then((status) => {
+        if (!disposed) {
+          setWorkflowStatus(status);
+          setBackendError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    activeBatchId,
+    analysisRevision,
+    bridge,
+    cullingReviews,
+    groupRevision,
+    handoffPreflights,
+    handoffResults,
+    mode,
+    recipeReviews,
+    referenceBindings,
+    referencePreviews,
+    referenceStyles,
+  ]);
 
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
@@ -1242,6 +1342,87 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     }
   };
 
+  const workflowNextView =
+    workflowStatus && workflowStatus.next_focus !== "COMPLETE"
+      ? workflowFocusView(workflowStatus.next_focus)
+      : null;
+  const workflowNextOrder = workflowStatus
+    ? workflowFocusOrder[workflowStatus.next_focus]
+    : -1;
+  const workflowPanelSteps =
+    mode === "workstation"
+      ? [
+          {
+            number: "1",
+            order: 0,
+            focus: "PREPARE" as WorkflowFocus,
+            title: "Import & analyze",
+            detail: workflowStatus
+              ? `${workflowStatus.facts.preparation_active} preparing · ${workflowStatus.facts.preparation_failed} failed`
+              : "Keep RAW untouched",
+          },
+          {
+            number: "2",
+            order: 1,
+            focus: "CULL" as WorkflowFocus,
+            title: "Cull",
+            detail: workflowStatus
+              ? `${workflowStatus.facts.cull_attention} attention · ${workflowStatus.facts.cull_pending} pending`
+              : "Quality + near-duplicate evidence",
+          },
+          {
+            number: "3",
+            order: 2,
+            focus: null,
+            title: "Group",
+            detail: workflowStatus
+              ? `${workflowStatus.facts.groups_total} effective editing groups`
+              : "Moment → semantic similarity",
+          },
+          {
+            number: "4",
+            order: 3,
+            focus: "REFERENCE" as WorkflowFocus,
+            title: "Reference look",
+            detail: workflowStatus
+              ? `${workflowStatus.facts.reference_attention_groups} groups need attention`
+              : "Your preferred photo/style",
+          },
+          {
+            number: "5",
+            order: 4,
+            focus: null,
+            title: "Adaptive recipe",
+            detail: workflowStatus
+              ? "Canonical Recipe per deliverable photo"
+              : "Different correction per photo",
+          },
+          {
+            number: "6",
+            order: 5,
+            focus: "REVIEW" as WorkflowFocus,
+            title: "Review exceptions",
+            detail: workflowStatus
+              ? `${workflowStatus.facts.review_attention} attention · ${workflowStatus.facts.review_pending_groups} pending groups`
+              : "Persist only per-photo corrections",
+          },
+          {
+            number: "7",
+            order: 6,
+            focus: "LIGHTROOM" as WorkflowFocus,
+            title: "Lightroom XMP",
+            detail: workflowStatus
+              ? `${workflowStatus.facts.lightroom_missing_sidecars} missing · ${workflowStatus.facts.lightroom_conflict_groups} conflicts · ${workflowStatus.facts.lightroom_current_groups} current`
+              : "Verified non-destructive handoff",
+          },
+        ]
+      : [
+          { number: "1", order: 0, focus: null, title: "Library", detail: "Synced project context" },
+          { number: "2", order: 1, focus: null, title: "Cull", detail: "Keep / Review / Reject" },
+          { number: "3", order: 2, focus: null, title: "Groups", detail: "Use effective project groups" },
+          { number: "4", order: 3, focus: null, title: "Reference", detail: "Choose the preferred photo" },
+        ];
+
   const visibleViews: ReadonlyArray<readonly [WorkspaceView, string]> =
     mode === "companion"
       ? [
@@ -1278,9 +1459,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           <div className="overview-card wide">
             <span>Next workflow</span>
             <strong>
-              {mode === "workstation"
-                ? "Cull → Groups → Reference → Review → XMP"
-                : "Cull → Groups → Reference"}
+              {mode === "workstation" && workflowStatus
+                ? workflowFocusLabel(workflowStatus.next_focus)
+                : mode === "workstation"
+                  ? "Cull → Groups → Reference → Review → XMP"
+                  : "Cull → Groups → Reference"}
             </strong>
           </div>
         </section>
@@ -2510,10 +2693,31 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   : "Photography workflow")}
             </h1>
             <p>{summary.done}/{summary.total} ready · {summary.running} analyzing · {summary.failed} failed</p>
+            {mode === "workstation" && workflowStatus && (
+              <p className={workflowStatus.next_focus === "COMPLETE" ? "success-text" : "workflow-next-summary"}>
+                {workflowStatus.next_focus === "COMPLETE"
+                  ? workflowFocusDetail(workflowStatus)
+                  : `Next: ${workflowFocusLabel(workflowStatus.next_focus)} · ${workflowFocusDetail(workflowStatus)}`}
+              </p>
+            )}
             {importNote && <p className="success-text">{importNote}</p>}
             {backendError && <p className="error-text">{backendError}</p>}
           </div>
           <div className="batch-controls">
+            {mode === "workstation" && workflowStatus?.next_focus === "COMPLETE" && (
+              <span className="workflow-complete-pill">Delivery current</span>
+            )}
+            {mode === "workstation" &&
+              workflowStatus &&
+              workflowNextView &&
+              workflowNextView !== activeView && (
+              <button
+                className="button primary"
+                onClick={() => setActiveView(workflowNextView)}
+              >
+                Continue: {workflowFocusLabel(workflowStatus.next_focus)}
+              </button>
+            )}
             {mode === "workstation" && bridge?.runBatch && activeBatch && summary.pending > 0 && summary.running === 0 && !isPaused && (
               <button className="button primary" onClick={startOrContinue}>Analyze / Continue</button>
             )}
@@ -2546,32 +2750,42 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             : "Companion reuses the same project decisions for mobile culling and reference selection. RAW analysis, Recipe editing and Lightroom handoff remain on the workstation."}
         </p>
 
+        {mode === "workstation" && workflowStatus && (
+          <div className={`workflow-focus-card ${workflowStatus.next_focus === "COMPLETE" ? "complete" : ""}`}>
+            <span>{workflowStatus.next_focus === "COMPLETE" ? "Current state" : "Next photographer action"}</span>
+            <strong>{workflowFocusLabel(workflowStatus.next_focus)}</strong>
+            <small>{workflowFocusDetail(workflowStatus)}</small>
+            {workflowNextView && (
+              <button className="review-choice keep" onClick={() => setActiveView(workflowNextView)}>
+                Open {workflowFocusLabel(workflowStatus.next_focus)}
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="workflow-list">
-          {(mode === "workstation"
-            ? [
-                ["1", "Import & analyze", "Keep RAW untouched"],
-                ["2", "Cull", "Quality + near-duplicate evidence"],
-                ["3", "Group", "Moment → semantic similarity"],
-                ["4", "Reference look", "Your preferred photo/style"],
-                ["5", "Adaptive recipe", "Different correction per photo"],
-                ["6", "Review exceptions", "Persist only per-photo corrections"],
-                ["7", "Lightroom XMP", "Or direct export on demand"],
-              ]
-            : [
-                ["1", "Library", "Synced project context"],
-                ["2", "Cull", "Keep / Review / Reject"],
-                ["3", "Groups", "Use effective project groups"],
-                ["4", "Reference", "Choose the preferred photo"],
-              ]
-          ).map(([number, title, detail]) => (
-            <div className="workflow-step" key={number}>
-              <span className="workflow-number">{number}</span>
-              <div>
-                <strong>{title}</strong>
-                <small>{detail}</small>
+          {workflowPanelSteps.map((step) => {
+            const active =
+              workflowStatus != null &&
+              step.focus != null &&
+              workflowStatus.next_focus === step.focus;
+            const complete =
+              workflowStatus != null &&
+              (workflowStatus.next_focus === "COMPLETE" ||
+                workflowNextOrder > step.order);
+            return (
+              <div
+                className={`workflow-step ${active ? "active" : ""} ${complete ? "complete" : ""}`}
+                key={step.number}
+              >
+                <span className="workflow-number">{step.number}</span>
+                <div>
+                  <strong>{step.title}</strong>
+                  <small>{step.detail}</small>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="storage-note">

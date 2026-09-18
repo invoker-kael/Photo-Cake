@@ -353,3 +353,21 @@ verified Lightroom XMP
 ```
 
 No preset-copy renderer or second color pipeline is introduced.
+
+
+## Workflow Cockpit
+
+Photo-Cake exposes a read-only workflow status derived from canonical project state rather than maintaining a second workflow database. The core receives aggregated `WorkflowFacts` and deterministically selects the next photographer focus:
+
+```text
+Prepare
+  -> Cull attention
+  -> Reference attention
+  -> Recipe review attention
+  -> Lightroom delivery attention
+  -> Complete
+```
+
+The Windows workstation assembles those facts from the existing batch queue, culling evidence/reviews, Reference bindings, canonical reviewed Recipes and read-only XMP preflight. Lightroom facts include unresolved groups, existing-sidecar conflicts, missing sidecars and groups whose current Photo-Cake XMP already matches the current Recipes.
+
+This is navigation automation, not decision automation. `Continue workflow` may move the photographer to the most relevant surface, but it never confirms a Cull decision, selects a Reference, accepts a Recipe or writes XMP. The cockpit is intentionally a fixed photography state machine rather than a generic node editor: the goal is to reduce scanning and setup overhead while preserving the existing canonical workflow and explicit photographer gates.

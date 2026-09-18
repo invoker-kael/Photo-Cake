@@ -21,6 +21,7 @@ import App, {
   type BackendRecipeReviewOverride,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
+  type BackendWorkflowStatus,
   type BatchWorkerEvent,
   type PhotoCakeBridge,
 } from "@photo-cake/ui";
@@ -39,6 +40,8 @@ const bridge: PhotoCakeBridge = {
   cancelBatch: (batchId) => invoke<BackendBatch>("cancel_batch", { batchId }),
   refineGroups: (batchId) =>
     invoke<BackendSemanticRefinementReport>("refine_batch_groups", { batchId }),
+  loadWorkflowStatus: (batchId) =>
+    invoke<BackendWorkflowStatus>("batch_workflow_status", { batchId }),
   loadPhotoContext: async (batchId) => {
     const context = await invoke<BackendPhotoContext>("batch_photo_context", { batchId });
     return {

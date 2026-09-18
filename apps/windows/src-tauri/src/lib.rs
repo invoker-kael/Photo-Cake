@@ -1,16 +1,17 @@
 use photo_core::{
     apply_companion_patch as apply_companion_patch_core,
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
+    derive_workflow_status,
     preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
     write_group_sidecars, write_sidecar_batch, AnalysisCache,
     AssetMetadataEvidence, AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor,
     ClassificationStore, CompanionDecisionPatch, CompanionPatchApplyReport, CompanionSnapshot,
-    CompanionSnapshotStore, CullingReview, CullingReviewStore, CullingUserDecision,
+    CompanionSnapshotStore, CullingDecision, CullingReview, CullingReviewStore, CullingUserDecision,
     GroupCullingResult, GroupReferenceBinding, JobStatus, ModelBundleManifest, ModelPlatform,
     PhotoGroup, PreviewArtifact, PreviewStore, RawAsset, RawCatalog, RawImportResult, RawImporter,
     RawMetadataStore, Recipe, RecipeReviewOverride, RecipeReviewStore, ReferenceStore,
     ReferenceWorkflowError, RunStep, SemanticGroupingConfig, SemanticRefinementReport,
-    StyleProfile,
+    StyleProfile, WorkflowFacts, WorkflowStatus,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::{Deserialize, Serialize};
@@ -563,6 +564,209 @@ fn refine_batch_groups(
         SemanticGroupingConfig::default(),
     )
     .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn batch_workflow_status(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<WorkflowStatus, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let batch = state
+        .store
+        .load_batch(batch_id)
+        .map_err(|error| error.to_string())?;
+    let groups = state
+        .catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let assets_by_id = state
+        .catalog
+        .list_assets()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|asset| (asset.id, asset))
+        .collect::<HashMap<_, _>>();
+
+    let mut facts = WorkflowFacts {
+        preparation_active: batch
+            .items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.status,
+                    JobStatus::Pending | JobStatus::Running | JobStatus::Paused | JobStatus::Cancelled
+                )
+            })
+            .count(),
+        preparation_failed: batch
+            .items
+            .iter()
+            .filter(|item| item.status == JobStatus::Failed)
+            .count(),
+        groups_total: groups.len(),
+        ..WorkflowFacts::default()
+    };
+
+    for group in groups {
+        let culling = build_group_culling_result(&state.analysis_cache, &group, 0.98)
+            .map_err(|error| error.to_string())?;
+
+        for asset_id in &culling.pending_asset_ids {
+            if state
+                .culling_reviews
+                .get(*asset_id)
+                .map_err(|error| error.to_string())?
+                .is_none()
+            {
+                facts.cull_pending += 1;
+            }
+        }
+
+        for recommendation in &culling.recommendations {
+            let user_review = state
+                .culling_reviews
+                .get(recommendation.asset_id)
+                .map_err(|error| error.to_string())?;
+            if user_review.is_none() && recommendation.decision != CullingDecision::Keep {
+                facts.cull_attention += 1;
+            }
+        }
+
+        let Some(binding) = state
+            .reference_store
+            .group_binding(group.id)
+            .map_err(|error| error.to_string())?
+        else {
+            facts.reference_attention_groups += 1;
+            facts.lightroom_unresolved_groups += 1;
+            continue;
+        };
+
+        if state
+            .culling_reviews
+            .get(binding.selected_reference_asset_id)
+            .map_err(|error| error.to_string())?
+            .is_some_and(|review| review.decision == CullingUserDecision::Reject)
+        {
+            facts.reference_attention_groups += 1;
+            facts.lightroom_unresolved_groups += 1;
+            continue;
+        }
+
+        let reference_set = state
+            .reference_store
+            .get_set(binding.reference_set_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
+        let editable = editable_group(&group, &state.culling_reviews)?;
+        if editable.asset_ids.is_empty() {
+            facts.reference_attention_groups += 1;
+            facts.lightroom_unresolved_groups += 1;
+            continue;
+        }
+
+        let mut resolved = match reference_set.resolve_group_from_cache(
+            &state.analysis_cache,
+            &editable,
+            binding.selected_reference_asset_id,
+            1,
+        ) {
+            Ok(value) => value,
+            Err(ReferenceWorkflowError::MissingExposureAnalysis(_)) => {
+                facts.review_pending_groups += 1;
+                facts.lightroom_unresolved_groups += 1;
+                continue;
+            }
+            Err(error) => return Err(error.to_string()),
+        };
+        apply_recipe_reviews(&mut resolved.recipes, &state.recipe_reviews)?;
+
+        for recipe in &resolved.recipes {
+            let Some(asset_id) = recipe.target_asset_id else {
+                continue;
+            };
+            if state
+                .recipe_reviews
+                .is_recipe_confirmed(recipe)
+                .map_err(|error| error.to_string())?
+            {
+                continue;
+            }
+
+            let has_exception = state
+                .recipe_reviews
+                .get(asset_id)
+                .map_err(|error| error.to_string())?
+                .is_some();
+            let user_review = state
+                .culling_reviews
+                .get(asset_id)
+                .map_err(|error| error.to_string())?;
+            let ai_attention = user_review.is_none()
+                && culling
+                    .recommendations
+                    .iter()
+                    .find(|candidate| candidate.asset_id == asset_id)
+                    .is_some_and(|candidate| {
+                        matches!(
+                            candidate.decision,
+                            CullingDecision::Review | CullingDecision::RejectSuggestion
+                        )
+                    });
+            if has_exception
+                || user_review
+                    .as_ref()
+                    .is_some_and(|review| review.decision == CullingUserDecision::Review)
+                || ai_attention
+            {
+                facts.review_attention += 1;
+            }
+        }
+
+        if resolved.recipes.is_empty() {
+            facts.lightroom_unresolved_groups += 1;
+            continue;
+        }
+
+        let group_assets = editable
+            .asset_ids
+            .iter()
+            .filter_map(|asset_id| assets_by_id.get(asset_id).cloned())
+            .collect::<Vec<_>>();
+        if group_assets.len() != editable.asset_ids.len() {
+            facts.lightroom_unresolved_groups += 1;
+            continue;
+        }
+
+        let preflight = match preflight_group_sidecars(&group_assets, &resolved.recipes) {
+            Ok(value) => value,
+            Err(_) => {
+                facts.lightroom_unresolved_groups += 1;
+                continue;
+            }
+        };
+        let conflict_count = preflight
+            .iter()
+            .filter(|target| {
+                target.existing_sidecar.is_some() && !target.existing_matches_recipe
+            })
+            .count();
+        let missing_count = preflight
+            .iter()
+            .filter(|target| target.existing_sidecar.is_none())
+            .count();
+
+        if conflict_count > 0 {
+            facts.lightroom_conflict_groups += 1;
+        }
+        facts.lightroom_missing_sidecars += missing_count;
+        if conflict_count == 0 && missing_count == 0 {
+            facts.lightroom_current_groups += 1;
+        }
+    }
+
+    Ok(derive_workflow_status(facts))
 }
 
 #[tauri::command]
@@ -1475,6 +1679,7 @@ pub fn run() {
             apply_companion_decision_patch,
             batch_photo_context,
             refine_batch_groups,
+            batch_workflow_status,
             batch_culling,
             batch_culling_reviews,
             set_culling_review,

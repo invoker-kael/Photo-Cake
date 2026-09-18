@@ -298,3 +298,12 @@ The synchronization copies only the shared StyleProfile preference layer. Every 
 The backend validates the source and every target before writing and persists all selected target StyleProfiles in one transaction. Duplicate targets, the source group appearing as a target, an unknown group or a target without a Reference binding fails the whole operation before partial style changes are committed.
 
 After a successful sync, normal canonical recomputation applies: adaptive Recipes are regenerated from each target group's own Reference/evidence plus the shared look; stale Recipe-review confirmations naturally return to attention; Lightroom preflight and previous session verification are recalculated through the existing state dependencies. Per-photo Recipe exceptions remain separate and continue to override only their own photos.
+
+
+### Workflow cockpit and next action
+
+The workstation should continuously summarize the current batch into one next-action focus without asking the photographer to inspect every workspace manually. The priority order is preparation failures/incomplete analysis, unresolved Cull attention, groups needing a usable Reference, Recipe review attention/pending evidence, then Lightroom delivery conflicts/missing XMP. Only when none remain is the batch shown as delivery-current.
+
+The status is derived read-only from existing project truth. The workflow cockpit does not create a parallel task database and does not mark work complete just because a user visited a page. Counts must come from the same evidence, stores, Recipe fingerprints and XMP preflight used by the underlying views.
+
+A `Continue workflow` action only navigates to the relevant workspace. Photographer-authoritative actions remain explicit: AI Cull suggestions are not silently accepted, References are not auto-selected, Recipe review confirmations are not auto-created and Lightroom XMP is never written automatically. This keeps the speed benefit of a guided batch editor while preserving Photo-Cake's non-destructive decision boundaries.

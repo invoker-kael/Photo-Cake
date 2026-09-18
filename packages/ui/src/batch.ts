@@ -17,6 +17,34 @@ export type JobStatus =
 
 export type QaResult = "PASS" | "REVIEW" | "FAIL" | null;
 
+export type WorkflowFocus =
+  | "PREPARE"
+  | "CULL"
+  | "REFERENCE"
+  | "REVIEW"
+  | "LIGHTROOM"
+  | "COMPLETE";
+
+export interface BackendWorkflowFacts {
+  preparation_active: number;
+  preparation_failed: number;
+  cull_attention: number;
+  cull_pending: number;
+  groups_total: number;
+  reference_attention_groups: number;
+  review_attention: number;
+  review_pending_groups: number;
+  lightroom_conflict_groups: number;
+  lightroom_missing_sidecars: number;
+  lightroom_unresolved_groups: number;
+  lightroom_current_groups: number;
+}
+
+export interface BackendWorkflowStatus {
+  next_focus: WorkflowFocus;
+  facts: BackendWorkflowFacts;
+}
+
 export interface BatchJob {
   id: string;
   filename: string;
@@ -263,6 +291,7 @@ export interface PhotoCakeBridge {
   cancelBatch?(batchId: string): Promise<BackendBatch>;
   importRawDirectory?(): Promise<BackendRawImportResult | null>;
   loadPhotoContext?(batchId: string): Promise<BackendPhotoContext>;
+  loadWorkflowStatus?(batchId: string): Promise<BackendWorkflowStatus>;
   refineGroups?(batchId: string): Promise<BackendSemanticRefinementReport>;
   loadCulling?(batchId: string): Promise<BackendGroupCullingResult[]>;
   loadCullingReviews?(batchId: string): Promise<BackendCullingReview[]>;

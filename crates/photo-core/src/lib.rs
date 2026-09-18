@@ -35,6 +35,7 @@ pub mod runner;
 pub mod semantic_grouping;
 pub mod store;
 pub mod xmp;
+pub mod workflow;
 
 pub use analysis::{
     AnalysisArtifact, AnalysisCache, AnalysisCacheError, AnalysisCacheKey, InferenceBackend,
@@ -128,3 +129,5 @@ pub use xmp::{
     write_group_sidecars, write_recipe_sidecar, write_sidecar_batch, XmpEditState,
     XmpHandoffVerification, XmpParseError, XmpSidecarPreflight, XmpWriteError,
 };
+
+pub use workflow::{derive_workflow_status, WorkflowFacts, WorkflowFocus, WorkflowStatus};

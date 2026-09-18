@@ -188,3 +188,27 @@ Same-basename XMP
 ```
 
 The group shares visual intent, but each photo receives its own exposure correction and other resolved values. Do not blindly copy one reference photo's numeric settings across the whole group.
+
+
+---
+
+# Reference Style Resolution
+
+`ReferenceSet` is now an active workflow object, not only metadata. Its `StyleProfile` combines small photographer preferences with measured values from a selected reference photo, producing the existing `GroupColorIntent` used by `color_sync`.
+
+```text
+Reference photo analysis
+        +
+StyleProfile preferences
+        |
+        v
+GroupColorIntent
+        |
+        v
+Adaptive per-photo resolution
+        |
+        v
+Per-photo Recipe -> XMP
+```
+
+This keeps the look consistent while allowing each photo to receive different numeric corrections.

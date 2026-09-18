@@ -1,6 +1,7 @@
 pub mod analysis;
 pub mod batch;
 pub mod batch_export;
+pub mod culling;
 pub mod export_stage;
 pub mod pipeline;
 pub mod catalog;
@@ -25,9 +26,10 @@ pub mod store;
 
 pub use batch::{Batch, BatchItem, BatchStage, JobStatus};
 pub use batch_export::{BatchExportExecutor, BatchExportItem};
+pub use culling::{suggest_decision, CullingDecision, CullingScore};
 pub use export_stage::{ExportStageError, ExportStageExecutor};
 pub use pipeline::BatchPipelineExecutor;
-pub use runner::{AutomationRunner, NoopStageExecutor, RunStep, RunnerError, StageExecutor};
+pub use runner::{AutomationRunner, NoopStageExecutor, RunStep, StageExecutor, RunnerError};
 
 pub use analysis::{
     AnalysisArtifact, AnalysisCache, AnalysisCacheError, AnalysisCacheKey, InferenceBackend,

@@ -65,14 +65,15 @@ pub fn scan_raw_paths(paths: impl IntoIterator<Item = PathBuf>) -> RawImportScan
             .ok()
             .and_then(|metadata| metadata.modified().ok())
             .and_then(system_time_to_ms);
+        let metadata = crate::read_raw_metadata(&path);
 
         assets.push(RawAsset {
             id: Uuid::new_v4(),
             source_path: path.to_string_lossy().into_owned(),
             filename: filename.clone(),
             extension,
-            camera_id: None,
-            capture_time_ms: None,
+            camera_id: metadata.camera_id,
+            capture_time_ms: metadata.capture_time_ms,
             file_time_ms,
             sequence_number: extract_sequence_number(&filename),
         });

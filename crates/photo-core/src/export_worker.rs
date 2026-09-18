@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
+use uuid::Uuid;
 
-use crate::{ExportStatus, ExportStore};
+use crate::{ExportCheckpoint, ExportStatus, ExportStore};
 
 #[derive(Debug, Error)]
 pub enum ExportWorkerError {
@@ -12,6 +13,8 @@ pub enum ExportWorkerError {
     Store(String),
     #[error("output operation failed: {0}")]
     Output(String),
+    #[error("output verification failed: {0}")]
+    Verify(String),
 }
 
 pub trait ExportRenderer {
@@ -20,15 +23,16 @@ pub trait ExportRenderer {
 
 #[derive(Debug, Clone)]
 pub struct ExportJob {
-    pub photo_id: String,
+    pub batch_id: Uuid,
+    pub item_id: Uuid,
     pub source: PathBuf,
-    pub output: PathBuf,
 }
 
 /// Crash-safe export coordinator.
 ///
-/// The worker intentionally owns only export execution. Analysis, grouping,
-/// AI inference and color planning remain independent checkpoints.
+/// Export execution owns only the final derivative stage. Previous stages
+/// (import, analysis, embedding, grouping and retouch) are never invalidated
+/// by an export retry.
 pub struct ExportWorker<R> {
     renderer: R,
 }
@@ -41,15 +45,43 @@ where
         Self { renderer }
     }
 
-    pub fn run_job(&self, job: &ExportJob) -> Result<(), ExportWorkerError> {
-        let temporary = job.output.with_extension("partial");
+    pub fn run_job(
+        &self,
+        store: &ExportStore,
+        job: &ExportJob,
+    ) -> Result<ExportCheckpoint, ExportWorkerError> {
+        let checkpoint = store
+            .reserve(job.batch_id, job.item_id, &job.source)
+            .map_err(|e| ExportWorkerError::Store(e.to_string()))?;
 
-        self.renderer.render(&job.source, &temporary)?;
+        let running = store
+            .mark_running(checkpoint)
+            .map_err(|e| ExportWorkerError::Store(e.to_string()))?;
 
-        std::fs::rename(&temporary, &job.output)
+        let temporary = running.output_path.with_extension("partial");
+
+        let result = self.renderer.render(&job.source, &temporary);
+
+        if let Err(error) = result {
+            let _ = store.mark_failed(running, error.to_string());
+            return Err(error);
+        }
+
+        std::fs::rename(&temporary, &running.output_path)
             .map_err(|e| ExportWorkerError::Output(e.to_string()))?;
 
-        Ok(())
+        let metadata = std::fs::metadata(&running.output_path)
+            .map_err(|e| ExportWorkerError::Verify(e.to_string()))?;
+        if metadata.len() == 0 {
+            let failed = store
+                .mark_failed(running, "empty exported file")
+                .map_err(|e| ExportWorkerError::Store(e.to_string()))?;
+            return Err(ExportWorkerError::Verify(format!("{}", failed.output_path.display())));
+        }
+
+        store
+            .mark_done(running)
+            .map_err(|e| ExportWorkerError::Store(e.to_string()))
     }
 }
 

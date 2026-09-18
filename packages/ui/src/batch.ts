@@ -106,6 +106,31 @@ export interface BackendReferenceBinding {
   selected_reference_asset_id: string;
 }
 
+export interface BackendEditAdjustments {
+  exposure: number | null;
+  contrast: number | null;
+  highlights: number | null;
+  shadows: number | null;
+  temperature: number | null;
+  tint: number | null;
+  saturation: number | null;
+}
+
+export interface BackendRecipe {
+  id: string;
+  name: string;
+  target_asset_id: string | null;
+  source_reference_ids: string[];
+  adjustments: BackendEditAdjustments;
+}
+
+export interface BackendGroupReferencePreview {
+  group_id: string;
+  selected_reference_asset_id: string;
+  recipes: BackendRecipe[];
+  pending_asset_id: string | null;
+}
+
 export interface BatchWorkerEvent {
   batch: BackendBatch;
   step: unknown | null;
@@ -126,6 +151,7 @@ export interface PhotoCakeBridge {
   loadReferenceBindings?(batchId: string): Promise<BackendReferenceBinding[]>;
   setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
   clearGroupReference?(groupId: string): Promise<void>;
+  loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
   subscribeBatchUpdates(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }
 

@@ -6,6 +6,7 @@ import {
   type BackendCullingReview,
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
+  type BackendLightroomHandoffResult,
   type BackendPhotoContext,
   type BackendReferenceBinding,
   type BatchJob,
@@ -20,6 +21,7 @@ export type {
   BackendCullingReview,
   BackendGroupCullingResult,
   BackendGroupReferencePreview,
+  BackendLightroomHandoffResult,
   BackendPhotoContext,
   BackendRawImportResult,
   BackendReferenceBinding,
@@ -130,6 +132,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [cullingLoading, setCullingLoading] = useState(false);
   const [referenceBindings, setReferenceBindings] = useState<Record<string, BackendReferenceBinding>>({});
   const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
+  const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
+  const [handoffRunning, setHandoffRunning] = useState<string | null>(null);
 
   useEffect(() => {
     if (!bridge) return;
@@ -490,6 +494,20 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     }
   };
 
+  const writeGroupXmp = async (groupId: string) => {
+    if (!bridge?.writeGroupXmp) return;
+    setHandoffRunning(groupId);
+    try {
+      const result = await bridge.writeGroupXmp(groupId);
+      setHandoffResults((current) => ({ ...current, [groupId]: result }));
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setHandoffRunning(null);
+    }
+  };
+
   const renderLibrary = () => (
     <>
       {photoContext && (
@@ -762,6 +780,81 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     </section>
   );
 
+  const renderLightroom = () => (
+    <section className="queue-card">
+      <div className="queue-title">
+        <strong>Lightroom XMP handoff</strong>
+        <span>Explicit write only · original RAW stays untouched · existing XMP aborts the whole group</span>
+      </div>
+      <div className="handoff-groups">
+        {photoContext?.groups.map((group, index) => {
+          const binding = referenceBindings[group.id];
+          const preview = referencePreviews[group.id];
+          const result = handoffResults[group.id];
+          const ready =
+            binding != null &&
+            preview != null &&
+            preview.pending_asset_id == null &&
+            preview.recipes.length > 0;
+          const writesWhiteBalance =
+            preview?.recipes.some(
+              (recipe) =>
+                recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
+            ) ?? false;
+
+          return (
+            <div className="handoff-card" key={group.id}>
+              <div className="handoff-card-main">
+                <span>Group {index + 1}</span>
+                <strong>{group.asset_ids.length} source photos</strong>
+                <small>
+                  {binding
+                    ? `Reference: ${assetNames.get(binding.selected_reference_asset_id) ?? binding.selected_reference_asset_id.slice(0, 8)}`
+                    : "Choose a reference first"}
+                </small>
+                <small>
+                  {preview?.pending_asset_id
+                    ? "Waiting for exposure evidence"
+                    : preview?.recipes.length
+                      ? `${preview.recipes.length} XMP targets · WB ${writesWhiteBalance ? "measured" : "untouched"}`
+                      : "No adaptive Recipe preview yet"}
+                </small>
+                <small>Explicit Reject photos are excluded; AI suggestions alone never delete or exclude files.</small>
+              </div>
+
+              <div className="handoff-actions">
+                {result ? (
+                  <>
+                    <strong>{result.written_sidecars.length} XMP written</strong>
+                    <small>Sidecars created beside the original RAW files</small>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      className="button primary"
+                      disabled={!ready || !bridge?.writeGroupXmp || handoffRunning != null}
+                      onClick={() => void writeGroupXmp(group.id)}
+                    >
+                      {handoffRunning === group.id
+                        ? "Writing XMP…"
+                        : ready
+                          ? `Write ${preview.recipes.length} XMP`
+                          : "Not ready"}
+                    </button>
+                    <small>No overwrite: any existing same-basename XMP stops the group before writing.</small>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {!photoContext?.groups.length && (
+          <div className="panel-note">Import, analyze and choose a reference before Lightroom handoff.</div>
+        )}
+      </div>
+    </section>
+  );
+
   const renderFutureView = (title: string, body: string) => (
     <section className="queue-card">
       <div className="queue-title"><strong>{title}</strong></div>
@@ -842,10 +935,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         {activeView === "cull" && renderCull()}
         {activeView === "groups" && renderGroups()}
         {activeView === "reference" && renderReference()}
-        {activeView === "lightroom" && renderFutureView(
-          "Lightroom handoff",
-          "Core same-basename XMP generation is implemented and protects existing sidecars. The workstation UI will expose explicit apply/handoff only after a reference-driven Recipe set exists.",
-        )}
+        {activeView === "lightroom" && renderLightroom()}
       </main>
 
       <aside className="automation-panel">

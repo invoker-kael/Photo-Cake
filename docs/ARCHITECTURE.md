@@ -89,7 +89,7 @@ one Recipe per target asset
 
 References may come from the target group or from another compatible group. In-group reference promotion still validates membership. The workstation now persists the selected reference for each group before any adaptive edit is applied.
 
-Reference selection is intentionally separated from color application: the current preview analysis does not provide a sufficiently reliable RAW white-balance/temperature measurement, so the UI must not invent Kelvin/tint values merely to make the XMP path appear complete.
+Reference selection is intentionally separated from unsupported color guesses. Analyze now records preview-relative exposure evidence, so a selected reference can safely produce per-photo exposure Recipes from the cache. Embedded JPEG previews do not provide a sufficiently reliable RAW white-balance/temperature measurement, so temperature/tint remain optional and are omitted from Recipe/XMP until reliable RAW/metadata evidence exists.
 
 ## Lightroom Bridge
 
@@ -186,3 +186,8 @@ cached evidence -> AI recommendation
 ```
 
 The review is keyed by stable RAW asset ID so re-importing the same source keeps the photographer's decision. Clearing a review restores the current AI suggestion. Reject remains metadata/state and never removes the source file.
+
+
+## Partial Evidence Rule
+
+`PhotoColorAnalysis`, `GroupColorIntent` and resolved edits support missing white-balance evidence. Preview-relative exposure can drive adaptive exposure immediately; absent temperature/tint stays `None` all the way through Recipe and XMP. XMP serialization therefore writes only supported/measured fields rather than filling unknown values with defaults.

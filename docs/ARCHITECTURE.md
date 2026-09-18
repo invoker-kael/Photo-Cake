@@ -23,6 +23,8 @@ Style Profile
     |
 Recipe / Edit Graph
     |
+XMP Mapping
+    |
 +----------+
 |          |
 XMP     Direct Export
@@ -63,7 +65,9 @@ Style Profile
     |
 Recipe
     |
-XMP / Export
+XMP Mapping
+    |
+Lightroom / Export
 ```
 
 A group of photos is the main editing unit, not an isolated image.
@@ -85,7 +89,10 @@ Style Profile
 Recipe
         |
         v
-XMP / Export
+XMP Mapping
+        |
+        v
+Lightroom
 ```
 
 The system learns photographer preference from selected references instead of replacing decisions.
@@ -110,7 +117,7 @@ XMP Mapping
 Lightroom
 ```
 
-Direct export uses the same Recipe model.
+Direct export uses the same Recipe model and does not require additional editing data.
 
 Initial supported adjustments:
 

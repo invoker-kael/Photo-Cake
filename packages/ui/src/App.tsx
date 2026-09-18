@@ -53,11 +53,13 @@ function filenameFromPath(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
 
-function captureTimeLabel(value: number | null) {
-  if (value == null) return "file-time fallback";
+function timelineLabel(captureTimeMs: number | null, fileTimeMs: number | null) {
+  const value = captureTimeMs ?? fileTimeMs;
+  if (value == null) return "Time unavailable";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "capture time unavailable";
-  return date.toISOString().replace("T", " ").slice(0, 19);
+  if (Number.isNaN(date.getTime())) return "Time unavailable";
+  const source = captureTimeMs != null ? "EXIF" : "File";
+  return `${source} · ${date.toISOString().replace("T", " ").slice(0, 19)}`;
 }
 
 function jobFromItem(item: BackendBatchItem): BatchJob {
@@ -828,7 +830,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               <div className="metadata-row" key={asset.id}>
                 <strong>{asset.filename}</strong>
                 <span>{asset.camera_id ?? "Camera metadata unavailable"}</span>
-                <small>{captureTimeLabel(asset.capture_time_ms)}</small>
+                <small>{timelineLabel(asset.capture_time_ms, asset.file_time_ms)}</small>
               </div>
             ))}
           </div>

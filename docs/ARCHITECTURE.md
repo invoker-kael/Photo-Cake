@@ -143,3 +143,10 @@ catalog/preview
 ```
 
 Full RAW-engine replacement, cloud editing, accounts and a Lightroom database/plugin integration are not early dependencies.
+
+
+## Batch Runner Boundary
+
+The persistent batch runner is preparation infrastructure, not the whole photographer workflow. New RAW items run `IMPORT -> ANALYZE -> DONE`, where DONE means reusable local evidence is ready. Grouping, culling review, reference selection, adaptive Recipes and XMP handoff operate above that per-photo preparation queue. Legacy preset/retouch/QA/export stage values remain loadable for old project data and explicit adapters, but new RAW imports do not automatically traverse no-op editing/export stages.
+
+The Windows workstation now exposes the existing `RawImporter::import_directory` through a native directory picker. Android keeps the companion role and shares UI/core contracts without duplicating Windows filesystem behavior.

@@ -1,196 +1,119 @@
 # Photo-Cake Luna Execution Specification
 
-## Purpose
+## Authority
 
-This document is the execution authority for Luna.
+This is Luna's execution entry. Build the existing repository into the user's personal semi-automatic photography workflow. Do not replace working foundations and do not stop at planning when an implementable gap exists.
 
-Photo-Cake is a local-first semi-automatic photography workflow assistant.
+Read in order:
 
-The target workflow:
+1. this file;
+2. `PRODUCT_REQUIREMENTS.md`;
+3. `ARCHITECTURE.md`;
+4. `PRODUCT_ROADMAP.md`;
+5. current code and tests.
 
-```text
-RAW Collection
-    |
-Catalog
-    |
-Preview + Metadata
-    |
-Smart Culling
-    |
-Photo Group
-    |
-Reference Set
-    |
-Style Profile
-    |
-Recipe / Edit Graph
-    |
-XMP / Direct Export
-```
+Code state is authoritative for what already exists. The roadmap is direction, not permission to reimplement completed work.
 
-The goal is not replacing Lightroom. The goal is reducing repetitive photographer work while keeping RAW files, Lightroom compatibility and photographer decisions.
-
----
-
-## Existing Code First
-
-Reuse existing implementation before creating new systems.
+## Target Workflow
 
 ```text
-photo-core
- |
- +-- catalog
- +-- importer
- +-- raw
- +-- metadata
- +-- preview
- +-- grouping
- +-- culling
- +-- reference
- +-- recipe
- +-- export
-
-photo-inference
- |
- +-- analysis
- +-- similarity
- +-- segmentation
- +-- culling models
- +-- style extraction
+RAW collection
+  -> catalog + preview
+  -> smart culling
+  -> moment grouping
+  -> semantic refinement
+  -> choose/edit reference
+  -> StyleProfile
+  -> GroupColorIntent
+  -> adaptive per-photo Recipes
+  -> review
+  -> same-basename XMP -> Lightroom
+       or
+     direct JPEG/TIFF export
 ```
 
-Rules:
+## Mandatory Execution Rules
 
-- Extend existing modules.
-- Do not create parallel workflow engines.
-- Keep workflow logic platform independent.
-- Do not make renderer/export the source of truth.
+- Reuse `photo-core` and `photo-inference`; never create a parallel workflow engine.
+- Preserve RAW bytes and source filenames.
+- Prefer RAW + XMP; do not generate large intermediates by default.
+- Recipe is the editing source of truth. XMP and direct export are outputs.
+- A group shares visual intent, not identical numeric adjustments.
+- Reuse `color_sync` for per-photo resolution.
+- Smart culling only recommends Keep / Review / RejectSuggestion; never auto-delete.
+- Preserve manual grouping/selection decisions.
+- Keep business logic cross-platform. Windows and Android use shared core models.
+- Keep normal operation local/offline.
+- Do not prioritize cloud services, accounts, a Lightroom plugin/database writer or a replacement RAW engine.
+- Do not create additional docs for requirements already covered by the five files in `docs/`; update the owning file instead.
 
----
-
-## Photography Workflow Rules
-
-The workflow follows real photographer behavior:
+## Reuse Map
 
 ```text
-Many RAW files
-      |
-      v
-AI assisted selection
-      |
-      v
-Photo groups
-      |
-      v
-Choose preferred references
-      |
-      v
-Generate style recipe
-      |
-      v
-Apply batch adjustments
+raw/importer/catalog       source + identity + persistence
+preview/analysis           reusable image evidence
+classification             portrait/scene routing
+grouping                   fast moment groups
+semantic_grouping          local visual refinement
+culling                    selection recommendation
+reference                  ReferenceSet + StyleProfile
+color_sync                 adaptive group intent resolution
+recipe                     target-bound per-photo edit decisions
+xmp                        Lightroom sidecars
+export/renderer/workers     optional rendered output
+batch/runner/stores         resumable execution
+photo-inference             local models, embedding, segmentation
 ```
 
-Important:
+## Required Editing Chain
 
-- RAW remains unchanged.
-- XMP is the preferred Lightroom delivery format and should remain tiny metadata beside the RAW.
-- Direct export remains available.
-- AI recommends; user controls final selection.
-
----
-
-## Platform Strategy
-
-Windows:
-
-- Primary RAW workstation
-- Large photo libraries
-- Batch processing
-- Lightroom workflow
-- GPU acceleration
-
-Android:
-
-- Companion application
-- Mobile photo selection
-- Reference selection
-- Preview
-
-Core models and business logic must be shared.
-
----
-
-## Development Priority
+For reference-driven work use this chain unless a concrete code defect requires changing it:
 
 ```text
-1. Catalog and asset foundation
-2. Preview and metadata
-3. Photo Group model
-4. Smart Culling
-5. Reference Set and Style Profile
-6. Reuse color_sync to resolve group intent per photo
-7. Materialize per-photo Recipe/Edit Graph
-8. Lightroom XMP mapping and sidecar writing
-9. Direct export
-9. Advanced AI assistance
+ReferenceSet::resolve_group
+  -> StyleProfile -> GroupColorIntent
+  -> build_adaptive_group_plan / color_sync
+  -> Recipe::materialize_group
+  -> write_group_sidecars
 ```
 
----
+A reference may be external to the target group. A target Recipe must remain bound to exactly one target asset before XMP output.
 
-## Non Destructive Rules
-
-- Never modify RAW source files.
-- Never generate unnecessary duplicate full-size files.
-- Recipe is the editing decision source.
-- XMP and export are outputs of Recipe.
-- Never delete photos automatically.
-
----
-
-## Phase 1 Acceptance
-
-Input:
+## Required Grouping Chain
 
 ```text
-RAW photo collection
+initial_group_raw_assets
+  -> Moment PhotoGroup
+  -> refine_group_by_similarity
+  -> SemanticPhotoGroup::to_photo_group
+  -> reference/culling/edit workflow
 ```
 
-Output:
+Do not globally regroup unrelated collections only because embeddings look similar.
 
-```text
-Catalog
-Preview
-Photo Groups
-Reference foundation
-Recipe
-XMP
-```
+## Current Gap-first Priority
 
-The result must continue working in Lightroom.
+At every run inspect what is already implemented and take the smallest complete next gap. Prefer, in order:
 
----
+1. compile/test/CI regressions;
+2. end-to-end wiring between existing core modules;
+3. culling evidence quality and duplicate/burst selection;
+4. reference/style extraction and editable Recipe coverage;
+5. Lightroom XMP compatibility and round-trip behavior;
+6. review UX on Windows, then shared/Android UX;
+7. direct export polish;
+8. richer local AI and edit controls.
 
-## Completion Criteria
+Do not redo lower-numbered items that already pass.
 
-A task is complete when:
+## Completion Gate
 
-- It improves photographer workflow.
-- It reuses current architecture.
-- It has implementation, tests and build validation.
-- It moves Photo-Cake closer to semi-automatic personal editing workflow.
+A change is complete only when:
 
+- it advances the photographer workflow;
+- existing architecture is reused or a necessary refactor is justified in code;
+- tests cover the changed behavior;
+- relevant CI/build checks pass;
+- no new duplicate workflow or documentation path is introduced.
 
-## Adaptive Batch Rule
-
-For a Photo Group, preserve one shared style intent but resolve photo-specific adjustments from existing analysis. Reuse `color_sync`; do not introduce a second batch-style engine. Materialize one Recipe per target asset before XMP generation so differently exposed photos do not receive identical numeric corrections.
-
-
-## Reference Style Execution Rule
-
-Use the existing `ReferenceSet::color_intent_from_reference` path to turn a selected reference plus `StyleProfile` into `GroupColorIntent`. Then reuse `color_sync` to resolve individual photos and `Recipe::materialize_group` to create target-bound Recipes. Do not bypass this chain with blind preset copying.
-
-
-## Grouping Execution Rule
-
-Preserve the existing two-stage design: use `initial_group_raw_assets` for fast moment grouping, then `refine_group_by_similarity` for portrait/scene refinement. Promote semantic groups through `SemanticPhotoGroup::to_photo_group` before reference/style/Recipe work. Do not add a parallel scene-grouping subsystem.
+CI is verification, not the product. Do not create repeated CI-only commits unless a failing check identifies a real problem.

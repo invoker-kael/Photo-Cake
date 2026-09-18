@@ -2,8 +2,8 @@ use photo_core::{
     build_group_culling_result, AnalysisCache, AutomationRunner, Batch, BatchStore,
     ClassificationRoutingExecutor, ClassificationStore, CullingReview, CullingReviewStore,
     CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus, ModelBundleManifest,
-    ModelPlatform, PhotoGroup, RawAsset, RawCatalog, RawImportResult, RawImporter, ReferenceStore,
-    RunStep,
+    ModelPlatform, PhotoGroup, RawAsset, RawCatalog, RawImportResult, RawImporter, Recipe,
+    ReferenceStore, ReferenceWorkflowError, RunStep,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
@@ -63,6 +63,14 @@ struct BatchWorkerError {
 struct BatchPhotoContext {
     assets: Vec<RawAsset>,
     groups: Vec<PhotoGroup>,
+}
+
+#[derive(Clone, Serialize)]
+struct GroupReferencePreview {
+    group_id: Uuid,
+    selected_reference_asset_id: Uuid,
+    recipes: Vec<Recipe>,
+    pending_asset_id: Option<Uuid>,
 }
 
 struct AppState {
@@ -411,6 +419,59 @@ fn clear_group_reference(
 }
 
 #[tauri::command]
+fn batch_reference_previews(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<GroupReferencePreview>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let groups = state
+        .catalog
+        .list_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let mut previews = Vec::new();
+
+    for group in groups {
+        let Some(binding) = state
+            .reference_store
+            .group_binding(group.id)
+            .map_err(|error| error.to_string())?
+        else {
+            continue;
+        };
+        let set = state
+            .reference_store
+            .get_set(binding.reference_set_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
+
+        match set.resolve_group_from_cache(
+            &state.analysis_cache,
+            &group,
+            binding.selected_reference_asset_id,
+            1,
+        ) {
+            Ok(result) => previews.push(GroupReferencePreview {
+                group_id: group.id,
+                selected_reference_asset_id: binding.selected_reference_asset_id,
+                recipes: result.recipes,
+                pending_asset_id: None,
+            }),
+            Err(ReferenceWorkflowError::MissingExposureAnalysis(asset_id)) => {
+                previews.push(GroupReferencePreview {
+                    group_id: group.id,
+                    selected_reference_asset_id: binding.selected_reference_asset_id,
+                    recipes: Vec::new(),
+                    pending_asset_id: Some(asset_id),
+                });
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+
+    Ok(previews)
+}
+
+#[tauri::command]
 fn create_batch(
     name: String,
     paths: Vec<String>,
@@ -595,6 +656,7 @@ pub fn run() {
             batch_reference_bindings,
             set_group_reference,
             clear_group_reference,
+            batch_reference_previews,
             create_batch,
             import_raw_paths,
             import_raw_directory,

@@ -2,7 +2,9 @@ name: CI
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Normal pushes queue behind the active validation run. A deliberately marked
+  # recovery commit can cancel a stuck run without restoring always-cancel behavior.
+  cancel-in-progress: ${{ contains(github.event.head_commit.message, '[ci-recover]') }}
 
 on:
   push:
@@ -41,7 +43,6 @@ jobs:
       - name: Check Windows and Android UI
         run: pnpm check
 
-
   windows-rust:
     runs-on: windows-latest
     steps:
@@ -58,7 +59,8 @@ jobs:
           package-manager-cache: false
 
       - name: Rust tests
-        run: cargo test --workspace
+        timeout-minutes: 15
+        run: cargo test --workspace -- --nocapture
 
       - name: Check Android companion Rust contract
         run: cargo check --manifest-path apps/android/src-tauri/Cargo.toml

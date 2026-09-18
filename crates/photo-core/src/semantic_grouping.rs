@@ -1,4 +1,4 @@
-use crate::{PhotoCategory, PhotoClassification, PhotoGroup};
+use crate::{GroupingBasis, PhotoCategory, PhotoClassification, PhotoGroup, PhotoGroupKind};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -41,6 +41,20 @@ pub struct SemanticPhotoGroup {
     pub asset_ids: Vec<Uuid>,
     pub reference_candidate_id: Option<Uuid>,
     pub similarity_threshold: f32,
+}
+
+impl SemanticPhotoGroup {
+    /// Convert semantic refinement back into the shared PhotoGroup type used by
+    /// culling, reference selection and recipe generation.
+    pub fn to_photo_group(&self) -> PhotoGroup {
+        PhotoGroup {
+            id: self.id,
+            kind: PhotoGroupKind::Similar,
+            basis: GroupingBasis::SemanticSimilarity,
+            asset_ids: self.asset_ids.clone(),
+            manual_locked: false,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -282,6 +296,34 @@ mod tests {
         .unwrap();
         assert_eq!(groups.len(), 2);
         assert!(groups.iter().any(|group| group.asset_ids.len() == 2));
+    }
+
+    #[test]
+    fn semantic_group_promotes_into_shared_photo_group() {
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let parent = parent(vec![first, second]);
+        let groups = refine_group_by_similarity(
+            &parent,
+            &[
+                classification(first, PhotoCategory::NonPortrait),
+                classification(second, PhotoCategory::NonPortrait),
+            ],
+            &[
+                embedding(first, &[1.0, 0.0]),
+                embedding(second, &[0.99, 0.02]),
+            ],
+            SemanticGroupingConfig {
+                portrait_similarity_threshold: 0.9,
+                scene_similarity_threshold: 0.9,
+            },
+        )
+        .unwrap();
+
+        let promoted = groups[0].to_photo_group();
+        assert_eq!(promoted.kind, PhotoGroupKind::Similar);
+        assert_eq!(promoted.basis, GroupingBasis::SemanticSimilarity);
+        assert_eq!(promoted.asset_ids.len(), 2);
     }
 
     #[test]

@@ -4,8 +4,12 @@
 //! It never deletes originals automatically and it does not invent scores for
 //! evidence that has not been measured yet.
 
-use crate::{embedding_similarity, ImageEmbedding};
+use crate::{
+    embedding_similarity, AnalysisCache, AnalysisCacheError, ImageEmbedding, InferenceTask,
+    PhotoGroup,
+};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,9 +179,92 @@ pub fn rank_group_candidates_with_embeddings(
     rank_group_candidates(&enriched)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupCullingResult {
+    pub group_id: Uuid,
+    pub recommendations: Vec<CullingRecommendation>,
+    pub pending_asset_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Error)]
+pub enum CullingEvidenceError {
+    #[error(transparent)]
+    Analysis(#[from] AnalysisCacheError),
+    #[error("invalid cached culling evidence for asset {asset_id}: {source}")]
+    Json {
+        asset_id: Uuid,
+        source: serde_json::Error,
+    },
+}
+
+/// Build culling recommendations entirely from evidence already produced by
+/// Analyze. No inference is repeated here.
+pub fn build_group_culling_result(
+    cache: &AnalysisCache,
+    group: &PhotoGroup,
+    duplicate_threshold: f32,
+) -> Result<GroupCullingResult, CullingEvidenceError> {
+    let mut candidates = Vec::new();
+    let mut embeddings = Vec::new();
+    let mut pending_asset_ids = Vec::new();
+
+    for asset_id in &group.asset_ids {
+        match cache.latest_for_asset_task(*asset_id, InferenceTask::QualityScoring)? {
+            Some(artifact) => {
+                let score = serde_json::from_value::<CullingScore>(artifact.payload_json)
+                    .map_err(|source| CullingEvidenceError::Json {
+                        asset_id: *asset_id,
+                        source,
+                    })?;
+                candidates.push(CullingCandidate {
+                    asset_id: *asset_id,
+                    score,
+                });
+            }
+            None => {
+                pending_asset_ids.push(*asset_id);
+                continue;
+            }
+        }
+
+        if let Some(artifact) =
+            cache.latest_for_asset_task(*asset_id, InferenceTask::ImageEmbedding)?
+        {
+            if let Some(value) = artifact.payload_json.get("embedding") {
+                let vector = serde_json::from_value::<Vec<f32>>(value.clone()).map_err(|source| {
+                    CullingEvidenceError::Json {
+                        asset_id: *asset_id,
+                        source,
+                    }
+                })?;
+                if !vector.is_empty() {
+                    embeddings.push(ImageEmbedding {
+                        asset_id: *asset_id,
+                        vector,
+                        model_id: artifact.key.model_id,
+                        model_version: artifact.key.model_version,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(GroupCullingResult {
+        group_id: group.id,
+        recommendations: rank_group_candidates_with_embeddings(
+            &candidates,
+            &embeddings,
+            duplicate_threshold,
+        ),
+        pending_asset_ids,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AnalysisArtifact, AnalysisCacheKey, GroupingBasis, PhotoGroupKind};
+    use tempfile::tempdir;
 
     fn score(quality: f32, duplicate_similarity: Option<f32>) -> CullingScore {
         CullingScore {
@@ -259,6 +346,89 @@ mod tests {
         assert_eq!(duplicate.decision, CullingDecision::Review);
         let distinct = ranked.iter().find(|item| item.asset_id == different).unwrap();
         assert_eq!(distinct.decision, CullingDecision::Keep);
+    }
+
+    fn cache_artifact(
+        cache: &AnalysisCache,
+        asset_id: Uuid,
+        task: InferenceTask,
+        payload_json: serde_json::Value,
+    ) {
+        cache
+            .put(&AnalysisArtifact {
+                key: AnalysisCacheKey {
+                    asset_id,
+                    source_fingerprint: "raw-v1".to_string(),
+                    preview_revision: "preview-v1".to_string(),
+                    task,
+                    model_id: match task {
+                        InferenceTask::QualityScoring => "quality",
+                        InferenceTask::ImageEmbedding => "embedding",
+                        _ => "test",
+                    }
+                    .to_string(),
+                    model_version: "1".to_string(),
+                    config_hash: "default".to_string(),
+                },
+                payload_json,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn group_culling_reuses_cached_quality_and_embedding_evidence() {
+        let dir = tempdir().unwrap();
+        let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
+        let best = Uuid::new_v4();
+        let duplicate = Uuid::new_v4();
+        let pending = Uuid::new_v4();
+        let group = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Similar,
+            basis: GroupingBasis::SemanticSimilarity,
+            asset_ids: vec![best, duplicate, pending],
+            manual_locked: false,
+        };
+
+        cache_artifact(
+            &cache,
+            best,
+            InferenceTask::QualityScoring,
+            serde_json::to_value(score(0.95, None)).unwrap(),
+        );
+        cache_artifact(
+            &cache,
+            duplicate,
+            InferenceTask::QualityScoring,
+            serde_json::to_value(score(0.90, None)).unwrap(),
+        );
+        cache_artifact(
+            &cache,
+            best,
+            InferenceTask::ImageEmbedding,
+            serde_json::json!({"embedding": [1.0, 0.0]}),
+        );
+        cache_artifact(
+            &cache,
+            duplicate,
+            InferenceTask::ImageEmbedding,
+            serde_json::json!({"embedding": [0.999, 0.01]}),
+        );
+
+        let result = build_group_culling_result(&cache, &group, 0.98).unwrap();
+        assert_eq!(result.recommendations.len(), 2);
+        assert_eq!(result.recommendations[0].asset_id, best);
+        assert_eq!(result.recommendations[0].decision, CullingDecision::Keep);
+        assert_eq!(
+            result
+                .recommendations
+                .iter()
+                .find(|item| item.asset_id == duplicate)
+                .unwrap()
+                .decision,
+            CullingDecision::Review
+        );
+        assert_eq!(result.pending_asset_ids, vec![pending]);
     }
 
     #[test]

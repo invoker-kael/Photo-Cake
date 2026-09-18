@@ -219,6 +219,34 @@ impl ReferenceStore {
         Ok(())
     }
 
+    pub fn group_reference_set(
+        &self,
+        group_id: Uuid,
+    ) -> Result<Option<ReferenceSet>, ReferenceStoreError> {
+        let Some(binding) = self.group_binding(group_id)? else {
+            return Ok(None);
+        };
+        self.get_set(binding.reference_set_id)
+    }
+
+    pub fn update_group_style_profile(
+        &self,
+        group_id: Uuid,
+        update: impl FnOnce(&mut StyleProfile),
+    ) -> Result<ReferenceSet, ReferenceStoreError> {
+        let binding = self
+            .group_binding(group_id)?
+            .ok_or(ReferenceStoreError::ReferenceSetNotFound(group_id))?;
+        let mut set = self
+            .get_set(binding.reference_set_id)?
+            .ok_or(ReferenceStoreError::ReferenceSetNotFound(
+                binding.reference_set_id,
+            ))?;
+        update(&mut set.style_profile);
+        self.save_set(&set)?;
+        Ok(set)
+    }
+
     /// Persist the simple workstation action "use this photo as this group's reference"
     /// while still representing the choice as a real ReferenceSet.
     pub fn set_single_photo_reference(
@@ -276,6 +304,35 @@ mod tests {
         assert_eq!(loaded.id, set.id);
         assert_eq!(loaded.name, set.name);
         assert_eq!(loaded.photo_ids, set.photo_ids);
+    }
+
+    #[test]
+    fn group_style_profile_updates_persist_without_changing_reference() {
+        let dir = tempdir().unwrap();
+        let store = ReferenceStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let group_id = Uuid::new_v4();
+        let asset_id = Uuid::new_v4();
+
+        let (set, binding) = store
+            .set_single_photo_reference(group_id, asset_id, "Portrait look")
+            .unwrap();
+        let updated = store
+            .update_group_style_profile(group_id, |profile| {
+                profile.exposure_bias_ev = Some(0.35);
+                profile.contrast_preference = Some(12.0);
+                profile.saturation_preference = Some(5.0);
+            })
+            .unwrap();
+
+        assert_eq!(updated.id, set.id);
+        assert_eq!(updated.photo_ids, vec![asset_id]);
+        assert_eq!(updated.style_profile.exposure_bias_ev, Some(0.35));
+        assert_eq!(updated.style_profile.contrast_preference, Some(12.0));
+        assert_eq!(updated.style_profile.saturation_preference, Some(5.0));
+        assert_eq!(
+            store.group_binding(group_id).unwrap().unwrap(),
+            binding
+        );
     }
 
     #[test]

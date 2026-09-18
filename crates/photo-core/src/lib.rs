@@ -71,7 +71,7 @@ pub use raw::{
     RawImportScan,
 };
 pub use recipe::{EditAdjustments, Recipe};
-pub use reference::{ReferenceSet, StyleProfile};
+pub use reference::{ReferenceGroupResult, ReferenceSet, ReferenceWorkflowError, StyleProfile};
 pub use renderer::ImageExportRenderer;
 pub use runner::{AutomationRunner, NoopStageExecutor, RunStep, RunnerError, StageExecutor};
 pub use semantic_grouping::{

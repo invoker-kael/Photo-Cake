@@ -53,6 +53,13 @@ function filenameFromPath(path: string) {
   return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 }
 
+function captureTimeLabel(value: number | null) {
+  if (value == null) return "file-time fallback";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "capture time unavailable";
+  return date.toISOString().replace("T", " ").slice(0, 19);
+}
+
 function jobFromItem(item: BackendBatchItem): BatchJob {
   return {
     id: item.id,
@@ -804,6 +811,24 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <span>Group {index + 1}</span>
                 <strong>{group.asset_ids.length} photos</strong>
                 <small>{group.basis.replaceAll("_", " ").toLowerCase()}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {photoContext && photoContext.assets.length > 0 && (
+        <section className="queue-card">
+          <div className="queue-title">
+            <strong>Capture metadata</strong>
+            <span>RAW/EXIF first · filesystem time only as fallback</span>
+          </div>
+          <div className="metadata-list">
+            {photoContext.assets.slice(0, 20).map((asset) => (
+              <div className="metadata-row" key={asset.id}>
+                <strong>{asset.filename}</strong>
+                <span>{asset.camera_id ?? "Camera metadata unavailable"}</span>
+                <small>{captureTimeLabel(asset.capture_time_ms)}</small>
               </div>
             ))}
           </div>

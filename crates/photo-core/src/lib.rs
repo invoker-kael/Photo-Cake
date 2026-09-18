@@ -59,6 +59,12 @@ pub use export_worker::{
 pub use grouping::{
     initial_group_raw_assets, GroupingBasis, InitialGroupingConfig, PhotoGroup, PhotoGroupKind,
 };
+pub use handoff::{
+    plan_finish, xmp_sidecar_path, EditCompatibility, FallbackReason, FinishPlan, FinishTarget,
+    HandoffColorSpace, HandoffError, HandoffMode, RenderedHandoffPreset, TiffCompression,
+};
+pub use handoff_store::{HandoffStore, HandoffStoreError};
+pub use importer::{RawImportError, RawImportResult, RawImporter};
 pub use models::{
     BundledModelSpec, ModelBundleManifest, ModelPlatform, ModelVariant,
 };
@@ -78,4 +84,5 @@ pub use semantic_grouping::{
     refine_group_by_similarity, ImageEmbedding, SemanticGroupKind, SemanticGroupingConfig,
     SemanticGroupingError, SemanticPhotoGroup,
 };
+pub use store::{BatchStore, StoreError};
 pub use xmp::{sidecar_path_for_raw, write_group_sidecars, write_recipe_sidecar, XmpEditState, XmpWriteError};

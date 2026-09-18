@@ -3,7 +3,7 @@ use photo_core::{
     write_group_sidecars, ClassificationRoutingExecutor, ClassificationStore, CullingReview,
     CullingReviewStore, CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus,
     ModelBundleManifest, ModelPlatform, PhotoGroup, RawAsset, RawCatalog, RawImportResult,
-    RawImporter, Recipe, ReferenceStore, ReferenceWorkflowError, RunStep,
+    RawImporter, Recipe, ReferenceStore, ReferenceWorkflowError, RunStep, StyleProfile,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
@@ -77,6 +77,13 @@ struct GroupReferencePreview {
 struct LightroomHandoffResult {
     group_id: Uuid,
     written_sidecars: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct GroupReferenceStyle {
+    group_id: Uuid,
+    reference_set_id: Uuid,
+    style_profile: StyleProfile,
 }
 
 struct AppState {
@@ -457,6 +464,76 @@ fn clear_group_reference(
 }
 
 #[tauri::command]
+fn batch_reference_styles(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<GroupReferenceStyle>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let groups = state
+        .catalog
+        .list_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let mut styles = Vec::new();
+
+    for group in groups {
+        let Some(binding) = state
+            .reference_store
+            .group_binding(group.id)
+            .map_err(|error| error.to_string())?
+        else {
+            continue;
+        };
+        let set = state
+            .reference_store
+            .get_set(binding.reference_set_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
+        styles.push(GroupReferenceStyle {
+            group_id: group.id,
+            reference_set_id: binding.reference_set_id,
+            style_profile: set.style_profile,
+        });
+    }
+
+    Ok(styles)
+}
+
+#[tauri::command]
+fn update_group_reference_style(
+    group_id: String,
+    exposure_bias_ev: f32,
+    contrast_preference: f32,
+    saturation_preference: f32,
+    state: State<'_, AppState>,
+) -> Result<GroupReferenceStyle, String> {
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let binding = state
+        .reference_store
+        .group_binding(group_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "select a reference photo before editing the group style".to_string())?;
+
+    let exposure_bias_ev = exposure_bias_ev.clamp(-3.0, 3.0);
+    let contrast_preference = contrast_preference.clamp(-100.0, 100.0);
+    let saturation_preference = saturation_preference.clamp(-100.0, 100.0);
+    let set = state
+        .reference_store
+        .update_group_style_profile(group_id, |profile| {
+            profile.exposure_bias_ev = Some(exposure_bias_ev);
+            profile.contrast_preference = Some(contrast_preference);
+            profile.saturation_preference = Some(saturation_preference);
+        })
+        .map_err(|error| error.to_string())?;
+
+    Ok(GroupReferenceStyle {
+        group_id,
+        reference_set_id: binding.reference_set_id,
+        style_profile: set.style_profile,
+    })
+}
+
+#[tauri::command]
 fn batch_reference_previews(
     batch_id: String,
     state: State<'_, AppState>,
@@ -773,6 +850,8 @@ pub fn run() {
             batch_reference_bindings,
             set_group_reference,
             clear_group_reference,
+            batch_reference_styles,
+            update_group_reference_style,
             batch_reference_previews,
             write_group_reference_xmp,
             create_batch,

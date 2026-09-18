@@ -4,40 +4,43 @@
 
 Photo-Cake is a local-first AI photography workflow application.
 
-The architecture follows a photographer workflow:
+The architecture follows the real photographer workflow instead of a generic image processing pipeline.
 
 ```text
-RAW collection
-    |
-    v
+RAW Collection
+      |
+      v
 Catalog
-    |
-    v
+      |
+      v
+Metadata + Preview
+      |
+      v
 Analysis
-    |
-    v
-Selection
-    |
-    v
-Grouping
-    |
-    v
-Style Learning
-    |
-    v
-Recipe
-    |
-    v
-XMP / Export
+      |
+      v
+Smart Culling
+      |
+      v
+Photo Group
+      |
+      v
+Reference Style
+      |
+      v
+Recipe / Edit Graph
+      |
+      +------------+
+      |            |
+      v            v
+     XMP        Export
 ```
-
-It assists editing decisions while preserving professional RAW workflow.
 
 ---
 
-# Reuse Existing Implementation
+# Existing Code Reuse
 
-The existing repository structure is the foundation.
+The current repository is the foundation.
 
 ```text
 apps/
@@ -49,66 +52,29 @@ crates/
  └── photo-inference
 ```
 
-Do not rewrite working foundations without technical reason.
+Do not create parallel implementations when existing modules can be extended.
 
 ---
 
-# Core Pipeline
-
-```text
-RAW Catalog
-    |
-    v
-Metadata Extraction
-    |
-    v
-Photo Analysis
-    |
- +----------------+
- |                |
- v                v
-Quality        Similarity
-Score          Detection
- |
- v
-Smart Culling
- |
- v
-Photo Group
- |
- v
-Reference Style
- |
- v
-Recipe / Edit Graph
- |
- +-------------+
- |             |
- v             v
-XMP          Export
-```
-
----
-
-# Shared Core Layer
+# Core Layer
 
 ## photo-core
 
-Platform-independent workflow logic.
+Shared photography workflow engine.
 
 Responsibilities:
 
-- catalog
-- asset model
-- RAW metadata
+- catalog management
+- RAW asset model
+- metadata
 - photo groups
-- preview foundation
-- recipe model
-- edit graph
+- preview system
+- Recipe model
+- Edit Graph
 - batch jobs
-- export interfaces
+- XMP/export interfaces
 
-This layer should contain photography workflow rules.
+This layer contains workflow rules shared by platforms.
 
 ---
 
@@ -116,43 +82,42 @@ This layer should contain photography workflow rules.
 
 AI capability layer.
 
-Responsibilities:
-
-Current:
+Current capabilities:
 
 - image analysis
-- similarity
+- similarity detection
 - segmentation
 - local model execution
 
-Future:
+Future extensions:
 
-- culling models
-- quality scoring
+- photo quality scoring
+- culling assistance
 - style extraction
 - editing suggestions
 
-Models remain replaceable.
+Models must remain replaceable.
 
 ---
 
-# Platform Design
+# Platform Architecture
 
 ## Windows
 
-Primary editing workstation.
+Primary workstation.
 
 Responsibilities:
 
 - large RAW collections
 - batch processing
+- GPU acceleration
 - Lightroom workflow
 - XMP generation
-- GPU acceleration
+- direct export
 
 ## Android
 
-Mobile assistant.
+Mobile companion.
 
 Responsibilities:
 
@@ -161,7 +126,7 @@ Responsibilities:
 - preview
 - lightweight analysis
 
-Core workflow logic stays shared.
+Business logic stays in shared core modules.
 
 ---
 
@@ -185,11 +150,11 @@ Edit Graph
 Output Job
 ```
 
-Photo Group is a first-class object because real photography sessions contain different scenes and lighting conditions.
+Photo Group is a first-class object because real photography sessions contain different scenes, lighting, and editing requirements.
 
 ---
 
-# Non-destructive Editing
+# Non-Destructive Editing
 
 ```text
 RAW
@@ -205,15 +170,15 @@ XMP      Export
 
 Rules:
 
-- RAW files are immutable.
-- XMP is the primary Lightroom bridge.
-- Export uses the same Recipe model.
+- RAW remains immutable.
+- XMP is the Lightroom bridge.
+- Export always uses the same Recipe model.
 
 ---
 
 # Development Priority
 
-Priority is user photography value:
+Development should maximize photographer value:
 
 ```text
 Catalog
@@ -226,24 +191,24 @@ Catalog
  -> Advanced AI
 ```
 
-Do not block the workflow on:
+Do not block early workflow delivery on:
 
-- full RAW engine replacement
+- full RAW replacement engine
 - Lightroom plugin
 - cloud service
 
 ---
 
-# Future Expansion
+# Long Term Expansion
 
-Later:
+Later phases may add:
 
 - advanced RAW processing
 - personal style profile
 - AI retouch planning
 - advanced GPU acceleration
 
-The foundation remains:
+Foundation remains:
 
 ```text
 RAW -> Recipe -> XMP -> Lightroom

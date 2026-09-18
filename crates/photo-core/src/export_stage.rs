@@ -1,7 +1,9 @@
-use crate::{BatchExportExecutor, BatchExportItem, BatchItem, BatchStage, ExportRenderer, ExportWorkerError};
+use crate::{
+    BatchExportExecutor, BatchExportItem, BatchItem, BatchStage, ExportRenderer, ExportWorkerError,
+};
+use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;
-use std::path::PathBuf;
 
 #[derive(Debug, Error)]
 pub enum ExportStageError {
@@ -13,9 +15,10 @@ pub enum ExportStageError {
 
 /// Adapter used by the batch runner when the current stage reaches Export.
 ///
-/// The runner owns batch state progression. This adapter only performs the
-/// export operation and keeps earlier stages reusable.
+/// The runner owns batch progression. This adapter only executes export and
+/// keeps upstream analysis/edit stages reusable.
 pub struct ExportStageExecutor<R> {
+    batch_id: Uuid,
     executor: BatchExportExecutor<R>,
 }
 
@@ -23,8 +26,8 @@ impl<R> ExportStageExecutor<R>
 where
     R: ExportRenderer,
 {
-    pub fn new(executor: BatchExportExecutor<R>) -> Self {
-        Self { executor }
+    pub fn new(batch_id: Uuid, executor: BatchExportExecutor<R>) -> Self {
+        Self { batch_id, executor }
     }
 
     pub fn execute_item(&self, item: &BatchItem) -> Result<(), ExportStageError> {
@@ -34,7 +37,7 @@ where
 
         self.executor
             .execute(BatchExportItem {
-                batch_id: Uuid::nil(),
+                batch_id: self.batch_id,
                 item_id: item.id,
                 source: PathBuf::from(&item.source_path),
             })

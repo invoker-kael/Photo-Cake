@@ -56,7 +56,7 @@ XMP Lightroom    Direct Export
 - RAW + XMP is the primary workflow.
 - Recipe is the single source of editing decisions.
 - Export is optional and generated from Recipe.
-- Avoid unnecessary TIFF/JPEG intermediate storage.
+- Avoid unnecessary TIFF/JPEG intermediate storage; the normal handoff is the original RAW plus a small XMP sidecar.
 - Local-first operation.
 - Existing code is extended before creating new systems.
 
@@ -161,7 +161,7 @@ The system learns:
 Primary:
 
 ```text
-RAW + XMP -> Lightroom
+RAW + same-basename XMP -> Lightroom
 ```
 
 Secondary:

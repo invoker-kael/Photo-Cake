@@ -134,6 +134,31 @@ h2 { font-size: 19px; }
 .progress span { display: block; height: 100%; background: #c8cdd0; }
 .job-percent { color: #777f84; font-size: 11px; text-align: right; }
 
+
+.cull-groups { display: grid; gap: 14px; padding: 14px; }
+.cull-group { border: 1px solid #22272a; border-radius: 10px; overflow: hidden; background: #101315; }
+.cull-group-head { display: flex; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #22272a; }
+.cull-group-head span { color: #727a7f; font-size: 11px; }
+.cull-list { display: grid; }
+.cull-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 54px; padding: 10px 14px; border-bottom: 1px solid #1d2123; }
+.cull-row:last-child { border-bottom: 0; }
+.cull-row.pending { opacity: .7; }
+.cull-rank { color: #626a6f; font-size: 11px; }
+.cull-name { min-width: 0; display: grid; gap: 3px; }
+.cull-name strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.cull-name small { color: #6f777c; font-size: 10px; }
+.cull-decision { padding: 4px 7px; border-radius: 5px; background: #242a2d; color: #a7afb4; font-size: 9px; white-space: nowrap; }
+.decision-keep { color: #badfc2; background: #1b3021; }
+.decision-review { color: #e1d7a8; background: #312d1b; }
+.decision-reject-suggestion { color: #dfb0b0; background: #351f21; }
+
+.group-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px; }
+.group-detail-card { min-width: 0; min-height: 110px; padding: 14px; display: grid; align-content: start; gap: 7px; border: 1px solid #22272a; border-radius: 9px; background: #101315; }
+.group-detail-card span { color: #70787d; font-size: 10px; }
+.group-detail-card strong { font-size: 17px; }
+.group-detail-card small { color: #6d757a; font-size: 10px; text-transform: capitalize; }
+.group-detail-card em { width: fit-content; margin-top: auto; color: #cbd0d3; font-size: 9px; font-style: normal; }
+
 .automation-panel {
   grid-area: auto;
   padding: 26px 22px;
@@ -159,7 +184,7 @@ h2 { font-size: 19px; }
   }
   .automation-panel { display: none; }
   .photo-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .group-grid, .group-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nav-item { padding: 0 8px; text-align: center; font-size: 11px; }
   .sidebar-foot { display: none; }
 }
@@ -179,7 +204,9 @@ h2 { font-size: 19px; }
   .queue-title span, .group-strip-head span { display: none; }
   .photo-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-card.wide { grid-column: 1 / -1; }
-  .group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .group-grid, .group-detail-grid { grid-template-columns: 1fr; }
+  .cull-row { grid-template-columns: 30px minmax(0, 1fr); }
+  .cull-decision { grid-column: 2; width: fit-content; }
   .job-row { grid-template-columns: 44px minmax(0, 1fr); padding: 12px; }
   .thumb { width: 44px; height: 40px; }
   .job-percent { display: none; }

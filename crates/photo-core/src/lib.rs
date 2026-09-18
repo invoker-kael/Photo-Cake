@@ -78,4 +78,4 @@ pub use semantic_grouping::{
     refine_group_by_similarity, ImageEmbedding, SemanticGroupKind, SemanticGroupingConfig,
     SemanticGroupingError, SemanticPhotoGroup,
 };
-pub use xmp::{sidecar_path_for_raw, write_recipe_sidecar, XmpEditState};
+pub use xmp::{sidecar_path_for_raw, write_group_sidecars, write_recipe_sidecar, XmpEditState, XmpWriteError};

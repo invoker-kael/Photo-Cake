@@ -1,10 +1,11 @@
 use photo_core::{
     AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor, ClassificationStore,
-    JobStatus, ModelBundleManifest, ModelPlatform, RawImportResult, RawImporter, RunStep,
+    JobStatus, ModelBundleManifest, ModelPlatform, PhotoGroup, RawAsset, RawCatalog,
+    RawImportResult, RawImporter, RunStep,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -56,9 +57,16 @@ struct BatchWorkerError {
     message: String,
 }
 
+#[derive(Clone, Serialize)]
+struct BatchPhotoContext {
+    assets: Vec<RawAsset>,
+    groups: Vec<PhotoGroup>,
+}
+
 struct AppState {
     runner: Arc<Mutex<AppRunner>>,
     store: BatchStore,
+    catalog: RawCatalog,
     raw_importer: RawImporter,
     controls: Arc<Mutex<HashMap<Uuid, Arc<BatchControl>>>>,
 }
@@ -244,6 +252,35 @@ fn list_batches(state: State<'_, AppState>) -> Result<Vec<Batch>, String> {
 }
 
 #[tauri::command]
+fn batch_photo_context(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<BatchPhotoContext, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let batch = state
+        .store
+        .load_batch(batch_id)
+        .map_err(|error| error.to_string())?;
+    let asset_ids = batch
+        .items
+        .iter()
+        .filter_map(|item| item.asset_id)
+        .collect::<HashSet<_>>();
+    let assets = state
+        .catalog
+        .list_assets()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|asset| asset_ids.contains(&asset.id))
+        .collect();
+    let groups = state
+        .catalog
+        .list_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    Ok(BatchPhotoContext { assets, groups })
+}
+
+#[tauri::command]
 fn create_batch(
     name: String,
     paths: Vec<String>,
@@ -391,6 +428,7 @@ pub fn run() {
                 .unwrap_or(app.path().resource_dir()?.join("models"));
 
             let store = BatchStore::open(&database)?;
+            let catalog = RawCatalog::open(&database)?;
             let classification_store = ClassificationStore::open(&database)?;
             let analyze_executor = LocalAnalyzeExecutor::new(
                 &database,
@@ -406,6 +444,7 @@ pub fn run() {
             app.manage(AppState {
                 runner: Arc::new(Mutex::new(runner)),
                 store,
+                catalog,
                 raw_importer,
                 controls: Arc::new(Mutex::new(HashMap::new())),
             });
@@ -413,6 +452,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_batches,
+            batch_photo_context,
             create_batch,
             import_raw_paths,
             import_raw_directory,

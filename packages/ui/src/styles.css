@@ -202,6 +202,19 @@ h2 { font-size: 19px; }
   background: #101416;
 }
 .cull-toolbar > span { color: #7d868b; font-size: 10px; line-height: 1.4; }
+.cull-toolbar-actions { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.cull-batch-action {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #3b4246;
+  border-radius: 5px;
+  background: #202528;
+  color: #d9dde0;
+  font-size: 9px;
+  cursor: pointer;
+}
+.cull-batch-action:hover:not(:disabled) { background: #292f33; }
+.cull-batch-action:disabled { opacity: .45; cursor: not-allowed; }
 .cull-view-switch { display: flex; gap: 5px; flex: 0 0 auto; }
 .cull-view-switch button {
   min-height: 28px;

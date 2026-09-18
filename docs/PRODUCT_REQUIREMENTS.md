@@ -72,7 +72,7 @@ The reference establishes the desired look. Photo-Cake must adapt exposure/white
 
 Multiple reference sets may coexist for different looks/scenes. The photographer's selected reference must persist independently from AI suggestions and survive reopening the project. A newly imported collection may form new Photo Group IDs and can require explicit rebinding.
 
-Selecting a reference does not itself imply that edits are applied. Photo-Cake must have reliable measured color/exposure evidence before producing adaptive white-balance adjustments; it must not fabricate a color temperature from a rendered preview merely to populate XMP.
+Selecting a reference does not itself imply that edits are applied. On Windows the photographer can persist group-level exposure bias, contrast and saturation in the ReferenceSet StyleProfile; changing the selected reference preserves those preferences. White-balance controls remain unavailable until reliable RAW/metadata evidence exists, so Photo-Cake never fabricates Kelvin/tint merely to populate XMP.
 
 ## Recipe Requirements
 
@@ -120,7 +120,7 @@ Android is a companion for selection, preview, reference management and lightwei
 For a large personal shoot, the user can:
 
 1. point Photo-Cake at existing RAWs without copying them;
-2. quickly see previews and useful groups;
+2. quickly see real cached RAW previews and useful groups;
 3. reduce manual review with culling suggestions;
 4. select a preferred look/reference;
 5. have Photo-Cake adapt it across similar photos;
@@ -151,3 +151,8 @@ Photo-Cake may apply a subset of trustworthy adjustments. Current local preview 
 ## Explicit Lightroom Delivery
 
 Lightroom delivery is a deliberate photographer action, not an automatic batch stage. Before writing, Photo-Cake shows the selected reference and adaptive Recipe count. Photographer-confirmed Reject photos are excluded; AI suggestions alone do not remove photos from delivery. If any target RAW already has a same-basename XMP, Photo-Cake stops the entire group before creating new sidecars so existing edits and group consistency are preserved.
+
+
+## Visual Review Surface
+
+The workstation reuses the existing PreviewStore artifacts in Cull and Reference views. Cached embedded RAW JPEG previews are displayed directly from managed local storage; the UI must not create full-size rendered working copies merely to show thumbnails. Preview availability follows Analyze progress and missing previews degrade to a lightweight RAW placeholder.

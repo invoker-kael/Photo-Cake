@@ -1,11 +1,13 @@
 use photo_core::{
-    build_group_culling_result, render_recipe_preview, write_group_sidecars, AnalysisCache,
-    AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor, ClassificationStore,
+    build_group_culling_result, refine_collection_semantic_groups, render_recipe_preview,
+    write_group_sidecars, AnalysisCache, AutomationRunner, Batch, BatchStore,
+    ClassificationRoutingExecutor, ClassificationStore,
     CullingReview,
     CullingReviewStore, CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus,
     ModelBundleManifest, ModelPlatform, PhotoGroup, PreviewArtifact, PreviewStore, RawAsset,
     RawCatalog, RawImportResult, RawImporter, Recipe, RecipeReviewOverride, RecipeReviewStore,
-    ReferenceStore, ReferenceWorkflowError, RunStep, StyleProfile,
+    ReferenceStore, ReferenceWorkflowError, RunStep, SemanticGroupingConfig,
+    SemanticRefinementReport, StyleProfile,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
@@ -104,6 +106,7 @@ struct AppState {
     preview_store: PreviewStore,
     culling_reviews: CullingReviewStore,
     reference_store: ReferenceStore,
+    classifications: ClassificationStore,
     recipe_reviews: RecipeReviewStore,
     raw_importer: RawImporter,
     cache_root: PathBuf,
@@ -164,10 +167,8 @@ fn resolve_reviewed_group_recipes(
 ) -> Result<(PhotoGroup, Vec<Recipe>), String> {
     let group = state
         .catalog
-        .list_groups()
+        .find_group(group_id)
         .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|group| group.id == group_id)
         .ok_or_else(|| format!("photo group not found: {group_id}"))?;
     let binding = state
         .reference_store
@@ -406,7 +407,7 @@ fn batch_photo_context(
         .collect();
     let groups = state
         .catalog
-        .list_groups_for_collection(batch_id)
+        .list_effective_groups_for_collection(batch_id)
         .map_err(|error| error.to_string())?;
     let preview_ids = assets.iter().map(|asset| asset.id).collect::<Vec<_>>();
     let previews = state
@@ -421,6 +422,41 @@ fn batch_photo_context(
 }
 
 #[tauri::command]
+fn refine_batch_groups(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<SemanticRefinementReport, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let current = state
+        .catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+
+    for group in &current {
+        if state
+            .reference_store
+            .group_binding(group.id)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Err(
+                "semantic refinement is locked after Reference selection; clear group references first"
+                    .to_string(),
+            );
+        }
+    }
+
+    refine_collection_semantic_groups(
+        &state.catalog,
+        &state.classifications,
+        &state.analysis_cache,
+        batch_id,
+        SemanticGroupingConfig::default(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn batch_culling(
     batch_id: String,
     state: State<'_, AppState>,
@@ -428,7 +464,7 @@ fn batch_culling(
     let batch_id = parse_batch_id(&batch_id)?;
     let groups = state
         .catalog
-        .list_groups_for_collection(batch_id)
+        .list_effective_groups_for_collection(batch_id)
         .map_err(|error| error.to_string())?;
 
     groups
@@ -489,7 +525,7 @@ fn batch_reference_bindings(
     let batch_id = parse_batch_id(&batch_id)?;
     let groups = state
         .catalog
-        .list_groups_for_collection(batch_id)
+        .list_effective_groups_for_collection(batch_id)
         .map_err(|error| error.to_string())?;
     let mut bindings = Vec::new();
     for group in groups {
@@ -616,7 +652,7 @@ fn batch_reference_styles(
     let batch_id = parse_batch_id(&batch_id)?;
     let groups = state
         .catalog
-        .list_groups_for_collection(batch_id)
+        .list_effective_groups_for_collection(batch_id)
         .map_err(|error| error.to_string())?;
     let mut styles = Vec::new();
 
@@ -686,7 +722,7 @@ fn batch_reference_previews(
     let batch_id = parse_batch_id(&batch_id)?;
     let groups = state
         .catalog
-        .list_groups_for_collection(batch_id)
+        .list_effective_groups_for_collection(batch_id)
         .map_err(|error| error.to_string())?;
     let mut previews = Vec::new();
 
@@ -1018,8 +1054,10 @@ pub fn run() {
                 &model_root,
                 ModelPlatform::Windows,
             )?;
-            let executor =
-                ClassificationRoutingExecutor::new(analyze_executor, classification_store);
+            let executor = ClassificationRoutingExecutor::new(
+                analyze_executor,
+                classification_store.clone(),
+            );
             let runner = AutomationRunner::new(store.clone(), executor);
             runner.recover_interrupted()?;
             let raw_importer = RawImporter::open(&database)?;
@@ -1031,6 +1069,7 @@ pub fn run() {
                 preview_store,
                 culling_reviews,
                 reference_store,
+                classifications: classification_store,
                 recipe_reviews,
                 raw_importer,
                 cache_root,
@@ -1041,6 +1080,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_batches,
             batch_photo_context,
+            refine_batch_groups,
             batch_culling,
             batch_culling_reviews,
             set_culling_review,

@@ -7,7 +7,6 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -227,7 +226,7 @@ pub fn apply_companion_patch(
     reference_store: &ReferenceStore,
 ) -> Result<CompanionPatchApplyReport, CompanionError> {
     validate_patch_identity(snapshot, patch)?;
-    validate_current_state(snapshot, culling_reviews, reference_store)?;
+    validate_current_state(snapshot, patch, culling_reviews, reference_store)?;
 
     let asset_ids = snapshot
         .assets
@@ -353,6 +352,7 @@ fn validate_patch_identity(
 
 fn validate_current_state(
     snapshot: &CompanionSnapshot,
+    patch: &CompanionDecisionPatch,
     culling_reviews: &CullingReviewStore,
     reference_store: &ReferenceStore,
 ) -> Result<(), CompanionError> {
@@ -362,11 +362,17 @@ fn validate_current_state(
         .map(|review| (review.asset_id, Some(review.decision)))
         .collect::<HashMap<_, _>>();
 
-    for asset in &snapshot.assets {
-        let current = culling_reviews.get(asset.id)?.map(|review| review.decision);
-        let expected = snapshot_reviews.get(&asset.id).copied().flatten();
+    let touched_assets = patch
+        .culling_changes
+        .iter()
+        .map(|change| change.asset_id)
+        .collect::<HashSet<_>>();
+
+    for asset_id in &touched_assets {
+        let current = culling_reviews.get(*asset_id)?.map(|review| review.decision);
+        let expected = snapshot_reviews.get(asset_id).copied().flatten();
         if current != expected {
-            return Err(CompanionError::ConcurrentCullingChange(asset.id));
+            return Err(CompanionError::ConcurrentCullingChange(*asset_id));
         }
     }
 
@@ -376,11 +382,23 @@ fn validate_current_state(
         .map(|state| (state.binding.group_id, Some(state.binding.clone())))
         .collect::<HashMap<_, _>>();
 
-    for group in &snapshot.groups {
-        let current = reference_store.group_binding(group.id)?;
-        let expected = snapshot_references.get(&group.id).cloned().flatten();
+    let mut touched_groups = patch
+        .reference_changes
+        .iter()
+        .map(|change| change.group_id)
+        .collect::<HashSet<_>>();
+
+    for state in &snapshot.references {
+        if touched_assets.contains(&state.binding.selected_reference_asset_id) {
+            touched_groups.insert(state.binding.group_id);
+        }
+    }
+
+    for group_id in touched_groups {
+        let current = reference_store.group_binding(group_id)?;
+        let expected = snapshot_references.get(&group_id).cloned().flatten();
         if current != expected {
-            return Err(CompanionError::ConcurrentReferenceChange(group.id));
+            return Err(CompanionError::ConcurrentReferenceChange(group_id));
         }
     }
 
@@ -578,6 +596,43 @@ mod tests {
             Err(CompanionError::DuplicateCullingChange(id)) if id == asset_id
         ));
         assert!(culling.get(asset_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn unrelated_workstation_change_does_not_block_patch() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("project.sqlite3");
+        let culling = CullingReviewStore::open(&db).unwrap();
+        let references = ReferenceStore::open(&db).unwrap();
+        let asset_id = Uuid::new_v4();
+        let unrelated = Uuid::new_v4();
+        let group_id = Uuid::new_v4();
+        let snapshot = snapshot(asset_id, group_id);
+
+        culling
+            .set(unrelated, CullingUserDecision::Review)
+            .unwrap();
+
+        let patch = CompanionDecisionPatch {
+            schema_version: COMPANION_SNAPSHOT_SCHEMA_VERSION,
+            base_snapshot_id: snapshot.snapshot_id,
+            batch_id: snapshot.batch_id,
+            culling_changes: vec![CompanionCullingChange {
+                asset_id,
+                decision: Some(CullingUserDecision::Keep),
+            }],
+            reference_changes: Vec::new(),
+        };
+
+        apply_companion_patch(&snapshot, &patch, &culling, &references).unwrap();
+        assert_eq!(
+            culling.get(asset_id).unwrap().unwrap().decision,
+            CullingUserDecision::Keep
+        );
+        assert_eq!(
+            culling.get(unrelated).unwrap().unwrap().decision,
+            CullingUserDecision::Review
+        );
     }
 
     #[test]

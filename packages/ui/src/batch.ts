@@ -87,6 +87,13 @@ export interface BackendPhotoContext {
   previews?: BackendPreviewArtifact[];
 }
 
+export interface BackendSemanticRefinementReport {
+  collection_id: string;
+  refined_parent_group_ids: string[];
+  pending_asset_ids: string[];
+  effective_groups: BackendPhotoGroup[];
+}
+
 export interface BackendRawImportResult extends BackendPhotoContext {
   batch: BackendBatch | null;
   skipped_non_raw: string[];
@@ -192,6 +199,7 @@ export interface PhotoCakeBridge {
   cancelBatch(batchId: string): Promise<BackendBatch>;
   importRawDirectory?(): Promise<BackendRawImportResult | null>;
   loadPhotoContext?(batchId: string): Promise<BackendPhotoContext>;
+  refineGroups?(batchId: string): Promise<BackendSemanticRefinementReport>;
   loadCulling?(batchId: string): Promise<BackendGroupCullingResult[]>;
   loadCullingReviews?(batchId: string): Promise<BackendCullingReview[]>;
   setCullingReview?(assetId: string, decision: CullingUserDecision | null): Promise<void>;

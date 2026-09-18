@@ -1,4 +1,7 @@
-use crate::{LocalModelError, LocalSemanticModels, RawPreviewError, extract_largest_embedded_jpeg, score_image_quality, source_fingerprint};
+use crate::{
+    LocalModelError, LocalSemanticModels, RawPreviewError, analyze_preview_exposure,
+    extract_largest_embedded_jpeg, score_image_quality, source_fingerprint,
+};
 use image::DynamicImage;
 use photo_core::{
     AnalysisArtifact, AnalysisCache, AnalysisCacheError, AnalysisCacheKey, BatchItem, BatchStage,
@@ -16,6 +19,9 @@ const CLASSIFIER_POLICY_VERSION: &str = "portrait-policy-v1";
 const QUALITY_MODEL_ID: &str = "deterministic-preview-quality";
 const QUALITY_MODEL_VERSION: &str = "1";
 const QUALITY_CONFIG_HASH: &str = "laplacian-clipping-v1";
+const EXPOSURE_MODEL_ID: &str = "preview-relative-exposure";
+const EXPOSURE_MODEL_VERSION: &str = "1";
+const EXPOSURE_CONFIG_HASH: &str = "trimmed-luma-relative-v1";
 
 #[derive(Debug, Error)]
 pub enum AnalyzeError {
@@ -89,6 +95,23 @@ impl LocalAnalyzeExecutor {
             self.analysis_cache.put(&AnalysisArtifact {
                 key: quality_key,
                 payload_json: serde_json::to_value(&quality)?,
+            })?;
+        }
+
+        let exposure_key = AnalysisCacheKey {
+            asset_id,
+            source_fingerprint: fingerprint.clone(),
+            preview_revision: preview.revision.clone(),
+            task: InferenceTask::ExposureAnalysis,
+            model_id: EXPOSURE_MODEL_ID.to_string(),
+            model_version: EXPOSURE_MODEL_VERSION.to_string(),
+            config_hash: EXPOSURE_CONFIG_HASH.to_string(),
+        };
+        if self.analysis_cache.get(&exposure_key)?.is_none() {
+            let exposure = analyze_preview_exposure(asset_id, &image);
+            self.analysis_cache.put(&AnalysisArtifact {
+                key: exposure_key,
+                payload_json: serde_json::to_value(&exposure)?,
             })?;
         }
 

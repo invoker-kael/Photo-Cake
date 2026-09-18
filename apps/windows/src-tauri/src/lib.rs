@@ -1,6 +1,7 @@
 use photo_core::{
-    build_group_culling_result, AnalysisCache, AutomationRunner, Batch, BatchStore,
-    write_group_sidecars, ClassificationRoutingExecutor, ClassificationStore, CullingReview,
+    build_group_culling_result, render_recipe_preview, write_group_sidecars, AnalysisCache,
+    AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor, ClassificationStore,
+    CullingReview,
     CullingReviewStore, CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus,
     ModelBundleManifest, ModelPlatform, PhotoGroup, PreviewArtifact, PreviewStore, RawAsset,
     RawCatalog, RawImportResult, RawImporter, Recipe, RecipeReviewOverride, RecipeReviewStore,
@@ -88,6 +89,13 @@ struct GroupReferenceStyle {
     style_profile: StyleProfile,
 }
 
+#[derive(Clone, Serialize)]
+struct ReviewRenderResult {
+    asset_id: Uuid,
+    recipe_id: Uuid,
+    cache_path: String,
+}
+
 struct AppState {
     runner: Arc<Mutex<AppRunner>>,
     store: BatchStore,
@@ -98,6 +106,7 @@ struct AppState {
     reference_store: ReferenceStore,
     recipe_reviews: RecipeReviewStore,
     raw_importer: RawImporter,
+    cache_root: PathBuf,
     controls: Arc<Mutex<HashMap<Uuid, Arc<BatchControl>>>>,
 }
 
@@ -147,6 +156,54 @@ fn apply_recipe_reviews(
         }
     }
     Ok(())
+}
+
+fn resolve_reviewed_group_recipes(
+    group_id: Uuid,
+    state: &AppState,
+) -> Result<(PhotoGroup, Vec<Recipe>), String> {
+    let group = state
+        .catalog
+        .list_groups()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|group| group.id == group_id)
+        .ok_or_else(|| format!("photo group not found: {group_id}"))?;
+    let binding = state
+        .reference_store
+        .group_binding(group_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "select a reference photo before reviewing edits".to_string())?;
+
+    if state
+        .culling_reviews
+        .get(binding.selected_reference_asset_id)
+        .map_err(|error| error.to_string())?
+        .is_some_and(|review| review.decision == CullingUserDecision::Reject)
+    {
+        return Err("selected reference is explicitly rejected; choose another reference".to_string());
+    }
+
+    let reference_set = state
+        .reference_store
+        .get_set(binding.reference_set_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
+    let editable = editable_group(&group, &state.culling_reviews)?;
+    if editable.asset_ids.is_empty() {
+        return Err("all photos in this group are explicitly rejected".to_string());
+    }
+
+    let mut resolved = reference_set
+        .resolve_group_from_cache(
+            &state.analysis_cache,
+            &editable,
+            binding.selected_reference_asset_id,
+            1,
+        )
+        .map_err(|error| error.to_string())?;
+    apply_recipe_reviews(&mut resolved.recipes, &state.recipe_reviews)?;
+    Ok((editable, resolved.recipes))
 }
 
 fn lock_runner<T>(
@@ -691,6 +748,49 @@ fn batch_reference_previews(
 }
 
 #[tauri::command]
+fn render_group_recipe_preview(
+    group_id: String,
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<ReviewRenderResult, String> {
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let asset_id = Uuid::parse_str(&asset_id)
+        .map_err(|error| format!("invalid asset id: {error}"))?;
+
+    let (editable, recipes) = resolve_reviewed_group_recipes(group_id, &state)?;
+    if !editable.asset_ids.contains(&asset_id) {
+        return Err("photo is not an editable member of this group".to_string());
+    }
+    let recipe = recipes
+        .into_iter()
+        .find(|recipe| recipe.target_asset_id == Some(asset_id))
+        .ok_or_else(|| format!("adaptive Recipe not found for asset {asset_id}"))?;
+    let source = state
+        .preview_store
+        .get(asset_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "RAW preview is not ready yet".to_string())?;
+    let destination = state
+        .cache_root
+        .join("review-previews")
+        .join(format!("{asset_id}.jpg"));
+
+    render_recipe_preview(
+        &PathBuf::from(source.cache_path),
+        &destination,
+        &recipe,
+    )
+    .map_err(|error| error.to_string())?;
+
+    Ok(ReviewRenderResult {
+        asset_id,
+        recipe_id: recipe.id,
+        cache_path: destination.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
 fn write_group_reference_xmp(
     group_id: String,
     state: State<'_, AppState>,
@@ -933,6 +1033,7 @@ pub fn run() {
                 reference_store,
                 recipe_reviews,
                 raw_importer,
+                cache_root,
                 controls: Arc::new(Mutex::new(HashMap::new())),
             });
             Ok(())
@@ -952,6 +1053,7 @@ pub fn run() {
             batch_reference_styles,
             update_group_reference_style,
             batch_reference_previews,
+            render_group_recipe_preview,
             write_group_reference_xmp,
             create_batch,
             import_raw_paths,

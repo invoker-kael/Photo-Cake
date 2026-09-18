@@ -260,3 +260,11 @@ An existing same-basename XMP is not automatically a conflict when it is a Photo
 
 Matching sidecars are preserved byte-for-byte and skipped. Missing sidecars may be created in the same group. Any existing XMP that cannot be parsed as Photo-Cake state or whose supported fields differ remains a hard conflict and aborts the group before new files are created. Extra Lightroom fields that Photo-Cake does not manage are never overwritten.
 
+
+### Batch Lightroom handoff
+
+The workstation can hand off every currently ready Lightroom group in one explicit action. A group is batch-ready only when it has a selected Reference, resolved target-bound Recipes, no pending evidence, a completed read-only XMP preflight and at least one missing sidecar.
+
+Before creating the first new XMP, the core preflights every selected group. Any conflicting or unverifiable existing XMP aborts the whole batch before writes begin. Matching Photo-Cake sidecars are treated as already current and are preserved byte-for-byte.
+
+Each group repeats its race-safe preflight immediately before writing. If a later group fails because the filesystem changed after the batch preflight, Photo-Cake removes sidecars newly created by earlier groups in that same batch. Pre-existing matching sidecars and source RAW files are never removed or modified.

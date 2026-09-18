@@ -217,6 +217,10 @@ export interface BackendLightroomHandoffResult {
   written_sidecars: string[];
 }
 
+export interface BackendLightroomBatchHandoffResult {
+  groups: BackendLightroomHandoffResult[];
+}
+
 export interface BackendRecipeReviewOverride {
   asset_id: string;
   exposure_delta_ev: number;
@@ -278,6 +282,7 @@ export interface PhotoCakeBridge {
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
   preflightGroupXmp?(groupId: string): Promise<BackendLightroomHandoffPreflight>;
   writeGroupXmp?(groupId: string): Promise<BackendLightroomHandoffResult>;
+  writeBatchXmp?(groupIds: string[]): Promise<BackendLightroomBatchHandoffResult>;
   subscribeBatchUpdates?(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }
 

@@ -7,6 +7,7 @@ import {
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
   type BackendGroupReferenceStyle,
+  type BackendLightroomBatchHandoffResult,
   type BackendLightroomHandoffPreflight,
   type BackendLightroomHandoffResult,
   type BackendPhotoContext,
@@ -29,6 +30,7 @@ export type {
   BackendGroupCullingResult,
   BackendGroupReferencePreview,
   BackendGroupReferenceStyle,
+  BackendLightroomBatchHandoffResult,
   BackendLightroomHandoffPreflight,
   BackendLightroomHandoffResult,
   BackendPhotoContext,
@@ -196,6 +198,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [handoffPreflightLoading, setHandoffPreflightLoading] = useState(false);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
   const [handoffRunning, setHandoffRunning] = useState<string | null>(null);
+  const [handoffBatchRunning, setHandoffBatchRunning] = useState(false);
 
   useEffect(() => {
     if (!bridge) return;
@@ -1093,6 +1096,36 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     }
   };
 
+  const writeBatchXmp = async (groupIds: string[]) => {
+    if (!bridge?.writeBatchXmp || groupIds.length === 0) return;
+    setHandoffBatchRunning(true);
+    try {
+      const result: BackendLightroomBatchHandoffResult = await bridge.writeBatchXmp(groupIds);
+      setHandoffResults((current) => ({
+        ...current,
+        ...Object.fromEntries(result.groups.map((group) => [group.group_id, group])),
+      }));
+      setHandoffPreflights((current) => {
+        const next = { ...current };
+        for (const group of result.groups) {
+          const previous = next[group.group_id];
+          if (!previous) continue;
+          next[group.group_id] = {
+            ...previous,
+            current_sidecars: previous.target_sidecars,
+            conflicting_sidecars: [],
+          };
+        }
+        return next;
+      });
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setHandoffBatchRunning(false);
+    }
+  };
+
   const visibleViews: ReadonlyArray<readonly [WorkspaceView, string]> =
     mode === "companion"
       ? [
@@ -1848,11 +1881,84 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     </section>
   );
 
-  const renderLightroom = () => (
+  const renderLightroom = () => {
+    const readyGroups = (photoContext?.groups ?? []).flatMap((group) => {
+      const binding = referenceBindings[group.id];
+      const preview = referencePreviews[group.id];
+      const preflight = handoffPreflights[group.id];
+      const deliverableCount =
+        preview?.recipes.filter((recipe) => recipe.target_asset_id != null).length ?? 0;
+      if (
+        binding == null ||
+        preview == null ||
+        preview.pending_asset_id != null ||
+        deliverableCount === 0 ||
+        preflight == null
+      ) {
+        return [];
+      }
+
+      const conflicts = preflight.conflicting_sidecars.length;
+      const missing = Math.max(
+        0,
+        preflight.target_sidecars.length -
+          preflight.current_sidecars.length -
+          preflight.conflicting_sidecars.length,
+      );
+      return [{ groupId: group.id, conflicts, missing }];
+    });
+    const batchConflictCount = readyGroups.reduce((total, group) => total + group.conflicts, 0);
+    const batchGroupIds = readyGroups
+      .filter((group) => group.conflicts === 0 && group.missing > 0)
+      .map((group) => group.groupId);
+    const batchMissingCount = readyGroups.reduce(
+      (total, group) => total + (group.conflicts === 0 ? group.missing : 0),
+      0,
+    );
+
+    return (
     <section className="queue-card">
       <div className="queue-title">
         <strong>Lightroom XMP handoff</strong>
-        <span>Explicit write only · original RAW stays untouched · existing XMP aborts the whole group</span>
+        <span>Explicit create-new writes · original RAW stays untouched · conflicting XMP blocks group or batch</span>
+      </div>
+      <div className="handoff-card">
+        <div className="handoff-card-main">
+          <span>Batch handoff</span>
+          <strong>{batchMissingCount} missing XMP across {batchGroupIds.length} ready groups</strong>
+          <small>
+            All selected groups are preflighted before the first new sidecar is created.
+            Matching Photo-Cake XMP stays untouched.
+          </small>
+          {batchConflictCount > 0 && (
+            <small className="error-text">
+              {batchConflictCount} conflicting XMP must be resolved before batch handoff.
+            </small>
+          )}
+        </div>
+        <div className="handoff-actions">
+          <button
+            className="button primary"
+            disabled={
+              !bridge?.writeBatchXmp ||
+              handoffBatchRunning ||
+              handoffRunning != null ||
+              handoffPreflightLoading ||
+              batchConflictCount > 0 ||
+              batchGroupIds.length === 0
+            }
+            onClick={() => void writeBatchXmp(batchGroupIds)}
+          >
+            {handoffBatchRunning
+              ? "Writing batch XMP…"
+              : batchConflictCount > 0
+                ? "Resolve XMP conflicts"
+                : batchGroupIds.length > 0
+                  ? `Write ${batchMissingCount} missing XMP`
+                  : "Batch already current / not ready"}
+          </button>
+          <small>If a later group fails, XMP newly created by this batch is rolled back.</small>
+        </div>
       </div>
       <div className="handoff-groups">
         {photoContext?.groups.map((group, index) => {
@@ -1948,7 +2054,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   <>
                     <button
                       className="button primary"
-                      disabled={!ready || !bridge?.writeGroupXmp || handoffRunning != null}
+                      disabled={!ready || !bridge?.writeGroupXmp || handoffRunning != null || handoffBatchRunning}
                       onClick={() => void writeGroupXmp(group.id)}
                     >
                       {handoffRunning === group.id
@@ -1975,7 +2081,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         )}
       </div>
     </section>
-  );
+    );
+  };
 
   const renderFutureView = (title: string, body: string) => (
     <section className="queue-card">

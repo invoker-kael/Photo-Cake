@@ -344,6 +344,16 @@ pub fn preflight_group_sidecars(
     Ok(targets)
 }
 
+fn first_conflicting_sidecar(preflight: &[XmpSidecarPreflight]) -> Option<PathBuf> {
+    preflight.iter().find_map(|target| {
+        if target.existing_sidecar.is_some() && !target.existing_matches_recipe {
+            target.existing_sidecar.clone()
+        } else {
+            None
+        }
+    })
+}
+
 /// Write one same-basename XMP sidecar for each target-bound Recipe.
 ///
 /// The caller supplies catalog assets, so Photo-Cake never needs to copy RAW
@@ -356,13 +366,7 @@ pub fn write_group_sidecars(
 
     // Repeat the whole-group conflict gate at write time so a sidecar created
     // after the UI preflight still cannot be overwritten.
-    if let Some(existing) = preflight.iter().find_map(|target| {
-        if target.existing_sidecar.is_some() && !target.existing_matches_recipe {
-            target.existing_sidecar.clone()
-        } else {
-            None
-        }
-    }) {
+    if let Some(existing) = first_conflicting_sidecar(&preflight) {
         return Err(XmpWriteError::ExistingSidecar(existing));
     }
 
@@ -382,6 +386,43 @@ pub fn write_group_sidecars(
         }
     }
     Ok(written)
+}
+
+/// Writes multiple Lightroom handoff groups as one batch operation.
+///
+/// Every group is preflighted before the first new sidecar is created. Group
+/// writes still repeat their own race-safe preflight. If a later group fails,
+/// sidecars created by earlier groups in this batch are removed; matching
+/// pre-existing Photo-Cake sidecars are never touched.
+pub fn write_sidecar_batch(
+    groups: &[(Vec<RawAsset>, Vec<Recipe>)],
+) -> Result<Vec<Vec<PathBuf>>, XmpWriteError> {
+    for (assets, recipes) in groups {
+        let preflight = preflight_group_sidecars(assets, recipes)?;
+        if let Some(existing) = first_conflicting_sidecar(&preflight) {
+            return Err(XmpWriteError::ExistingSidecar(existing));
+        }
+    }
+
+    let mut results = Vec::with_capacity(groups.len());
+    let mut batch_written = Vec::new();
+
+    for (assets, recipes) in groups {
+        match write_group_sidecars(assets, recipes) {
+            Ok(written) => {
+                batch_written.extend(written.iter().cloned());
+                results.push(written);
+            }
+            Err(error) => {
+                for path in &batch_written {
+                    let _ = std::fs::remove_file(path);
+                }
+                return Err(error);
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 #[cfg(test)]
@@ -814,4 +855,149 @@ mod tests {
         assert_eq!(std::fs::read(&first_path).unwrap(), before_first);
         assert_eq!(std::fs::read(&second_path).unwrap(), before_second);
     }
+    #[test]
+    fn batch_handoff_preflights_every_group_before_first_write() {
+        let dir = tempdir().unwrap();
+        let first_path = dir.path().join("IMG_0201.CR3");
+        let second_path = dir.path().join("IMG_0202.CR3");
+        std::fs::write(&first_path, b"raw-one").unwrap();
+        std::fs::write(&second_path, b"raw-two").unwrap();
+        std::fs::write(dir.path().join("IMG_0202.xmp"), b"lightroom-edit").unwrap();
+
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let groups = vec![
+            (
+                vec![RawAsset {
+                    id: first_id,
+                    source_path: first_path.to_string_lossy().into_owned(),
+                    filename: "IMG_0201.CR3".into(),
+                    extension: "cr3".into(),
+                    camera_id: None,
+                    capture_time_ms: None,
+                    file_time_ms: None,
+                    sequence_number: Some(201),
+                }],
+                vec![recipe(Some(first_id))],
+            ),
+            (
+                vec![RawAsset {
+                    id: second_id,
+                    source_path: second_path.to_string_lossy().into_owned(),
+                    filename: "IMG_0202.CR3".into(),
+                    extension: "cr3".into(),
+                    camera_id: None,
+                    capture_time_ms: None,
+                    file_time_ms: None,
+                    sequence_number: Some(202),
+                }],
+                vec![recipe(Some(second_id))],
+            ),
+        ];
+
+        let error = write_sidecar_batch(&groups).unwrap_err();
+        assert!(matches!(error, XmpWriteError::ExistingSidecar(_)));
+        assert!(!dir.path().join("IMG_0201.xmp").exists());
+        assert_eq!(
+            std::fs::read(dir.path().join("IMG_0202.xmp")).unwrap(),
+            b"lightroom-edit"
+        );
+    }
+
+    #[test]
+    fn batch_handoff_preserves_current_sidecars_and_writes_missing_groups() {
+        let dir = tempdir().unwrap();
+        let first_path = dir.path().join("IMG_0210.CR3");
+        let second_path = dir.path().join("IMG_0211.CR3");
+        std::fs::write(&first_path, b"raw-one").unwrap();
+        std::fs::write(&second_path, b"raw-two").unwrap();
+
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let first_asset = RawAsset {
+            id: first_id,
+            source_path: first_path.to_string_lossy().into_owned(),
+            filename: "IMG_0210.CR3".into(),
+            extension: "cr3".into(),
+            camera_id: None,
+            capture_time_ms: None,
+            file_time_ms: None,
+            sequence_number: Some(210),
+        };
+        let second_asset = RawAsset {
+            id: second_id,
+            source_path: second_path.to_string_lossy().into_owned(),
+            filename: "IMG_0211.CR3".into(),
+            extension: "cr3".into(),
+            camera_id: None,
+            capture_time_ms: None,
+            file_time_ms: None,
+            sequence_number: Some(211),
+        };
+
+        let first_recipe = recipe(Some(first_id));
+        write_recipe_sidecar(&first_path, &first_recipe).unwrap();
+        let current_bytes = std::fs::read(dir.path().join("IMG_0210.xmp")).unwrap();
+
+        let mut regenerated = first_recipe.clone();
+        regenerated.id = Uuid::new_v4();
+        let groups = vec![
+            (vec![first_asset], vec![regenerated]),
+            (vec![second_asset], vec![recipe(Some(second_id))]),
+        ];
+
+        let written = write_sidecar_batch(&groups).unwrap();
+        assert!(written[0].is_empty());
+        assert_eq!(written[1], vec![dir.path().join("IMG_0211.xmp")]);
+        assert_eq!(
+            std::fs::read(dir.path().join("IMG_0210.xmp")).unwrap(),
+            current_bytes
+        );
+        assert!(dir.path().join("IMG_0211.xmp").is_file());
+    }
+
+    #[test]
+    fn batch_handoff_rolls_back_earlier_groups_when_later_write_fails() {
+        let dir = tempdir().unwrap();
+        let first_path = dir.path().join("IMG_0220.CR3");
+        std::fs::write(&first_path, b"raw-one").unwrap();
+
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let missing_parent_path = dir.path().join("missing").join("IMG_0221.CR3");
+        let groups = vec![
+            (
+                vec![RawAsset {
+                    id: first_id,
+                    source_path: first_path.to_string_lossy().into_owned(),
+                    filename: "IMG_0220.CR3".into(),
+                    extension: "cr3".into(),
+                    camera_id: None,
+                    capture_time_ms: None,
+                    file_time_ms: None,
+                    sequence_number: Some(220),
+                }],
+                vec![recipe(Some(first_id))],
+            ),
+            (
+                vec![RawAsset {
+                    id: second_id,
+                    source_path: missing_parent_path.to_string_lossy().into_owned(),
+                    filename: "IMG_0221.CR3".into(),
+                    extension: "cr3".into(),
+                    camera_id: None,
+                    capture_time_ms: None,
+                    file_time_ms: None,
+                    sequence_number: Some(221),
+                }],
+                vec![recipe(Some(second_id))],
+            ),
+        ];
+
+        let error = write_sidecar_batch(&groups).unwrap_err();
+        assert!(matches!(error, XmpWriteError::Io(_)));
+        assert!(!dir.path().join("IMG_0220.xmp").exists());
+        assert!(!missing_parent_path.with_extension("xmp").exists());
+    }
+
 }

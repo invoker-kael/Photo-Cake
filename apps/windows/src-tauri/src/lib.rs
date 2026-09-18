@@ -2,7 +2,7 @@ use photo_core::{
     apply_companion_patch as apply_companion_patch_core,
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
     preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
-    write_group_sidecars, AnalysisCache,
+    write_group_sidecars, write_sidecar_batch, AnalysisCache,
     AssetMetadataEvidence, AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor,
     ClassificationStore, CompanionDecisionPatch, CompanionPatchApplyReport, CompanionSnapshot,
     CompanionSnapshotStore, CullingReview, CullingReviewStore, CullingUserDecision,
@@ -95,6 +95,11 @@ struct LightroomHandoffPreflight {
 struct LightroomHandoffResult {
     group_id: Uuid,
     written_sidecars: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct LightroomBatchHandoffResult {
+    groups: Vec<LightroomHandoffResult>,
 }
 
 #[derive(Clone, Serialize)]
@@ -1113,6 +1118,48 @@ fn write_group_reference_xmp(
 }
 
 #[tauri::command]
+fn write_reference_xmp_batch(
+    group_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<LightroomBatchHandoffResult, String> {
+    if group_ids.is_empty() {
+        return Err("no Lightroom groups selected for batch handoff".to_string());
+    }
+
+    let mut seen = HashSet::new();
+    let mut resolved_ids = Vec::with_capacity(group_ids.len());
+    let mut resolved_groups = Vec::with_capacity(group_ids.len());
+
+    for value in group_ids {
+        let group_id = Uuid::parse_str(&value)
+            .map_err(|error| format!("invalid group id: {error}"))?;
+        if !seen.insert(group_id) {
+            return Err(format!("duplicate Lightroom group in batch handoff: {group_id}"));
+        }
+
+        resolved_ids.push(group_id);
+        resolved_groups.push(resolve_lightroom_handoff(group_id, &state)?);
+    }
+
+    let written = write_sidecar_batch(&resolved_groups)
+        .map_err(|error| error.to_string())?;
+
+    Ok(LightroomBatchHandoffResult {
+        groups: resolved_ids
+            .into_iter()
+            .zip(written)
+            .map(|(group_id, paths)| LightroomHandoffResult {
+                group_id,
+                written_sidecars: paths
+                    .into_iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect(),
+            })
+            .collect(),
+    })
+}
+
+#[tauri::command]
 fn create_batch(
     name: String,
     paths: Vec<String>,
@@ -1325,6 +1372,7 @@ pub fn run() {
             render_group_recipe_preview,
             preflight_group_reference_xmp,
             write_group_reference_xmp,
+            write_reference_xmp_batch,
             create_batch,
             import_raw_paths,
             import_raw_directory,

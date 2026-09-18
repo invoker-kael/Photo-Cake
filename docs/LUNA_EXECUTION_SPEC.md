@@ -101,7 +101,7 @@ At every run inspect what is already implemented and take the smallest complete 
 3. add reliable RAW/metadata white-balance evidence when available, without blocking exposure-only workflow;
 4. add dedicated eye/expression evidence only when a reliable local model exists; current Cull already surfaces segmentation-based people/face/subject evidence without folding it into quality scoring;
 5. validate emitted XMP against real Lightroom/Camera Raw fixtures in addition to the implemented local parse-back gate;
-6. shared/Android review/reference UX;
+6. Android project transport/synchronization and mobile preview availability; the real Cull/Groups/Reference companion contract is already wired;
 7. direct export polish and richer local AI/edit controls.
 
 Do not redo lower-numbered items that already pass.
@@ -204,3 +204,10 @@ Downstream white balance is pair-gated at multiple boundaries. If either Tempera
 ## XMP Compatibility Rule
 
 Do not depend on a specific XML namespace prefix when reading supported XMP attributes; namespace processors may legally rename prefixes. Continue treating existing `.xmp` or `.XMP` as protected photographer/Lightroom state. Until a safe merge strategy exists, never overwrite an existing sidecar.
+
+
+## Android Companion Capability Rule
+
+Android reuses shared `photo-core` persistence and may read/write photographer selection/reference decisions. Treat platform bridge methods as capabilities: do not add fake no-op or always-error workstation methods merely to satisfy an interface. Keep RAW import/analyze control, StyleProfile/Recipe editing, direct export and Lightroom XMP writes workstation-only.
+
+The next Android gap is transport of project DB/state and preview artifacts between workstation and device. Solve transport separately from photography business logic; do not introduce cloud accounts or duplicate stores just to synchronize.

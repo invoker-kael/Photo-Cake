@@ -2,23 +2,70 @@
 
 ## Luna Execution Entry
 
-Read first:
+Luna must read first:
 
-- `LUNA_EXECUTION_GUIDE.md`
+1. `LUNA_EXECUTION_SPEC.md`
+2. `PHOTO_CAKE_WORKFLOW_REQUIREMENTS.md`
+3. `ARCHITECTURE.md`
+4. `PRODUCT_ROADMAP.md`
 
-This file defines implementation phases, execution rules, and completion criteria.
+`LUNA_EXECUTION_SPEC.md` is the execution authority.
 
-## Product Requirements
+---
+
+## Documents
+
+### Execution
+
+- `LUNA_EXECUTION_SPEC.md`
+
+Defines:
+- implementation rules
+- execution order
+- phase completion criteria
+- scope control
+
+### Product Requirements
 
 - `PHOTO_CAKE_WORKFLOW_REQUIREMENTS.md`
 
-This file defines the product workflow, RAW + XMP Lightroom workflow, direct export requirements, and storage strategy.
+Defines:
+- RAW workflow
+- Lightroom XMP workflow
+- direct export requirements
+- storage strategy
 
-## Execution Order
+### Architecture
 
-1. Read `LUNA_EXECUTION_GUIDE.md`
-2. Read `PHOTO_CAKE_WORKFLOW_REQUIREMENTS.md`
-3. Inspect current code state
-4. Implement the smallest complete working increment
-5. Test
-6. Continue to next phase
+- `ARCHITECTURE.md`
+
+Defines:
+- system layers
+- platform boundaries
+- technical architecture
+
+### Roadmap
+
+- `PRODUCT_ROADMAP.md`
+
+Defines:
+- long-term feature phases
+- product evolution
+
+---
+
+## Execution Flow
+
+```
+Read docs
+   |
+Inspect code
+   |
+Implement current phase
+   |
+Test
+   |
+Verify build
+   |
+Deliver
+```

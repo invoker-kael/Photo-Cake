@@ -40,7 +40,7 @@ Windows is the primary large-RAW/batch/Lightroom workflow. Android shares the sa
 
 The existing modules are the implementation backbone:
 
-- `raw`, `importer`, `catalog`: source references, stable asset identity and persistence.
+- `raw`, `metadata`, `importer`, `catalog`: source references, best-effort read-only RAW/EXIF capture metadata, stable asset identity and persistence.
 - `preview`, `analysis`, `classification`: reusable evidence for later decisions.
 - `grouping`: fast metadata/time/sequence moment groups.
 - `semantic_grouping`: portrait/scene similarity refinement inside a parent moment group; promote results through `SemanticPhotoGroup::to_photo_group`.

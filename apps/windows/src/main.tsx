@@ -9,6 +9,7 @@ import App, {
   type BackendGroupCullingResult,
   type BackendPhotoContext,
   type BackendRawImportResult,
+  type BackendReferenceBinding,
   type BatchWorkerEvent,
   type PhotoCakeBridge,
 } from "@photo-cake/ui";
@@ -33,6 +34,12 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendCullingReview[]>("batch_culling_reviews", { batchId }),
   setCullingReview: (assetId, decision) =>
     invoke<void>("set_culling_review", { assetId, decision }),
+  loadReferenceBindings: (batchId) =>
+    invoke<BackendReferenceBinding[]>("batch_reference_bindings", { batchId }),
+  setGroupReference: (groupId, assetId) =>
+    invoke<BackendReferenceBinding>("set_group_reference", { groupId, assetId }),
+  clearGroupReference: (groupId) =>
+    invoke<void>("clear_group_reference", { groupId }),
   importRawDirectory: async () => {
     const selected = await open({
       directory: true,

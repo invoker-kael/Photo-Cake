@@ -58,13 +58,13 @@ The existing modules are the implementation backbone:
 
 ```text
 capture time + camera + filename sequence
-  -> Moment PhotoGroup
+  -> persisted Moment PhotoGroup (parent)
   -> local classification + embedding
-  -> SemanticPhotoGroup
-  -> Similar PhotoGroup (SEMANTIC_SIMILARITY)
+  -> persisted SemanticPhotoGroup (child)
+  -> effective Similar PhotoGroup (SEMANTIC_SIMILARITY)
 ```
 
-Semantic refinement stays scoped to its parent moment group so visually similar photographs from unrelated trips/events are not globally merged. Manual grouping/locking remains authoritative.
+Semantic refinement stays scoped to its persisted parent moment group so visually similar photographs from unrelated trips/events are not globally merged. `RawCatalog::list_effective_groups_for_collection` exposes semantic children when present and falls back to the moment parent when evidence is incomplete. Re-refinement replaces only that parent's semantic children; the parent chronology remains available. Manual grouping/locking remains authoritative.
 
 ## Reference-driven Adaptive Editing
 
@@ -116,7 +116,7 @@ Current mapped adjustments:
 - tint
 - saturation
 
-XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. At preview and handoff time, Photo-Cake regenerates the base Recipe from the current ReferenceSet/StyleProfile/evidence and then applies the persisted per-photo review override, so preview and XMP share the same final values. The workstation writes sidecars only after an explicit user action, excludes only photographer-confirmed Reject photos, and preflights the entire group so an existing XMP prevents any partial write. RAW bytes are never changed.
+XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. At preview and handoff time, Photo-Cake regenerates the base Recipe from the current ReferenceSet/StyleProfile/evidence and then applies the persisted per-photo review override, so preview and XMP share the same final values. Newly written XMP is parsed back and validated before success; a failed validation removes the new sidecar and group writing rolls back sidecars created by that operation. The workstation writes sidecars only after an explicit user action, excludes only photographer-confirmed Reject photos, and preflights the entire group so an existing XMP prevents any partial write. RAW bytes are never changed.
 
 Future mappings such as HSL, tone curve, masks and richer skin/color controls extend the Recipe/XMP model rather than creating a second editing model.
 
@@ -202,3 +202,8 @@ The review is keyed by stable RAW asset ID so re-importing the same source keeps
 ## Preview Presentation Boundary
 
 `photo-inference` extracts the embedded RAW JPEG once and `PreviewStore` owns the cached artifact. Windows exposes those same artifacts to the UI through the local Tauri asset protocol; Cull and Reference consume them as thumbnails. Do not add a second thumbnail decoder or duplicate full-size working files. UI refresh follows Analyze progress, while missing artifacts remain placeholders.
+
+
+## Review Preview Evaluator
+
+`edit_preview` is a lightweight review-only evaluator for cached embedded JPEGs. It currently approximates Recipe exposure, contrast and saturation at a bounded preview size. It must stay clearly separated from RAW demosaic/export and must not be treated as Lightroom rendering parity. The Windows command reconstructs the canonical reviewed Recipe server-side before generating the after-preview; the UI never supplies an arbitrary Recipe as authority.

@@ -102,11 +102,19 @@ export interface BackendRawImportResult extends BackendPhotoContext {
 export type CullingDecision = "KEEP" | "REVIEW" | "REJECT_SUGGESTION";
 export type CullingUserDecision = "KEEP" | "REVIEW" | "REJECT";
 
+export interface BackendCullingPortraitEvidence {
+  person_count: number;
+  face_count: number;
+  primary_subject_ratio: number;
+  people_confidence: number;
+}
+
 export interface BackendCullingRecommendation {
   asset_id: string;
   quality_score: number;
   decision: CullingDecision;
   group_rank: number;
+  portrait_evidence?: BackendCullingPortraitEvidence | null;
 }
 
 export interface BackendGroupCullingResult {

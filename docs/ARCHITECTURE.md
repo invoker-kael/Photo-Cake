@@ -21,7 +21,9 @@ Reference Set
     |
 Style Profile
     |
-Recipe / Edit Graph
+Group Color Intent
+    |
+Per-photo Adaptive Recipe
     |
 XMP Mapping
     |
@@ -158,3 +160,31 @@ Foundation:
 ```text
 RAW -> Reference -> Recipe -> XMP -> Lightroom
 ```
+
+
+---
+
+# Adaptive Group Editing
+
+Existing `color_sync` is reused as the bridge between group style and individual photos.
+
+```text
+Reference Set / Style Profile
+        |
+        v
+Group Color Intent
+        |
+        v
+Analyze each photo
+        |
+        v
+Resolved per-photo edits
+        |
+        v
+Per-photo Recipe
+        |
+        v
+Same-basename XMP
+```
+
+The group shares visual intent, but each photo receives its own exposure correction and other resolved values. Do not blindly copy one reference photo's numeric settings across the whole group.

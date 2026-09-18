@@ -701,6 +701,41 @@ mod tests {
     }
 
     #[test]
+    fn find_group_resolves_persisted_semantic_child_for_downstream_workflow() {
+        let dir = tempdir().unwrap();
+        let catalog = RawCatalog::open(dir.path().join("catalog.sqlite3")).unwrap();
+        let assets = catalog
+            .ensure_assets(&[
+                sample_asset("C:/shoot/IMG_4501.CR3", 4501),
+                sample_asset("C:/shoot/IMG_4502.CR3", 4502),
+            ])
+            .unwrap();
+        let collection = Uuid::new_v4();
+        let parent = initial_group_raw_assets(&assets, InitialGroupingConfig::default())
+            .remove(0);
+        catalog
+            .replace_automatic_groups(collection, &[parent.clone()])
+            .unwrap();
+
+        let child = SemanticPhotoGroup {
+            id: Uuid::new_v4(),
+            parent_group_id: parent.id,
+            kind: SemanticGroupKind::SceneSimilar,
+            asset_ids: assets.iter().map(|asset| asset.id).collect(),
+            reference_candidate_id: Some(assets[0].id),
+            similarity_threshold: 0.84,
+        };
+        catalog
+            .replace_semantic_groups(parent.id, &[child.clone()])
+            .unwrap();
+
+        assert_eq!(
+            catalog.find_group(child.id).unwrap(),
+            Some(child.to_photo_group())
+        );
+    }
+
+    #[test]
     fn replacing_parent_groups_cascades_stale_semantic_children() {
         let dir = tempdir().unwrap();
         let catalog = RawCatalog::open(dir.path().join("catalog.sqlite3")).unwrap();

@@ -8,6 +8,7 @@ import App, {
   type BackendCullingReview,
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
+  type BackendGroupReferenceStyle,
   type BackendLightroomHandoffResult,
   type BackendPhotoContext,
   type BackendRawImportResult,
@@ -42,6 +43,20 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendReferenceBinding>("set_group_reference", { groupId, assetId }),
   clearGroupReference: (groupId) =>
     invoke<void>("clear_group_reference", { groupId }),
+  loadReferenceStyles: (batchId) =>
+    invoke<BackendGroupReferenceStyle[]>("batch_reference_styles", { batchId }),
+  updateReferenceStyle: (
+    groupId,
+    exposureBiasEv,
+    contrastPreference,
+    saturationPreference,
+  ) =>
+    invoke<BackendGroupReferenceStyle>("update_group_reference_style", {
+      groupId,
+      exposureBiasEv,
+      contrastPreference,
+      saturationPreference,
+    }),
   loadReferencePreviews: (batchId) =>
     invoke<BackendGroupReferencePreview[]>("batch_reference_previews", { batchId }),
   writeGroupXmp: (groupId) =>

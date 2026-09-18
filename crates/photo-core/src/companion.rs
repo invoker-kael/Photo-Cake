@@ -1,9 +1,11 @@
 use crate::{
-    build_group_culling_result, AnalysisCache, AssetMetadataEvidence, BatchStore, CatalogError,
+    build_group_culling_result, AnalysisCache, AssetMetadataEvidence, Batch, BatchItem, BatchStage,
+    BatchStore, CatalogError,
     CullingEvidenceError, CullingReview, CullingReviewStore, CullingReviewStoreError,
-    CullingUserDecision, GroupCullingResult, GroupReferenceBinding, PhotoGroup, PreviewSource,
-    PreviewStore, PreviewStoreError, RawAsset, RawCatalog, RawMetadataStore, RawMetadataStoreError,
-    ReferenceSet, ReferenceStore, ReferenceStoreError, StoreError,
+    CompanionSnapshotStore, CompanionSnapshotStoreError, CullingUserDecision, GroupCullingResult,
+    GroupReferenceBinding, JobStatus, PhotoGroup, PreviewSource, PreviewStore, PreviewStoreError,
+    RawAsset, RawCatalog, RawMetadataStore, RawMetadataStoreError, ReferenceSet, ReferenceStore,
+    ReferenceStoreError, StoreError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -112,6 +114,8 @@ pub enum CompanionError {
     Metadata(#[from] RawMetadataStoreError),
     #[error(transparent)]
     Preview(#[from] PreviewStoreError),
+    #[error(transparent)]
+    SnapshotStore(#[from] CompanionSnapshotStoreError),
     #[error("unsupported companion schema version: {0}")]
     UnsupportedSchema(u32),
     #[error("patch targets snapshot {actual}, expected {expected}")]
@@ -134,6 +138,20 @@ pub enum CompanionError {
     DuplicateCullingChange(Uuid),
     #[error("companion patch contains duplicate reference change for group {0}")]
     DuplicateReferenceChange(Uuid),
+    #[error(
+        "companion batch {batch_id} already has snapshot {existing_snapshot_id}; incoming snapshot {incoming_snapshot_id} requires decision sync first"
+    )]
+    SnapshotReplacementConflict {
+        batch_id: Uuid,
+        existing_snapshot_id: Uuid,
+        incoming_snapshot_id: Uuid,
+    },
+    #[error("companion snapshot contains duplicate asset id: {0}")]
+    DuplicateSnapshotAsset(Uuid),
+    #[error("companion snapshot contains duplicate group id: {0}")]
+    DuplicateSnapshotGroup(Uuid),
+    #[error("catalog identity mismatch while hydrating companion asset: expected {expected}, got {actual}")]
+    AssetIdentityMismatch { expected: Uuid, actual: Uuid },
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -217,6 +235,253 @@ pub fn build_companion_snapshot(
         metadata,
         previews,
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn hydrate_companion_snapshot(
+    snapshot: &CompanionSnapshot,
+    batch_store: &BatchStore,
+    catalog: &RawCatalog,
+    metadata_store: &RawMetadataStore,
+    culling_reviews: &CullingReviewStore,
+    reference_store: &ReferenceStore,
+    snapshot_store: &CompanionSnapshotStore,
+) -> Result<(), CompanionError> {
+    if snapshot.schema_version != COMPANION_SNAPSHOT_SCHEMA_VERSION {
+        return Err(CompanionError::UnsupportedSchema(snapshot.schema_version));
+    }
+
+    if let Some(existing) = snapshot_store.get(snapshot.batch_id)? {
+        if existing.snapshot_id == snapshot.snapshot_id {
+            return Ok(());
+        }
+        return Err(CompanionError::SnapshotReplacementConflict {
+            batch_id: snapshot.batch_id,
+            existing_snapshot_id: existing.snapshot_id,
+            incoming_snapshot_id: snapshot.snapshot_id,
+        });
+    }
+
+    validate_snapshot_contents(snapshot)?;
+
+    let raw_assets = snapshot
+        .assets
+        .iter()
+        .map(|asset| RawAsset {
+            id: asset.id,
+            source_path: companion_source_path(snapshot.batch_id, asset),
+            filename: asset.filename.clone(),
+            extension: asset.extension.clone(),
+            camera_id: asset.camera_id.clone(),
+            capture_time_ms: asset.capture_time_ms,
+            file_time_ms: asset.file_time_ms,
+            sequence_number: asset.sequence_number,
+        })
+        .collect::<Vec<_>>();
+    let canonical = catalog.ensure_assets(&raw_assets)?;
+    for (expected, actual) in raw_assets.iter().zip(canonical.iter()) {
+        if expected.id != actual.id {
+            return Err(CompanionError::AssetIdentityMismatch {
+                expected: expected.id,
+                actual: actual.id,
+            });
+        }
+    }
+
+    let batch = Batch {
+        id: snapshot.batch_id,
+        name: snapshot.batch_name.clone(),
+        items: raw_assets
+            .iter()
+            .map(|asset| BatchItem {
+                id: Uuid::new_v4(),
+                asset_id: Some(asset.id),
+                source_path: asset.source_path.clone(),
+                stage: BatchStage::Done,
+                status: JobStatus::Done,
+                attempts: 0,
+                last_error: None,
+            })
+            .collect(),
+        auto_qa: false,
+        stop_on_error: false,
+    };
+    batch_store.replace_batch(&batch)?;
+
+    let companion_groups = snapshot
+        .groups
+        .iter()
+        .cloned()
+        .map(|mut group| {
+            // Companion receives the effective group snapshot and does not run
+            // desktop grouping/refinement, so imported groups stay replaceable.
+            group.manual_locked = false;
+            group
+        })
+        .collect::<Vec<_>>();
+    catalog.replace_automatic_groups(snapshot.batch_id, &companion_groups)?;
+
+    for metadata in &snapshot.metadata {
+        metadata_store.save(metadata.asset_id, &metadata.evidence)?;
+    }
+    for review in &snapshot.culling_reviews {
+        culling_reviews.set(review.asset_id, review.decision)?;
+    }
+    for state in &snapshot.references {
+        reference_store.save_set(&state.reference_set)?;
+        reference_store.bind_group(
+            state.binding.group_id,
+            state.binding.reference_set_id,
+            state.binding.selected_reference_asset_id,
+        )?;
+    }
+
+    snapshot_store.save(snapshot)?;
+    Ok(())
+}
+
+pub fn build_companion_decision_patch(
+    snapshot: &CompanionSnapshot,
+    culling_reviews: &CullingReviewStore,
+    reference_store: &ReferenceStore,
+) -> Result<CompanionDecisionPatch, CompanionError> {
+    if snapshot.schema_version != COMPANION_SNAPSHOT_SCHEMA_VERSION {
+        return Err(CompanionError::UnsupportedSchema(snapshot.schema_version));
+    }
+
+    let baseline_reviews = snapshot
+        .culling_reviews
+        .iter()
+        .map(|review| (review.asset_id, Some(review.decision)))
+        .collect::<HashMap<_, _>>();
+    let mut culling_changes = Vec::new();
+    for asset in &snapshot.assets {
+        let current = culling_reviews.get(asset.id)?.map(|review| review.decision);
+        let baseline = baseline_reviews.get(&asset.id).copied().flatten();
+        if current != baseline {
+            culling_changes.push(CompanionCullingChange {
+                asset_id: asset.id,
+                decision: current,
+            });
+        }
+    }
+
+    let baseline_references = snapshot
+        .references
+        .iter()
+        .map(|state| {
+            (
+                state.binding.group_id,
+                Some(state.binding.selected_reference_asset_id),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut reference_changes = Vec::new();
+    for group in &snapshot.groups {
+        let current = reference_store
+            .group_binding(group.id)?
+            .map(|binding| binding.selected_reference_asset_id);
+        let baseline = baseline_references.get(&group.id).copied().flatten();
+        if current != baseline {
+            reference_changes.push(CompanionReferenceChange {
+                group_id: group.id,
+                selected_reference_asset_id: current,
+            });
+        }
+    }
+
+    Ok(CompanionDecisionPatch {
+        schema_version: COMPANION_SNAPSHOT_SCHEMA_VERSION,
+        base_snapshot_id: snapshot.snapshot_id,
+        batch_id: snapshot.batch_id,
+        culling_changes,
+        reference_changes,
+    })
+}
+
+fn companion_source_path(batch_id: Uuid, asset: &CompanionAsset) -> String {
+    format!(
+        "companion://{batch_id}/{}/{}",
+        asset.id,
+        asset.filename.replace(['/', '\\'], "_")
+    )
+}
+
+fn validate_snapshot_contents(snapshot: &CompanionSnapshot) -> Result<(), CompanionError> {
+    let mut asset_ids = HashSet::new();
+    for asset in &snapshot.assets {
+        if !asset_ids.insert(asset.id) {
+            return Err(CompanionError::DuplicateSnapshotAsset(asset.id));
+        }
+    }
+
+    let mut groups = HashMap::new();
+    for group in &snapshot.groups {
+        if groups.insert(group.id, group).is_some() {
+            return Err(CompanionError::DuplicateSnapshotGroup(group.id));
+        }
+        for asset_id in &group.asset_ids {
+            if !asset_ids.contains(asset_id) {
+                return Err(CompanionError::UnknownAsset(*asset_id));
+            }
+        }
+    }
+
+    for result in &snapshot.culling {
+        let group = groups
+            .get(&result.group_id)
+            .ok_or(CompanionError::UnknownGroup(result.group_id))?;
+        for asset_id in result
+            .recommendations
+            .iter()
+            .map(|value| value.asset_id)
+            .chain(result.pending_asset_ids.iter().copied())
+        {
+            if !group.asset_ids.contains(&asset_id) {
+                return Err(CompanionError::ReferenceOutsideGroup {
+                    group_id: group.id,
+                    asset_id,
+                });
+            }
+        }
+    }
+
+    for review in &snapshot.culling_reviews {
+        if !asset_ids.contains(&review.asset_id) {
+            return Err(CompanionError::UnknownAsset(review.asset_id));
+        }
+    }
+    for metadata in &snapshot.metadata {
+        if !asset_ids.contains(&metadata.asset_id) {
+            return Err(CompanionError::UnknownAsset(metadata.asset_id));
+        }
+    }
+    for preview in &snapshot.previews {
+        if !asset_ids.contains(&preview.asset_id) {
+            return Err(CompanionError::UnknownAsset(preview.asset_id));
+        }
+    }
+    for state in &snapshot.references {
+        let group = groups
+            .get(&state.binding.group_id)
+            .ok_or(CompanionError::UnknownGroup(state.binding.group_id))?;
+        let selected = state.binding.selected_reference_asset_id;
+        if !group.asset_ids.contains(&selected)
+            || !state.reference_set.photo_ids.contains(&selected)
+        {
+            return Err(CompanionError::ReferenceOutsideGroup {
+                group_id: group.id,
+                asset_id: selected,
+            });
+        }
+        if state.reference_set.id != state.binding.reference_set_id {
+            return Err(CompanionError::Reference(
+                ReferenceStoreError::ReferenceSetNotFound(state.binding.reference_set_id),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 pub fn apply_companion_patch(
@@ -455,6 +720,108 @@ mod tests {
         .unwrap();
 
         assert!(value.get("source_path").is_none());
+    }
+
+    #[test]
+    fn hydrate_snapshot_creates_mobile_project_and_patch_contains_only_changes() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("project.sqlite3");
+        let batches = BatchStore::open(&db).unwrap();
+        let catalog = RawCatalog::open(&db).unwrap();
+        let metadata = RawMetadataStore::open(&db).unwrap();
+        let culling = CullingReviewStore::open(&db).unwrap();
+        let references = ReferenceStore::open(&db).unwrap();
+        let snapshots = CompanionSnapshotStore::open(&db).unwrap();
+        let asset_id = Uuid::new_v4();
+        let group_id = Uuid::new_v4();
+        let snapshot = snapshot(asset_id, group_id);
+
+        hydrate_companion_snapshot(
+            &snapshot,
+            &batches,
+            &catalog,
+            &metadata,
+            &culling,
+            &references,
+            &snapshots,
+        )
+        .unwrap();
+
+        let loaded = batches.load_batch(snapshot.batch_id).unwrap();
+        assert_eq!(loaded.name, "Trip");
+        assert_eq!(loaded.items[0].status, JobStatus::Done);
+        assert_eq!(
+            catalog
+                .list_effective_groups_for_collection(snapshot.batch_id)
+                .unwrap()[0]
+                .id,
+            group_id
+        );
+
+        culling
+            .set(asset_id, CullingUserDecision::Keep)
+            .unwrap();
+        references
+            .set_single_photo_reference(group_id, asset_id, "Mobile reference")
+            .unwrap();
+
+        let patch =
+            build_companion_decision_patch(&snapshot, &culling, &references).unwrap();
+        assert_eq!(
+            patch.culling_changes,
+            vec![CompanionCullingChange {
+                asset_id,
+                decision: Some(CullingUserDecision::Keep),
+            }]
+        );
+        assert_eq!(
+            patch.reference_changes,
+            vec![CompanionReferenceChange {
+                group_id,
+                selected_reference_asset_id: Some(asset_id),
+            }]
+        );
+    }
+
+    #[test]
+    fn different_snapshot_cannot_replace_unsynced_mobile_baseline() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("project.sqlite3");
+        let batches = BatchStore::open(&db).unwrap();
+        let catalog = RawCatalog::open(&db).unwrap();
+        let metadata = RawMetadataStore::open(&db).unwrap();
+        let culling = CullingReviewStore::open(&db).unwrap();
+        let references = ReferenceStore::open(&db).unwrap();
+        let snapshots = CompanionSnapshotStore::open(&db).unwrap();
+        let asset_id = Uuid::new_v4();
+        let group_id = Uuid::new_v4();
+        let first = snapshot(asset_id, group_id);
+        hydrate_companion_snapshot(
+            &first,
+            &batches,
+            &catalog,
+            &metadata,
+            &culling,
+            &references,
+            &snapshots,
+        )
+        .unwrap();
+
+        let mut second = first.clone();
+        second.snapshot_id = Uuid::new_v4();
+
+        assert!(matches!(
+            hydrate_companion_snapshot(
+                &second,
+                &batches,
+                &catalog,
+                &metadata,
+                &culling,
+                &references,
+                &snapshots,
+            ),
+            Err(CompanionError::SnapshotReplacementConflict { .. })
+        ));
     }
 
     #[test]

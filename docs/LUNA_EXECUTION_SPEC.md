@@ -118,3 +118,10 @@ A change is complete only when:
 - no new duplicate workflow or documentation path is introduced.
 
 CI is verification, not the product. Do not create repeated CI-only commits unless a failing check identifies a real problem.
+
+
+## Batch Boundary Rule
+
+Do not turn the per-photo `AutomationRunner` into the product workflow. New imports use it for import/analyze preparation only and then become ready for group-level review. Culling, grouping, reference selection, adaptive Recipe generation and XMP delivery are higher-level operations. Preserve legacy stage decoding only for compatibility.
+
+The workstation import button must continue to call the existing `import_raw_directory` / `RawImporter` path; do not add a second importer. Android remains a companion and must reuse shared UI/core concepts.

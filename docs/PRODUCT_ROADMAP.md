@@ -28,8 +28,8 @@ Current code already contains substantial reusable groundwork:
 - semantic embedding-based group refinement;
 - batch/job/export infrastructure;
 - local model loading, segmentation and embeddings;
-- culling decision model;
-- ReferenceSet and StyleProfile;
+- cached technical culling evidence, group-relative duplicate ranking and persisted photographer decisions;
+- ReferenceSet and StyleProfile, plus persistent per-group reference selection;
 - adaptive `color_sync`;
 - target-bound per-photo Recipe materialization;
 - Lightroom XMP document and same-basename sidecar writing;
@@ -44,7 +44,8 @@ Goal: make one real shoot usable through the entire non-destructive path.
 
 Close remaining gaps around:
 
-- end-to-end orchestration from catalog group/reference to Recipes/XMP;
+- reliable color/exposure analysis evidence for reference-driven adaptive edits;
+- end-to-end orchestration from the persisted group/reference selection to Recipes/XMP;
 - persistence of semantic groups, references, recipes and review state;
 - Lightroom/Camera Raw compatibility tests for emitted XMP;
 - safe overwrite/update behavior for an existing sidecar;
@@ -119,7 +120,7 @@ Not early priorities:
 - destructive generative replacement as the default workflow.
 
 
-Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view and evidence-backed Cull view are connected to the existing Rust core. Reference selection/apply and explicit Lightroom handoff are the next UI gaps; their core ReferenceSet/Recipe/XMP logic already exists.
+Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view, evidence-backed Cull view, persisted photographer Cull decisions, and persisted per-group Reference selection are connected to the Rust core. The next correctness gap is reliable color/exposure evidence before ReferenceSet can safely drive adaptive Recipes and explicit Lightroom XMP handoff.
 
 
 Implemented since the previous milestone: the workstation Cull view now supports persisted photographer Keep/Review/Reject overrides on top of AI suggestions. Remaining selection work is richer preview/compare UX and semantic evidence such as eyes/expression when reliable local evidence is available.

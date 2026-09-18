@@ -54,8 +54,12 @@ impl StyleProfile {
         GroupColorIntent {
             name: name.into(),
             target_exposure_ev: reference.exposure_ev + self.exposure_bias_ev.unwrap_or(0.0),
-            target_temperature_k: reference.temperature_k + self.temperature_bias.unwrap_or(0.0),
-            target_tint: reference.tint + self.tint_bias.unwrap_or(0.0),
+            target_temperature_k: reference
+                .temperature_k
+                .map(|value| value + self.temperature_bias.unwrap_or(0.0)),
+            target_tint: reference
+                .tint
+                .map(|value| value + self.tint_bias.unwrap_or(0.0)),
             contrast: self.contrast_preference.unwrap_or(0.0),
             saturation: self.saturation_preference.unwrap_or(0.0),
             semantic: Vec::new(),
@@ -124,8 +128,8 @@ mod tests {
         let reference = PhotoColorAnalysis {
             asset_id: Uuid::new_v4(),
             exposure_ev: -0.2,
-            temperature_k: 5400.0,
-            tint: 3.0,
+            temperature_k: Some(5400.0),
+            tint: Some(3.0),
             confidence: 0.95,
         };
         let profile = StyleProfile {
@@ -139,8 +143,8 @@ mod tests {
 
         let intent = profile.to_group_color_intent("travel look", &reference);
         assert!((intent.target_exposure_ev - 0.1).abs() < 1e-6);
-        assert_eq!(intent.target_temperature_k, 5650.0);
-        assert_eq!(intent.target_tint, 4.0);
+        assert_eq!(intent.target_temperature_k, Some(5650.0));
+        assert_eq!(intent.target_tint, Some(4.0));
         assert_eq!(intent.contrast, 8.0);
         assert_eq!(intent.saturation, 4.0);
     }
@@ -164,23 +168,23 @@ mod tests {
         let reference = PhotoColorAnalysis {
             asset_id: reference_id,
             exposure_ev: 0.0,
-            temperature_k: 5600.0,
-            tint: 2.0,
+            temperature_k: Some(5600.0),
+            tint: Some(2.0),
             confidence: 1.0,
         };
         let analyses = vec![
             PhotoColorAnalysis {
                 asset_id: dark,
                 exposure_ev: -0.8,
-                temperature_k: 5200.0,
-                tint: 0.0,
+                temperature_k: Some(5200.0),
+                tint: Some(0.0),
                 confidence: 1.0,
             },
             PhotoColorAnalysis {
                 asset_id: bright,
                 exposure_ev: 0.6,
-                temperature_k: 5900.0,
-                tint: 3.0,
+                temperature_k: Some(5900.0),
+                tint: Some(3.0),
                 confidence: 1.0,
             },
         ];

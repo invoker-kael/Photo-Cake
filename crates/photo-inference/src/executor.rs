@@ -1,4 +1,4 @@
-use crate::{LocalModelError, LocalSemanticModels, RawPreviewError, extract_largest_embedded_jpeg, source_fingerprint};
+use crate::{LocalModelError, LocalSemanticModels, RawPreviewError, extract_largest_embedded_jpeg, score_image_quality, source_fingerprint};
 use image::DynamicImage;
 use photo_core::{
     AnalysisArtifact, AnalysisCache, AnalysisCacheError, AnalysisCacheKey, BatchItem, BatchStage,
@@ -13,6 +13,9 @@ const PREVIEW_REVISION: &str = "embedded-jpeg-v1";
 const SEGMENT_CONFIG_HASH: &str = "selfie-multiclass-summary-v1";
 const EMBEDDING_CONFIG_HASH: &str = "dino-center-crop-imagenet-v1";
 const CLASSIFIER_POLICY_VERSION: &str = "portrait-policy-v1";
+const QUALITY_MODEL_ID: &str = "deterministic-preview-quality";
+const QUALITY_MODEL_VERSION: &str = "1";
+const QUALITY_CONFIG_HASH: &str = "laplacian-clipping-v1";
 
 #[derive(Debug, Error)]
 pub enum AnalyzeError {
@@ -71,6 +74,23 @@ impl LocalAnalyzeExecutor {
         let fingerprint = source_fingerprint(raw_path)?;
         let preview = self.ensure_preview(asset_id, raw_path, &fingerprint)?;
         let image = image::open(&preview.cache_path)?;
+
+        let quality_key = AnalysisCacheKey {
+            asset_id,
+            source_fingerprint: fingerprint.clone(),
+            preview_revision: preview.revision.clone(),
+            task: InferenceTask::QualityScoring,
+            model_id: QUALITY_MODEL_ID.to_string(),
+            model_version: QUALITY_MODEL_VERSION.to_string(),
+            config_hash: QUALITY_CONFIG_HASH.to_string(),
+        };
+        if self.analysis_cache.get(&quality_key)?.is_none() {
+            let quality = score_image_quality(&image);
+            self.analysis_cache.put(&AnalysisArtifact {
+                key: quality_key,
+                payload_json: serde_json::to_value(&quality)?,
+            })?;
+        }
 
         let (segmentation_id, embedding_id) = {
             let models = self.ensure_models()?;

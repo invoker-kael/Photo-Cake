@@ -192,20 +192,22 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         if (!disposed) setBackendError(String(error));
       });
 
-    bridge
-      .subscribeBatchUpdates((batch) => {
-        if (disposed) return;
-        setBatches((current) => upsertBatch(current, batch));
-        setActiveBatchId((current) => current ?? batch.id);
-        setBackendError(null);
-      })
-      .then((stop) => {
-        if (disposed) stop();
-        else unsubscribe = stop;
-      })
-      .catch((error: unknown) => {
-        if (!disposed) setBackendError(String(error));
-      });
+    if (bridge.subscribeBatchUpdates) {
+      bridge
+        .subscribeBatchUpdates((batch) => {
+          if (disposed) return;
+          setBatches((current) => upsertBatch(current, batch));
+          setActiveBatchId((current) => current ?? batch.id);
+          setBackendError(null);
+        })
+        .then((stop) => {
+          if (disposed) stop();
+          else unsubscribe = stop;
+        })
+        .catch((error: unknown) => {
+          if (!disposed) setBackendError(String(error));
+        });
+    }
 
     return () => {
       disposed = true;
@@ -534,8 +536,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const retryFailed = () => {
-    if (bridge && activeBatch) {
-      void runBackendAction(() => bridge.retryFailed(activeBatch.id));
+    if (bridge?.retryFailed && activeBatch) {
+      void runBackendAction(() => bridge.retryFailed!(activeBatch.id));
       return;
     }
     setDemoState((current) =>
@@ -548,9 +550,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const togglePause = () => {
-    if (bridge && activeBatch) {
+    if (bridge && activeBatch && bridge.resumeBatch && bridge.pauseBatch) {
       void runBackendAction(() =>
-        isPaused ? bridge.resumeBatch(activeBatch.id) : bridge.pauseBatch(activeBatch.id),
+        isPaused ? bridge.resumeBatch!(activeBatch.id) : bridge.pauseBatch!(activeBatch.id),
       );
       return;
     }
@@ -558,14 +560,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const startOrContinue = () => {
-    if (bridge && activeBatch) {
-      void runBackendAction(() => bridge.runBatch(activeBatch.id));
+    if (bridge?.runBatch && activeBatch) {
+      void runBackendAction(() => bridge.runBatch!(activeBatch.id));
     }
   };
 
   const cancelBatch = () => {
-    if (bridge && activeBatch) {
-      void runBackendAction(() => bridge.cancelBatch(activeBatch.id));
+    if (bridge?.cancelBatch && activeBatch) {
+      void runBackendAction(() => bridge.cancelBatch!(activeBatch.id));
     }
   };
 
@@ -1487,16 +1489,16 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             {backendError && <p className="error-text">{backendError}</p>}
           </div>
           <div className="batch-controls">
-            {mode === "workstation" && bridge && activeBatch && summary.pending > 0 && summary.running === 0 && !isPaused && (
+            {mode === "workstation" && bridge?.runBatch && activeBatch && summary.pending > 0 && summary.running === 0 && !isPaused && (
               <button className="button primary" onClick={startOrContinue}>Analyze / Continue</button>
             )}
-            {mode === "workstation" && summary.failed > 0 && <button className="button secondary" onClick={retryFailed}>Retry failed</button>}
-            {mode === "workstation" && jobs.length > 0 && (
+            {mode === "workstation" && bridge?.retryFailed && summary.failed > 0 && <button className="button secondary" onClick={retryFailed}>Retry failed</button>}
+            {mode === "workstation" && bridge?.pauseBatch && bridge?.resumeBatch && jobs.length > 0 && (
               <button className="button secondary" onClick={togglePause}>
                 {isPaused ? "Resume" : "Pause"}
               </button>
             )}
-            {mode === "workstation" && bridge && activeBatch && jobs.some((job) => !["DONE", "CANCELLED"].includes(job.status)) && (
+            {mode === "workstation" && bridge?.cancelBatch && activeBatch && jobs.some((job) => !["DONE", "CANCELLED"].includes(job.status)) && (
               <button className="button secondary" onClick={cancelBatch}>Cancel</button>
             )}
           </div>

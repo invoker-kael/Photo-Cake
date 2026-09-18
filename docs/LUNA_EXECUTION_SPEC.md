@@ -2,32 +2,34 @@
 
 ## Purpose
 
-This is the execution authority for Luna.
+This document is the execution authority for Luna.
 
-Goal:
+Photo-Cake is a local-first semi-automatic photography workflow assistant.
 
-Build a local-first semi-automatic photography workflow product.
-
-Photo-Cake assists photographers by reducing repetitive editing while keeping RAW files, Lightroom compatibility, and user control.
+The goal is not to replace Lightroom or create a generic image editor. The goal is to reduce repetitive photographer work while preserving RAW, Lightroom compatibility, and user control.
 
 Existing code must be reused whenever it matches the workflow. Do not rebuild working modules without technical necessity.
+
+---
 
 ## Execution Order
 
 1. Read this document
 2. Read product requirements
 3. Read architecture
-4. Inspect current code and reusable modules
-5. Implement the smallest complete increment
+4. Inspect existing code and reusable modules
+5. Implement the smallest complete photography workflow increment
 6. Test
 7. Build verification
 8. Continue current phase
 
-## Existing Code Reuse Strategy
+---
 
-The current architecture already provides reusable foundations.
+## Existing Code First
 
-Reuse:
+The current repository already contains reusable foundations.
+
+Primary reuse targets:
 
 ```text
 photo-core
@@ -50,37 +52,49 @@ photo-inference
  +-- image analysis
 ```
 
-Extend existing modules instead of creating parallel implementations.
+Rules:
+
+- Extend existing modules first.
+- Avoid parallel implementations.
+- Keep shared logic platform independent.
+
+---
 
 ## Platform Strategy
 
-Photo-Cake supports two platforms.
+### Windows
 
-Windows:
+Primary photography workstation:
 
-- Primary workstation
 - Large RAW collections
 - Batch processing
 - Lightroom workflow
 - XMP generation
 - GPU acceleration
 
-Android:
+### Android
 
-- Mobile workflow companion
+Photography companion:
+
 - Photo selection
-- Reference image selection
+- Reference photo selection
+- Preview
 - Lightweight analysis
-- Shared core logic
 
-Business logic must remain reusable through shared core modules.
+Android must reuse shared workflow models instead of duplicating processing logic.
 
-## Product Workflow
+---
+
+## Photography Workflow Priority
+
+The product follows this order:
 
 ```text
 RAW Import
  |
-Metadata
+Catalog
+ |
+Metadata / Preview
  |
 Smart Culling
  |
@@ -90,7 +104,7 @@ Reference Style Analysis
  |
 Recipe Generation
  |
-Preview Review
+Review
  |
 +-------------+
 |             |
@@ -99,50 +113,55 @@ XMP           Export
 Lightroom     JPEG/TIFF
 ```
 
-## Execution Rules
+---
 
-- Preserve original RAW files.
-- Use RAW + XMP as the default workflow.
-- Do not create unnecessary large files.
-- Keep direct export available.
-- Use one Recipe model for XMP and export.
-- Prefer working user features over architecture expansion.
-- Keep local-first operation.
-- Do not add cloud/account/plugin features unless required.
-- Reuse existing working code before introducing new frameworks.
+## Core Rules
 
-## Current Product Model
+- RAW files are immutable.
+- RAW + XMP is the primary workflow.
+- Recipe is the unified editing decision model.
+- XMP and export must use the same Recipe.
+- Do not create unnecessary large intermediate files.
+- Local-first operation is preferred.
+- AI provides editing decisions, not destructive replacement.
+
+---
+
+## Current Development Focus
 
 Priority order:
 
 ```text
-Culling
-  -> Grouping
-  -> Reference Style
-  -> Recipe
-  -> Review
-  -> Output
+1. Catalog foundation
+2. RAW asset management
+3. Preview foundation
+4. Photo Group model
+5. Smart Culling foundation
+6. Recipe model
+7. XMP output
+8. Direct export
 ```
 
-## Phase 1 Completion Target
+---
 
-Build the foundation required for a real photography workflow:
+## Phase 1 Acceptance
 
-- RAW indexing
-- Metadata extraction
-- Asset management
-- Preview foundation
-- Photo Group foundation
-- Recipe schema
-- XMP generation
-- Export framework
-
-Acceptance:
+A complete minimal photographer workflow must exist:
 
 Input:
 
 ```text
 IMG.CR3
+```
+
+Process:
+
+```text
+Import
+Metadata
+Preview
+Group
+Recipe
 ```
 
 Output:
@@ -151,26 +170,27 @@ Output:
 IMG.XMP
 ```
 
-Lightroom must read the RAW and show adjustments.
+Lightroom can open the RAW file and apply the generated adjustments.
 
-## Development Restrictions
+---
 
-Do not prioritize:
+## Do Not Prioritize Early
 
 - Full RAW replacement engine
+- Lightroom database modification
 - Lightroom plugin
 - Cloud AI service
-- Complex social/account features
-- Rewriting existing reusable modules
+- Social/account features
+- Rewriting reusable code
 
-These belong to later roadmap phases.
+---
 
 ## Completion Criteria
 
-A feature is complete when:
+A task is complete when:
 
-- Implementation exists
-- Existing architecture is respected
-- Tests pass
-- Build succeeds
-- User photography workflow is improved
+- It improves the photographer workflow.
+- Existing architecture is respected.
+- Implementation exists.
+- Tests pass.
+- Build succeeds.

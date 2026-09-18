@@ -6,6 +6,7 @@ pub mod classification;
 pub mod classification_store;
 pub mod color_sync;
 pub mod color_sync_store;
+pub mod companion;
 pub mod culling;
 pub mod culling_store;
 pub mod export;
@@ -60,6 +61,12 @@ pub use culling::{
 };
 pub use culling_store::{
     CullingReview, CullingReviewStore, CullingReviewStoreError, CullingUserDecision,
+};
+pub use companion::{
+    apply_companion_patch, build_companion_snapshot, CompanionAsset, CompanionCullingChange,
+    CompanionDecisionPatch, CompanionError, CompanionPatchApplyReport, CompanionPreviewIndex,
+    CompanionReferenceChange, CompanionReferenceState, CompanionSnapshot,
+    COMPANION_SNAPSHOT_SCHEMA_VERSION,
 };
 pub use edit_preview::{apply_preview_adjustments, render_recipe_preview, EditPreviewError};
 pub use export::{

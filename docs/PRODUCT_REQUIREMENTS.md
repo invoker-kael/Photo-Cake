@@ -190,3 +190,8 @@ A photographer can process hundreds of RAW files by:
 ## Adaptive Batch Editing
 
 A group must not receive a blind copy of one photo's values. The reference defines the desired look; Photo-Cake resolves that intent against each photo's measured exposure/white-balance state, then creates a target-bound Recipe and XMP sidecar for that photo.
+
+
+## Grouping Behavior
+
+Photo-Cake first creates conservative moment groups from capture time/camera/sequence, then refines only within those groups using classification and visual similarity. This gives useful groups quickly while preventing visually similar but unrelated photos from different events from being merged together.

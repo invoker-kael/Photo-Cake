@@ -3,19 +3,24 @@ import {
   demoJobs,
   type BackendBatch,
   type BackendBatchItem,
+  type BackendGroupCullingResult,
   type BackendPhotoContext,
   type BatchJob,
   type BatchStage,
+  type CullingDecision,
   type PhotoCakeBridge,
 } from "./batch";
 
 export type {
   BackendBatch,
+  BackendGroupCullingResult,
   BackendPhotoContext,
   BackendRawImportResult,
   BatchWorkerEvent,
   PhotoCakeBridge,
 } from "./batch";
+
+type WorkspaceView = "library" | "cull" | "groups" | "reference" | "lightroom";
 
 const stageProgress: Record<BatchStage, number> = {
   IMPORT: 5,
@@ -60,6 +65,11 @@ function statusLabel(job: BatchJob) {
   return job.status === "DONE" ? "READY" : job.status;
 }
 
+function cullingLabel(decision: CullingDecision) {
+  if (decision === "REJECT_SUGGESTION") return "Reject suggestion";
+  return decision === "KEEP" ? "Keep" : "Review";
+}
+
 function JobRow({ job }: { job: BatchJob }) {
   return (
     <div className="job-row">
@@ -97,11 +107,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [demoState, setDemoState] = useState(demoJobs);
   const [batches, setBatches] = useState<BackendBatch[]>([]);
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<WorkspaceView>("library");
   const [demoPaused, setDemoPaused] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [photoContext, setPhotoContext] = useState<BackendPhotoContext | null>(null);
+  const [culling, setCulling] = useState<BackendGroupCullingResult[]>([]);
+  const [cullingLoading, setCullingLoading] = useState(false);
 
   useEffect(() => {
     if (!bridge) return;
@@ -147,6 +160,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     [activeBatchId, batches],
   );
 
+  const analysisRevision = useMemo(
+    () =>
+      activeBatch?.items
+        .map((item) => `${item.id}:${item.stage}:${item.status}:${item.attempts}`)
+        .join("|") ?? "",
+    [activeBatch],
+  );
+
   useEffect(() => {
     if (!bridge?.loadPhotoContext || !activeBatchId) {
       setPhotoContext(null);
@@ -168,6 +189,34 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     };
   }, [activeBatchId, bridge]);
 
+  useEffect(() => {
+    if (!bridge?.loadCulling || !activeBatchId) {
+      setCulling([]);
+      return;
+    }
+
+    let disposed = false;
+    setCullingLoading(true);
+    bridge
+      .loadCulling(activeBatchId)
+      .then((results) => {
+        if (!disposed) {
+          setCulling(results);
+          setBackendError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      })
+      .finally(() => {
+        if (!disposed) setCullingLoading(false);
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeBatchId, analysisRevision, bridge]);
+
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
     [activeBatch, bridge, demoState],
@@ -181,6 +230,21 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     const paused = jobs.filter((job) => job.status === "PAUSED").length;
     return { done, failed, running, pending, paused, total: jobs.length };
   }, [jobs]);
+
+  const cullingSummary = useMemo(() => {
+    const recommendations = culling.flatMap((group) => group.recommendations);
+    return {
+      keep: recommendations.filter((item) => item.decision === "KEEP").length,
+      review: recommendations.filter((item) => item.decision === "REVIEW").length,
+      reject: recommendations.filter((item) => item.decision === "REJECT_SUGGESTION").length,
+      pending: culling.reduce((total, group) => total + group.pending_asset_ids.length, 0),
+    };
+  }, [culling]);
+
+  const assetNames = useMemo(
+    () => new Map(photoContext?.assets.map((asset) => [asset.id, asset.filename]) ?? []),
+    [photoContext],
+  );
 
   const isPaused = bridge
     ? summary.paused > 0 && summary.running === 0 && summary.pending === 0
@@ -209,6 +273,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       if (!result) return;
       if (result.batch) applyBackendBatch(result.batch);
       setPhotoContext({ assets: result.assets, groups: result.groups });
+      setActiveView("library");
       setImportNote(
         `${result.assets.length} RAW imported · ${result.groups.length} moment groups` +
           (result.skipped_non_raw.length ? ` · ${result.skipped_non_raw.length} non-RAW skipped` : ""),
@@ -256,6 +321,146 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     }
   };
 
+  const renderLibrary = () => (
+    <>
+      {photoContext && (
+        <section className="photo-overview">
+          <div className="overview-card">
+            <span>RAW assets</span>
+            <strong>{photoContext.assets.length}</strong>
+          </div>
+          <div className="overview-card">
+            <span>Photo groups</span>
+            <strong>{photoContext.groups.length}</strong>
+          </div>
+          <div className="overview-card">
+            <span>Ready for review</span>
+            <strong>{summary.done}</strong>
+          </div>
+          <div className="overview-card wide">
+            <span>Next workflow</span>
+            <strong>Cull → Groups → Reference → XMP</strong>
+          </div>
+        </section>
+      )}
+
+      {photoContext && photoContext.groups.length > 0 && (
+        <section className="group-strip">
+          <div className="group-strip-head">
+            <strong>Initial photo groups</strong>
+            <span>Fast moment grouping; semantic refinement follows local analysis</span>
+          </div>
+          <div className="group-grid">
+            {photoContext.groups.slice(0, 8).map((group, index) => (
+              <div className="group-card" key={group.id}>
+                <span>Group {index + 1}</span>
+                <strong>{group.asset_ids.length} photos</strong>
+                <small>{group.basis.replaceAll("_", " ").toLowerCase()}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="queue-card">
+        <div className="queue-title">
+          <strong>RAW preparation queue</strong>
+          <span>Import and local analysis only · editing starts after photos are ready</span>
+        </div>
+        <div className="job-list">
+          {jobs.length > 0
+            ? jobs.map((job) => <JobRow job={job} key={job.id} />)
+            : <div className="panel-note">Import an existing RAW folder. Source RAW files stay in place.</div>}
+        </div>
+      </section>
+    </>
+  );
+
+  const renderCull = () => (
+    <>
+      <section className="photo-overview">
+        <div className="overview-card"><span>Keep</span><strong>{cullingSummary.keep}</strong></div>
+        <div className="overview-card"><span>Review</span><strong>{cullingSummary.review}</strong></div>
+        <div className="overview-card"><span>Reject suggestion</span><strong>{cullingSummary.reject}</strong></div>
+        <div className="overview-card"><span>Pending evidence</span><strong>{cullingSummary.pending}</strong></div>
+      </section>
+
+      <section className="queue-card">
+        <div className="queue-title">
+          <strong>Smart culling</strong>
+          <span>Group-relative quality + near-duplicate evidence · never deletes originals</span>
+        </div>
+        {cullingLoading && <div className="panel-note">Refreshing cached culling evidence…</div>}
+        {!cullingLoading && culling.length === 0 && (
+          <div className="panel-note">Import and analyze RAW photos before culling.</div>
+        )}
+        <div className="cull-groups">
+          {culling.map((group, groupIndex) => (
+            <div className="cull-group" key={group.group_id}>
+              <div className="cull-group-head">
+                <strong>Group {groupIndex + 1}</strong>
+                <span>
+                  {group.recommendations.length} scored · {group.pending_asset_ids.length} pending
+                </span>
+              </div>
+              <div className="cull-list">
+                {group.recommendations.map((item) => (
+                  <div className="cull-row" key={item.asset_id}>
+                    <span className="cull-rank">#{item.group_rank}</span>
+                    <div className="cull-name">
+                      <strong>{assetNames.get(item.asset_id) ?? item.asset_id.slice(0, 8)}</strong>
+                      <small>Quality {Math.round(item.quality_score * 100)}%</small>
+                    </div>
+                    <span className={`cull-decision decision-${item.decision.toLowerCase().replace("_", "-")}`}>
+                      {cullingLabel(item.decision)}
+                    </span>
+                  </div>
+                ))}
+                {group.pending_asset_ids.map((assetId) => (
+                  <div className="cull-row pending" key={assetId}>
+                    <span className="cull-rank">—</span>
+                    <div className="cull-name">
+                      <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
+                      <small>Waiting for local analysis evidence</small>
+                    </div>
+                    <span className="cull-decision">Pending</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+
+  const renderGroups = () => (
+    <section className="queue-card">
+      <div className="queue-title">
+        <strong>Photo Groups</strong>
+        <span>Moment groups are conservative; semantic refinement stays inside the parent group</span>
+      </div>
+      <div className="group-detail-grid">
+        {photoContext?.groups.map((group, index) => (
+          <div className="group-detail-card" key={group.id}>
+            <span>Group {index + 1}</span>
+            <strong>{group.asset_ids.length} photos</strong>
+            <small>{group.kind.toLowerCase()} · {group.basis.replaceAll("_", " ").toLowerCase()}</small>
+            {group.manual_locked && <em>Manual lock</em>}
+          </div>
+        ))}
+        {!photoContext?.groups.length && <div className="panel-note">No photo groups yet.</div>}
+      </div>
+    </section>
+  );
+
+  const renderFutureView = (title: string, body: string) => (
+    <section className="queue-card">
+      <div className="queue-title"><strong>{title}</strong></div>
+      <div className="panel-note">{body}</div>
+    </section>
+  );
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -278,11 +483,21 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
       <aside className="sidebar">
         <nav>
-          <button className="nav-item active">Library</button>
-          <button className="nav-item">Cull</button>
-          <button className="nav-item">Groups</button>
-          <button className="nav-item">Reference</button>
-          <button className="nav-item">Lightroom</button>
+          {([
+            ["library", "Library"],
+            ["cull", "Cull"],
+            ["groups", "Groups"],
+            ["reference", "Reference"],
+            ["lightroom", "Lightroom"],
+          ] as const).map(([view, label]) => (
+            <button
+              className={`nav-item ${activeView === view ? "active" : ""}`}
+              key={view}
+              onClick={() => setActiveView(view)}
+            >
+              {label}
+            </button>
+          ))}
         </nav>
         <div className="sidebar-foot">
           <span>{mode === "workstation" ? "Workstation" : "Companion"}</span>
@@ -293,7 +508,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       <main className="workspace">
         <section className="batch-head">
           <div>
-            <p className="eyebrow">RAW PREPARATION</p>
+            <p className="eyebrow">{activeView === "library" ? "RAW PREPARATION" : activeView.toUpperCase()}</p>
             <h1>{activeBatch?.name ?? (bridge ? "Import a RAW folder" : "Photography workflow")}</h1>
             <p>{summary.done}/{summary.total} ready · {summary.running} analyzing · {summary.failed} failed</p>
             {importNote && <p className="success-text">{importNote}</p>}
@@ -315,56 +530,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           </div>
         </section>
 
-        {photoContext && (
-          <section className="photo-overview">
-            <div className="overview-card">
-              <span>RAW assets</span>
-              <strong>{photoContext.assets.length}</strong>
-            </div>
-            <div className="overview-card">
-              <span>Photo groups</span>
-              <strong>{photoContext.groups.length}</strong>
-            </div>
-            <div className="overview-card">
-              <span>Ready for review</span>
-              <strong>{summary.done}</strong>
-            </div>
-            <div className="overview-card wide">
-              <span>Next workflow</span>
-              <strong>Cull → Groups → Reference → XMP</strong>
-            </div>
-          </section>
+        {activeView === "library" && renderLibrary()}
+        {activeView === "cull" && renderCull()}
+        {activeView === "groups" && renderGroups()}
+        {activeView === "reference" && renderFutureView(
+          "Reference look",
+          "Core ReferenceSet → StyleProfile → adaptive per-photo Recipe is implemented. The next UI step is selecting a reference from the reviewed group and editing its style preferences.",
         )}
-
-        {photoContext && photoContext.groups.length > 0 && (
-          <section className="group-strip">
-            <div className="group-strip-head">
-              <strong>Initial photo groups</strong>
-              <span>Fast moment grouping; semantic refinement follows local analysis</span>
-            </div>
-            <div className="group-grid">
-              {photoContext.groups.slice(0, 8).map((group, index) => (
-                <div className="group-card" key={group.id}>
-                  <span>Group {index + 1}</span>
-                  <strong>{group.asset_ids.length} photos</strong>
-                  <small>{group.basis.replaceAll("_", " ").toLowerCase()}</small>
-                </div>
-              ))}
-            </div>
-          </section>
+        {activeView === "lightroom" && renderFutureView(
+          "Lightroom handoff",
+          "Core same-basename XMP generation is implemented and protects existing sidecars. The workstation UI will expose explicit apply/handoff only after a reference-driven Recipe set exists.",
         )}
-
-        <section className="queue-card">
-          <div className="queue-title">
-            <strong>RAW preparation queue</strong>
-            <span>Import and local analysis only · editing starts after photos are ready</span>
-          </div>
-          <div className="job-list">
-            {jobs.length > 0
-              ? jobs.map((job) => <JobRow job={job} key={job.id} />)
-              : <div className="panel-note">Import an existing RAW folder. Source RAW files stay in place.</div>}
-          </div>
-        </section>
       </main>
 
       <aside className="automation-panel">
@@ -378,7 +554,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <div className="workflow-list">
           {[
             ["1", "Import & analyze", "Keep RAW untouched"],
-            ["2", "Cull", "Keep / Review / Reject suggestion"],
+            ["2", "Cull", "Quality + near-duplicate evidence"],
             ["3", "Group", "Moment → semantic similarity"],
             ["4", "Reference look", "Your preferred photo/style"],
             ["5", "Adaptive recipe", "Different correction per photo"],

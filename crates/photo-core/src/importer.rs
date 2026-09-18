@@ -1,6 +1,7 @@
 use crate::{
     initial_group_raw_assets, Batch, BatchStage, BatchStore, CatalogError, InitialGroupingConfig,
-    PhotoGroup, RawAsset, RawCatalog, RawImportScan, RunnerError,
+    PhotoGroup, RawAsset, RawCatalog, RawImportScan, RawMetadataStore, RawMetadataStoreError,
+    RunnerError,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -22,12 +23,15 @@ pub enum RawImportError {
     Runner(#[from] RunnerError),
     #[error("filesystem error: {0}")]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Metadata(#[from] RawMetadataStoreError),
 }
 
 #[derive(Debug, Clone)]
 pub struct RawImporter {
     catalog: RawCatalog,
     batch_store: BatchStore,
+    metadata_store: RawMetadataStore,
     grouping: InitialGroupingConfig,
 }
 
@@ -37,6 +41,7 @@ impl RawImporter {
         Ok(Self {
             catalog: RawCatalog::open(path)?,
             batch_store: BatchStore::open(path).map_err(RunnerError::from)?,
+            metadata_store: RawMetadataStore::open(path)?,
             grouping: InitialGroupingConfig::default(),
         })
     }
@@ -71,6 +76,16 @@ impl RawImporter {
         scan: RawImportScan,
     ) -> Result<RawImportResult, RawImportError> {
         let assets = self.catalog.ensure_assets(&scan.assets)?;
+        let metadata_by_path = scan
+            .metadata
+            .iter()
+            .map(|record| (record.source_path.as_str(), &record.evidence))
+            .collect::<std::collections::HashMap<_, _>>();
+        for asset in &assets {
+            if let Some(evidence) = metadata_by_path.get(asset.source_path.as_str()) {
+                self.metadata_store.save(asset.id, evidence)?;
+            }
+        }
 
         if assets.is_empty() {
             return Ok(RawImportResult {

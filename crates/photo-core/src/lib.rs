@@ -21,6 +21,7 @@ pub mod pipeline;
 pub mod preview;
 pub mod raw;
 pub mod recipe;
+pub mod recipe_review_store;
 pub mod reference;
 pub mod reference_store;
 pub mod renderer;
@@ -86,6 +87,9 @@ pub use raw::{
     RawImportScan,
 };
 pub use recipe::{EditAdjustments, Recipe};
+pub use recipe_review_store::{
+    RecipeReviewOverride, RecipeReviewStore, RecipeReviewStoreError,
+};
 pub use reference::{ReferenceGroupResult, ReferenceSet, ReferenceWorkflowError, StyleProfile};
 pub use reference_store::{GroupReferenceBinding, ReferenceStore, ReferenceStoreError};
 pub use renderer::ImageExportRenderer;

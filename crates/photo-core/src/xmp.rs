@@ -60,6 +60,9 @@ impl XmpEditState {
         if let Some(target_asset_id) = &self.target_asset_id {
             attributes.push(format!(r#"pc:TargetAssetId="{target_asset_id}""#));
         }
+        if self.temperature.is_some() || self.tint.is_some() {
+            attributes.push(r#"crs:WhiteBalance="Custom""#.to_string());
+        }
 
         push_attr(&mut attributes, "crs:Exposure2012", self.exposure);
         push_attr(&mut attributes, "crs:Contrast2012", self.contrast);
@@ -84,8 +87,23 @@ impl XmpEditState {
 
 fn push_attr(attributes: &mut Vec<String>, name: &str, value: Option<f32>) {
     if let Some(value) = value {
-        attributes.push(format!(r#"{name}="{value}""#));
+        attributes.push(format!(r#"{name}="{}""#, format_xmp_number(value)));
     }
+}
+
+fn format_xmp_number(value: f32) -> String {
+    if (value - value.round()).abs() < 0.0001 {
+        return format!("{:.0}", value);
+    }
+
+    let mut text = format!("{value:.4}");
+    while text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
 }
 
 pub fn sidecar_path_for_raw(raw_path: &Path) -> PathBuf {
@@ -168,6 +186,22 @@ mod tests {
         assert!(!xmp.contains("crs:Contrast2012"));
         assert!(!xmp.contains("crs:Temperature"));
         assert!(!xmp.contains("crs:Tint"));
+        assert!(!xmp.contains("crs:WhiteBalance"));
+    }
+
+    #[test]
+    fn measured_white_balance_marks_custom_and_uses_compact_numbers() {
+        let mut recipe = recipe(Some(Uuid::nil()));
+        recipe.adjustments.exposure = Some(0.60000002);
+        recipe.adjustments.temperature = Some(5700.0);
+        recipe.adjustments.tint = Some(3.0);
+
+        let xmp = XmpEditState::from_recipe(&recipe).to_xmp_document();
+
+        assert!(xmp.contains(r#"crs:WhiteBalance="Custom""#));
+        assert!(xmp.contains(r#"crs:Exposure2012="0.6""#));
+        assert!(xmp.contains(r#"crs:Temperature="5700""#));
+        assert!(xmp.contains(r#"crs:Tint="3""#));
     }
 
     #[test]

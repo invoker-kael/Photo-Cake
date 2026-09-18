@@ -164,6 +164,13 @@ export interface BackendLightroomHandoffResult {
   written_sidecars: string[];
 }
 
+export interface BackendRecipeReviewOverride {
+  asset_id: string;
+  exposure_delta_ev: number;
+  contrast_delta: number;
+  saturation_delta: number;
+}
+
 export interface BatchWorkerEvent {
   batch: BackendBatch;
   step: unknown | null;
@@ -184,6 +191,14 @@ export interface PhotoCakeBridge {
   loadReferenceBindings?(batchId: string): Promise<BackendReferenceBinding[]>;
   setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
   clearGroupReference?(groupId: string): Promise<void>;
+  loadRecipeReviews?(batchId: string): Promise<BackendRecipeReviewOverride[]>;
+  setRecipeReview?(
+    assetId: string,
+    exposureDeltaEv: number,
+    contrastDelta: number,
+    saturationDelta: number,
+  ): Promise<BackendRecipeReviewOverride>;
+  clearRecipeReview?(assetId: string): Promise<void>;
   loadReferenceStyles?(batchId: string): Promise<BackendGroupReferenceStyle[]>;
   updateReferenceStyle?(
     groupId: string,

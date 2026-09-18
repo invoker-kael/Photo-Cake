@@ -99,12 +99,14 @@ pub fn refine_collection_semantic_groups(
             continue;
         }
 
-        let refined = refine_group_by_similarity(
+        let existing = catalog.list_semantic_groups_for_parent(parent.id)?;
+        let mut refined = refine_group_by_similarity(
             &parent,
             &parent_classifications,
             &embeddings,
             config,
         )?;
+        preserve_semantic_group_ids(&existing, &mut refined);
         catalog.replace_semantic_groups(parent.id, &refined)?;
         refined_parent_group_ids.push(parent.id);
     }
@@ -118,6 +120,31 @@ pub fn refine_collection_semantic_groups(
         pending_asset_ids,
         effective_groups: catalog.list_effective_groups_for_collection(collection_id)?,
     })
+}
+
+fn preserve_semantic_group_ids(
+    existing: &[crate::SemanticPhotoGroup],
+    refined: &mut [crate::SemanticPhotoGroup],
+) {
+    for group in refined {
+        if let Some(previous) = existing.iter().find(|candidate| {
+            candidate.kind == group.kind
+                && same_asset_members(&candidate.asset_ids, &group.asset_ids)
+        }) {
+            group.id = previous.id;
+        }
+    }
+}
+
+fn same_asset_members(left: &[Uuid], right: &[Uuid]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut left = left.iter().map(|value| value.as_u128()).collect::<Vec<_>>();
+    let mut right = right.iter().map(|value| value.as_u128()).collect::<Vec<_>>();
+    left.sort_unstable();
+    right.sort_unstable();
+    left == right
 }
 
 #[cfg(test)]
@@ -225,6 +252,67 @@ mod tests {
             .effective_groups
             .iter()
             .all(|group| group.basis == GroupingBasis::SemanticSimilarity));
+    }
+
+    #[test]
+    fn repeated_refinement_preserves_semantic_group_ids_when_membership_is_unchanged() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("project.sqlite3");
+        let catalog = RawCatalog::open(&db).unwrap();
+        let classifications = ClassificationStore::open(&db).unwrap();
+        let analysis = AnalysisCache::open(&db).unwrap();
+        let assets = catalog
+            .ensure_assets(&[
+                asset("one.cr3", 1),
+                asset("two.cr3", 2),
+                asset("three.cr3", 3),
+            ])
+            .unwrap();
+        let collection = Uuid::new_v4();
+        let parents = initial_group_raw_assets(&assets, InitialGroupingConfig::default());
+        catalog
+            .replace_automatic_groups(collection, &parents)
+            .unwrap();
+
+        save_evidence(&classifications, &analysis, assets[0].id, vec![1.0, 0.0], false);
+        save_evidence(&classifications, &analysis, assets[1].id, vec![0.99, 0.02], false);
+        save_evidence(&classifications, &analysis, assets[2].id, vec![0.0, 1.0], false);
+
+        let config = SemanticGroupingConfig {
+            portrait_similarity_threshold: 0.9,
+            scene_similarity_threshold: 0.9,
+        };
+
+        refine_collection_semantic_groups(
+            &catalog,
+            &classifications,
+            &analysis,
+            collection,
+            config,
+        )
+        .unwrap();
+        let first = catalog
+            .list_semantic_groups_for_parent(parents[0].id)
+            .unwrap();
+
+        refine_collection_semantic_groups(
+            &catalog,
+            &classifications,
+            &analysis,
+            collection,
+            config,
+        )
+        .unwrap();
+        let second = catalog
+            .list_semantic_groups_for_parent(parents[0].id)
+            .unwrap();
+
+        let mut first_ids = first.iter().map(|group| group.id).collect::<Vec<_>>();
+        let mut second_ids = second.iter().map(|group| group.id).collect::<Vec<_>>();
+        first_ids.sort_by_key(|value| value.as_u128());
+        second_ids.sort_by_key(|value| value.as_u128());
+
+        assert_eq!(first_ids, second_ids);
     }
 
     #[test]

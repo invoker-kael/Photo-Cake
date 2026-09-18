@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, PartialEq)]
 pub struct XmpEditState {
     pub recipe_id: String,
+    pub target_asset_id: Option<String>,
     pub exposure: Option<f32>,
     pub contrast: Option<f32>,
     pub highlights: Option<f32>,
@@ -25,6 +26,7 @@ impl XmpEditState {
     pub fn from_recipe(recipe: &Recipe) -> Self {
         Self {
             recipe_id: recipe.id.to_string(),
+            target_asset_id: recipe.target_asset_id.map(|id| id.to_string()),
             exposure: recipe.adjustments.exposure,
             contrast: recipe.adjustments.contrast,
             highlights: recipe.adjustments.highlights,
@@ -41,6 +43,9 @@ impl XmpEditState {
             r#"crs:ProcessVersion="15.4""#.to_string(),
             format!(r#"pc:RecipeId="{}""#, self.recipe_id),
         ];
+        if let Some(target_asset_id) = &self.target_asset_id {
+            attributes.push(format!(r#"pc:TargetAssetId="{target_asset_id}""#));
+        }
 
         push_attr(&mut attributes, "crs:Exposure2012", self.exposure);
         push_attr(&mut attributes, "crs:Contrast2012", self.contrast);
@@ -90,6 +95,7 @@ mod tests {
         let recipe = Recipe {
             id: Uuid::nil(),
             name: "test".into(),
+            target_asset_id: Some(Uuid::nil()),
             source_reference_ids: vec![],
             adjustments: EditAdjustments {
                 exposure: Some(0.35),
@@ -103,6 +109,7 @@ mod tests {
         };
 
         let xmp = XmpEditState::from_recipe(&recipe).to_xmp_document();
+        assert!(xmp.contains(r#"pc:TargetAssetId="00000000-0000-0000-0000-000000000000""#));
         assert!(xmp.contains(r#"crs:Exposure2012="0.35""#));
         assert!(xmp.contains(r#"crs:Highlights2012="-40""#));
         assert!(!xmp.contains("crs:Contrast2012"));

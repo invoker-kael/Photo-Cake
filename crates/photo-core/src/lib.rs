@@ -46,7 +46,7 @@ pub use color_sync::{
     GroupColorInvalidation, GroupColorInvalidationScope, GroupColorSyncPlan, GroupSyncMode,
     PhotoColorAnalysis, ResolvedColorEdit, SemanticColorIntent, SemanticRegion,
 };
-pub use culling::{rank_group_candidates, rank_group_candidates_with_embeddings, suggest_decision, CullingCandidate, CullingDecision, CullingRecommendation, CullingScore};
+pub use culling::{build_group_culling_result, rank_group_candidates, rank_group_candidates_with_embeddings, suggest_decision, CullingCandidate, CullingDecision, CullingEvidenceError, CullingRecommendation, CullingScore, GroupCullingResult};
 pub use export::{
     collision_safe_output, plan_export, ExportColorSpace, ExportFormat, ExportPlan,
     ExportPlanError, ExportRecipe, ResizeRecipe,

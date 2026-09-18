@@ -192,3 +192,8 @@ White balance remains a paired adjustment contract: Temperature and Tint must bo
 Android is a decision companion, not a second RAW workstation. Its real bridge reuses the same local project stores for Library context, effective groups, Cull recommendations/reviews and Reference selection. Workstation-only capabilities such as RAW import/analyze control, StyleProfile editing, Recipe exception editing, direct export and Lightroom XMP writing must remain absent from the Android capability surface.
 
 Cross-device project transfer/synchronization is still a separate gap. Until that transport exists, the companion operates on project state present in its own app data; do not invent cloud accounts or duplicate photography logic to bridge devices.
+
+
+## Explainable Culling
+
+Every AI culling recommendation should expose concise reasons derived only from measured evidence. Current reasons cover strong technical candidate, low sharpness, blur risk, exposure risk, near-duplicate status and low technical quality. Subjective composition, eye state and expression must not be invented as explanations when dedicated evidence is absent.

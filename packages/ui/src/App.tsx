@@ -5,6 +5,7 @@ import {
   type BackendBatchItem,
   type BackendCullingReview,
   type BackendGroupCullingResult,
+  type BackendGroupReferencePreview,
   type BackendPhotoContext,
   type BackendReferenceBinding,
   type BatchJob,
@@ -18,6 +19,7 @@ export type {
   BackendBatch,
   BackendCullingReview,
   BackendGroupCullingResult,
+  BackendGroupReferencePreview,
   BackendPhotoContext,
   BackendRawImportResult,
   BackendReferenceBinding,
@@ -127,6 +129,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [cullingReviews, setCullingReviews] = useState<Record<string, CullingUserDecision>>({});
   const [cullingLoading, setCullingLoading] = useState(false);
   const [referenceBindings, setReferenceBindings] = useState<Record<string, BackendReferenceBinding>>({});
+  const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
 
   useEffect(() => {
     if (!bridge) return;
@@ -276,6 +279,30 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       disposed = true;
     };
   }, [activeBatchId, bridge]);
+
+  useEffect(() => {
+    if (!bridge?.loadReferencePreviews || !activeBatchId) {
+      setReferencePreviews({});
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadReferencePreviews(activeBatchId)
+      .then((previews) => {
+        if (disposed) return;
+        setReferencePreviews(
+          Object.fromEntries(previews.map((preview) => [preview.group_id, preview])),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeBatchId, analysisRevision, bridge, referenceBindings]);
 
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
@@ -650,7 +677,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       <div className="reference-groups">
         {photoContext?.groups.map((group, index) => {
           const binding = referenceBindings[group.id];
+          const preview = referencePreviews[group.id];
           const candidates = referenceCandidatesForGroup(group.asset_ids);
+          const exposureValues = preview?.recipes
+            .map((recipe) => recipe.adjustments.exposure)
+            .filter((value): value is number => value != null) ?? [];
+          const minExposure = exposureValues.length ? Math.min(...exposureValues) : null;
+          const maxExposure = exposureValues.length ? Math.max(...exposureValues) : null;
+          const writesWhiteBalance = preview?.recipes.some(
+            (recipe) =>
+              recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
+          ) ?? false;
           return (
             <div className="reference-group" key={group.id}>
               <div className="reference-group-head">
@@ -673,6 +710,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     >
                       Clear
                     </button>
+                  )}
+                  {binding && (
+                    <small className="reference-preview-status">
+                      {preview?.pending_asset_id
+                        ? `Waiting for exposure evidence: ${assetNames.get(preview.pending_asset_id) ?? preview.pending_asset_id.slice(0, 8)}`
+                        : preview?.recipes.length
+                          ? `${preview.recipes.length} adaptive Recipes · exposure ${minExposure?.toFixed(2)} to ${maxExposure?.toFixed(2)} EV · WB ${writesWhiteBalance ? "measured" : "untouched"}`
+                          : "Preparing adaptive preview"}
+                    </small>
                   )}
                 </div>
               </div>

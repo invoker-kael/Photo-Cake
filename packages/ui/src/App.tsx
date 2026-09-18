@@ -796,6 +796,23 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     }
   };
 
+  const visibleViews: ReadonlyArray<readonly [WorkspaceView, string]> =
+    mode === "companion"
+      ? [
+          ["library", "Library"],
+          ["cull", "Cull"],
+          ["groups", "Groups"],
+          ["reference", "Reference"],
+        ]
+      : [
+          ["library", "Library"],
+          ["cull", "Cull"],
+          ["groups", "Groups"],
+          ["reference", "Reference"],
+          ["review", "Review"],
+          ["lightroom", "Lightroom"],
+        ];
+
   const renderLibrary = () => (
     <>
       {photoContext && (
@@ -814,7 +831,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           </div>
           <div className="overview-card wide">
             <span>Next workflow</span>
-            <strong>Cull → Groups → Reference → Review → XMP</strong>
+            <strong>
+              {mode === "workstation"
+                ? "Cull → Groups → Reference → Review → XMP"
+                : "Cull → Groups → Reference"}
+            </strong>
           </div>
         </section>
       )}
@@ -1011,7 +1032,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <strong>Photo Groups</strong>
         <div className="group-refine-actions">
           <span>Moment parents are preserved; semantic children become the effective editing groups</span>
-          {bridge?.refineGroups && activeBatch && (
+          {mode === "workstation" && bridge?.refineGroups && activeBatch && (
             <button
               className="button secondary"
               disabled={groupRefining}
@@ -1093,7 +1114,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 </div>
               </div>
 
-              {binding && (
+              {binding && mode === "workstation" && (
                 <div className="reference-style">
                   <div className="style-control">
                     <span>Exposure bias</span>
@@ -1440,14 +1461,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
       <aside className="sidebar">
         <nav>
-          {([
-            ["library", "Library"],
-            ["cull", "Cull"],
-            ["groups", "Groups"],
-            ["reference", "Reference"],
-            ["review", "Review"],
-            ["lightroom", "Lightroom"],
-          ] as const).map(([view, label]) => (
+          {visibleViews.map(([view, label]) => (
             <button
               className={`nav-item ${activeView === view ? "active" : ""}`}
               key={view}
@@ -1473,16 +1487,16 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             {backendError && <p className="error-text">{backendError}</p>}
           </div>
           <div className="batch-controls">
-            {bridge && activeBatch && summary.pending > 0 && summary.running === 0 && !isPaused && (
+            {mode === "workstation" && bridge && activeBatch && summary.pending > 0 && summary.running === 0 && !isPaused && (
               <button className="button primary" onClick={startOrContinue}>Analyze / Continue</button>
             )}
-            {summary.failed > 0 && <button className="button secondary" onClick={retryFailed}>Retry failed</button>}
-            {jobs.length > 0 && (
+            {mode === "workstation" && summary.failed > 0 && <button className="button secondary" onClick={retryFailed}>Retry failed</button>}
+            {mode === "workstation" && jobs.length > 0 && (
               <button className="button secondary" onClick={togglePause}>
                 {isPaused ? "Resume" : "Pause"}
               </button>
             )}
-            {bridge && activeBatch && jobs.some((job) => !["DONE", "CANCELLED"].includes(job.status)) && (
+            {mode === "workstation" && bridge && activeBatch && jobs.some((job) => !["DONE", "CANCELLED"].includes(job.status)) && (
               <button className="button secondary" onClick={cancelBatch}>Cancel</button>
             )}
           </div>
@@ -1500,20 +1514,29 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <p className="eyebrow">PHOTOGRAPHY WORKFLOW</p>
         <h2>Semi-automatic, reference driven</h2>
         <p className="panel-note">
-          Background analysis prepares reusable evidence. Photo-Cake then helps you review groups,
-          choose a reference look, adapt it per photo and hand tiny XMP sidecars to Lightroom.
+          {mode === "workstation"
+            ? "Background analysis prepares reusable evidence. Photo-Cake then helps you review groups, choose a reference look, adapt it per photo and hand tiny XMP sidecars to Lightroom."
+            : "Companion reuses the same project decisions for mobile culling and reference selection. RAW analysis, Recipe editing and Lightroom handoff remain on the workstation."}
         </p>
 
         <div className="workflow-list">
-          {[
-            ["1", "Import & analyze", "Keep RAW untouched"],
-            ["2", "Cull", "Quality + near-duplicate evidence"],
-            ["3", "Group", "Moment → semantic similarity"],
-            ["4", "Reference look", "Your preferred photo/style"],
-            ["5", "Adaptive recipe", "Different correction per photo"],
-            ["6", "Review exceptions", "Persist only per-photo corrections"],
-            ["7", "Lightroom XMP", "Or direct export on demand"],
-          ].map(([number, title, detail]) => (
+          {(mode === "workstation"
+            ? [
+                ["1", "Import & analyze", "Keep RAW untouched"],
+                ["2", "Cull", "Quality + near-duplicate evidence"],
+                ["3", "Group", "Moment → semantic similarity"],
+                ["4", "Reference look", "Your preferred photo/style"],
+                ["5", "Adaptive recipe", "Different correction per photo"],
+                ["6", "Review exceptions", "Persist only per-photo corrections"],
+                ["7", "Lightroom XMP", "Or direct export on demand"],
+              ]
+            : [
+                ["1", "Library", "Synced project context"],
+                ["2", "Cull", "Keep / Review / Reject"],
+                ["3", "Groups", "Use effective project groups"],
+                ["4", "Reference", "Choose the preferred photo"],
+              ]
+          ).map(([number, title, detail]) => (
             <div className="workflow-step" key={number}>
               <span className="workflow-number">{number}</span>
               <div>
@@ -1526,7 +1549,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
         <div className="storage-note">
           <strong>Default storage</strong>
-          <span>Original RAW + small XMP. No automatic TIFF/JPEG working copies.</span>
+          <span>
+            {mode === "workstation"
+              ? "Original RAW + small XMP. No automatic TIFF/JPEG working copies."
+              : "Companion stores project decisions and preview context; original RAW stays workstation-owned."}
+          </span>
         </div>
       </aside>
     </div>

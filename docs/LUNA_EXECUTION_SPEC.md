@@ -51,7 +51,7 @@ RAW collection
 ## Reuse Map
 
 ```text
-raw/importer/catalog       source + identity + persistence
+raw/metadata/importer/catalog source + EXIF grouping evidence + identity + persistence
 preview/analysis           reusable image evidence
 classification             portrait/scene routing
 grouping                   fast moment groups
@@ -172,3 +172,8 @@ Use the shared `edit_preview` evaluator only on cached embedded previews and onl
 ## XMP Parse-back Gate
 
 Every newly written Photo-Cake XMP must parse back into the supported edit state and match Recipe ID, target asset ID and mapped numeric fields within serialization tolerance. On validation failure remove the new sidecar; on group-write failure roll back sidecars created by that operation. This local gate complements, but does not replace, real Lightroom/Camera Raw fixture testing.
+
+
+## RAW Metadata Rule
+
+Initial Moment grouping should use reliable embedded metadata before filesystem timestamps. `metadata` reads standard EXIF Make/Model and DateTimeOriginal/DateTime without modifying the RAW; failure is a normal fallback, not an import error. Do not interpret EXIF Auto/Manual white-balance mode or rendered JPEG colors as numeric Kelvin/tint evidence.

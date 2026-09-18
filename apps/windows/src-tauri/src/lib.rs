@@ -552,10 +552,8 @@ fn set_group_reference(
         .map_err(|error| format!("invalid asset id: {error}"))?;
     let group = state
         .catalog
-        .list_groups()
+        .find_group(group_id)
         .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|group| group.id == group_id)
         .ok_or_else(|| format!("photo group not found: {group_id}"))?;
     if !group.asset_ids.contains(&asset_id) {
         return Err(format!("asset {asset_id} is not part of group {group_id}"));
@@ -835,10 +833,8 @@ fn write_group_reference_xmp(
         .map_err(|error| format!("invalid group id: {error}"))?;
     let group = state
         .catalog
-        .list_groups()
+        .find_group(group_id)
         .map_err(|error| error.to_string())?
-        .into_iter()
-        .find(|group| group.id == group_id)
         .ok_or_else(|| format!("photo group not found: {group_id}"))?;
     let binding = state
         .reference_store

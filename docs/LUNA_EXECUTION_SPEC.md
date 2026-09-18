@@ -34,9 +34,9 @@ RAW Import
     |
 Metadata Extraction
     |
-Photo Analysis
+AI Culling
     |
-Quality Assessment / Grouping
+Photo Grouping
     |
 Reference Photo Selection
     |
@@ -45,6 +45,8 @@ Style Analysis
 Recipe Generation
     |
 Edit Graph
+    |
+Preview / Human Approval
     |
 +----------------+
 |                |
@@ -68,18 +70,73 @@ Lightroom        JPEG/TIFF
 
 ---
 
+# Intelligent Culling Workflow
+
+Photo-Cake should reduce manual photo selection work before editing.
+
+Analyze:
+
+- Blur and focus quality
+- Exposure problems
+- Closed eyes
+- Facial expression quality
+- Duplicate and burst photos
+- Obvious failed compositions
+
+Output:
+
+```
+Photo
+ |
+Quality Score
+ |
+Keep / Review / Reject suggestion
+```
+
+Culling assists the user and must not destroy original files.
+
+---
+
+# Photo Group Model
+
+Groups are first-class objects.
+
+Workflow:
+
+```
+Photo
+ |
+ v
+Photo Group
+ |
+ v
+Recipe
+```
+
+Examples:
+
+- Travel day
+- Landscape
+- Portrait
+- Indoor lighting
+- Night scene
+
+Different groups can receive different Recipes.
+
+---
+
 # Reference Photo Workflow
 
 Photo-Cake must support a reference-based workflow.
 
 Purpose:
 
-Allow the user to select a preferred edited photo and apply the visual intent to similar photos.
+Allow the user to select preferred edited photos and apply visual intent to similar photos.
 
 Flow:
 
 ```
-Reference Photo
+Reference Photos
       |
       v
 Style Analysis
@@ -91,7 +148,7 @@ Generate Recipe
 Apply to Similar Photo Group
 ```
 
-The system should analyze:
+Analyze:
 
 - Exposure style
 - White balance
@@ -128,6 +185,39 @@ XMP        Render Export
 Do not directly modify original files.
 
 Future AI features must generate editable intent instead of destructive image replacement.
+
+---
+
+# Human Approval Workflow
+
+Photo-Cake is semi-automatic, not fully automatic.
+
+Required workflow:
+
+```
+AI Processing
+ |
+Preview Comparison
+ |
+User Approval
+ |
+Apply XMP / Export
+```
+
+The user must be able to review results before final output.
+
+---
+
+# Personal Style Learning
+
+Future versions may learn user preferences from:
+
+- Accepted Recipes
+- User modifications
+- Common adjustment patterns
+- Reference selections
+
+The goal is improving personal workflow efficiency, not replacing user decisions.
 
 ---
 
@@ -171,15 +261,7 @@ Deliver:
 - Similar photo grouping
 - Best photo selection
 - Scene-based grouping
-
-Examples:
-
-- Travel day groups
-- Landscape groups
-- Portrait groups
-- Indoor/outdoor lighting groups
-
-Different groups should be able to receive different Recipes.
+- Intelligent culling
 
 ---
 

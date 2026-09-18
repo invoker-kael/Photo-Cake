@@ -229,3 +229,8 @@ Repeated semantic refinement with the same parent, group kind and member asset s
 `metadata` reads exact DNG/TIFF rational evidence such as `AsShotNeutral` and `AsShotWhiteXY`. `RawMetadataStore` persists the complete metadata evidence JSON by stable catalog asset ID, independently of the compact `raw_assets` grouping schema. Partial rescans merge evidence so a transient parser/container failure cannot erase previously captured WB provenance.
 
 This layer intentionally stops before Lightroom slider synthesis. `PhotoColorAnalysis`, `GroupColorIntent`, Recipe materialization and XMP serialization all enforce a complete Temperature+Tint pair. If either axis is missing, both are omitted from downstream edits.
+
+
+## XMP Interoperability Hardening
+
+Photo-Cake parses supported Camera Raw attributes by local XML attribute name rather than assuming a fixed namespace prefix, so a valid XMP processor may rename `crs`/Photo-Cake prefixes without breaking parse-back validation. Existing-sidecar preflight treats both lowercase `.xmp` and uppercase `.XMP` as occupied targets before group writes. Unknown Lightroom/metadata attributes remain ignored rather than destroyed because Photo-Cake still refuses to overwrite an existing sidecar.

@@ -11,16 +11,8 @@ import App, {
 } from "@photo-cake/ui";
 import "@photo-cake/ui/styles.css";
 
-const unsupported = (operation: string) =>
-  Promise.reject<BackendBatch>(new Error(`${operation} is workstation-only`));
-
 const bridge: PhotoCakeBridge = {
   listBatches: () => invoke<BackendBatch[]>("list_batches"),
-  runBatch: () => unsupported("Analyze"),
-  retryFailed: () => unsupported("Retry"),
-  pauseBatch: () => unsupported("Pause"),
-  resumeBatch: () => unsupported("Resume"),
-  cancelBatch: () => unsupported("Cancel"),
   loadPhotoContext: async (batchId) => {
     const context = await invoke<BackendPhotoContext>("batch_photo_context", { batchId });
     return {
@@ -43,7 +35,6 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendReferenceBinding>("set_group_reference", { groupId, assetId }),
   clearGroupReference: (groupId) =>
     invoke<void>("clear_group_reference", { groupId }),
-  subscribeBatchUpdates: async () => () => {},
 };
 
 createRoot(document.getElementById("root")!).render(

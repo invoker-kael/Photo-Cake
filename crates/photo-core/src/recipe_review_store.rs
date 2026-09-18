@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
+const NEUTRAL_EPSILON: f32 = 0.0001;
+
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS recipe_review_overrides (
     asset_id TEXT PRIMARY KEY NOT NULL,
@@ -32,9 +34,9 @@ impl RecipeReviewOverride {
     }
 
     pub fn is_neutral(&self) -> bool {
-        self.exposure_delta_ev.abs() <= f32::EPSILON
-            && self.contrast_delta.abs() <= f32::EPSILON
-            && self.saturation_delta.abs() <= f32::EPSILON
+        self.exposure_delta_ev.abs() <= NEUTRAL_EPSILON
+            && self.contrast_delta.abs() <= NEUTRAL_EPSILON
+            && self.saturation_delta.abs() <= NEUTRAL_EPSILON
     }
 
     pub fn apply_to_recipe(&self, recipe: &mut Recipe) -> Result<(), RecipeReviewStoreError> {
@@ -184,7 +186,7 @@ impl RecipeReviewStore {
 }
 
 fn add_delta(base: Option<f32>, delta: f32, min: f32, max: f32) -> Option<f32> {
-    if delta.abs() <= f32::EPSILON {
+    if delta.abs() <= NEUTRAL_EPSILON {
         return base;
     }
     Some((base.unwrap_or(0.0) + delta).clamp(min, max))
@@ -252,7 +254,7 @@ mod tests {
         .apply_to_recipe(&mut target)
         .unwrap();
 
-        assert_eq!(target.adjustments.exposure, Some(0.6));
+        assert!((target.adjustments.exposure.unwrap() - 0.6).abs() < 1e-6);
         assert_eq!(target.adjustments.contrast, Some(6.0));
         assert_eq!(target.adjustments.saturation, Some(5.0));
         assert!(target.adjustments.temperature.is_none());

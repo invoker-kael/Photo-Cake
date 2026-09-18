@@ -2,63 +2,42 @@
 
 ## Scope
 
-Photo-Cake is a single-user local-first AI photography workflow application.
+Photo-Cake is a local-first AI photography workflow application.
 
-The architecture follows a professional photographer workflow:
-
-RAW collection → selection → grouping → style learning → editing decision → Lightroom/export.
-
-It is not a RAW converter replacement and not a Lightroom replacement.
-
-The system generates editable editing intent while preserving original files.
-
----
-
-# Core Photography Pipeline
+The architecture follows a photographer workflow:
 
 ```text
-RAW Catalog
+RAW collection
     |
     v
-Metadata Extraction
+Catalog
     |
     v
-Photo Analysis
+Analysis
     |
- +------------------------------+
- |              |               |
- v              v               v
-Quality      Similarity       Scene
-Score        Detection        Detection
- |
- v
-Smart Culling
- |
- v
-Photo Group Layer
- |
- v
-Reference Style Layer
- |
- v
-Recipe / Edit Graph
- |
- +----------------+
- |                |
- v                v
-XMP Output     Direct Export
- |
- v
-Lightroom
+    v
+Selection
+    |
+    v
+Grouping
+    |
+    v
+Style Learning
+    |
+    v
+Recipe
+    |
+    v
+XMP / Export
 ```
+
+It assists editing decisions while preserving professional RAW workflow.
 
 ---
 
-# Reusable Code Architecture
+# Reuse Existing Implementation
 
-Existing implementation should be reused where it matches the workflow. Do not rewrite working foundations without reason.
-
-The repository is designed as:
+The existing repository structure is the foundation.
 
 ```text
 apps/
@@ -70,61 +49,123 @@ crates/
  └── photo-inference
 ```
 
-Responsibilities:
-
-## photo-core
-
-Shared platform-independent logic:
-
-- project model
-- catalog
-- asset identity
-- metadata
-- photo groups
-- recipe model
-- edit graph
-- job state
-- import/export interfaces
-
-This is the primary reusable layer.
-
-## photo-inference
-
-AI capability layer:
-
-- image analysis
-- similarity
-- classification
-- style analysis
-- future culling models
-
-Models must remain replaceable.
-
-## apps/windows
-
-Desktop workflow:
-
-- large RAW library management
-- batch processing
-- Lightroom-oriented workflow
-- GPU acceleration
-
-## apps/android
-
-Mobile workflow:
-
-- photo selection
-- preview
-- lightweight analysis
-- mobile capture/import
-
-Android should not duplicate core logic.
+Do not rewrite working foundations without technical reason.
 
 ---
 
-# Core Data Model
+# Core Pipeline
 
-Primary objects:
+```text
+RAW Catalog
+    |
+    v
+Metadata Extraction
+    |
+    v
+Photo Analysis
+    |
+ +----------------+
+ |                |
+ v                v
+Quality        Similarity
+Score          Detection
+ |
+ v
+Smart Culling
+ |
+ v
+Photo Group
+ |
+ v
+Reference Style
+ |
+ v
+Recipe / Edit Graph
+ |
+ +-------------+
+ |             |
+ v             v
+XMP          Export
+```
+
+---
+
+# Shared Core Layer
+
+## photo-core
+
+Platform-independent workflow logic.
+
+Responsibilities:
+
+- catalog
+- asset model
+- RAW metadata
+- photo groups
+- preview foundation
+- recipe model
+- edit graph
+- batch jobs
+- export interfaces
+
+This layer should contain photography workflow rules.
+
+---
+
+## photo-inference
+
+AI capability layer.
+
+Responsibilities:
+
+Current:
+
+- image analysis
+- similarity
+- segmentation
+- local model execution
+
+Future:
+
+- culling models
+- quality scoring
+- style extraction
+- editing suggestions
+
+Models remain replaceable.
+
+---
+
+# Platform Design
+
+## Windows
+
+Primary editing workstation.
+
+Responsibilities:
+
+- large RAW collections
+- batch processing
+- Lightroom workflow
+- XMP generation
+- GPU acceleration
+
+## Android
+
+Mobile assistant.
+
+Responsibilities:
+
+- photo selection
+- reference photo selection
+- preview
+- lightweight analysis
+
+Core workflow logic stays shared.
+
+---
+
+# Data Model
 
 ```text
 Project
@@ -144,173 +185,66 @@ Edit Graph
 Output Job
 ```
 
-Important design rule:
-
-Photo Group is a first-class object.
-
-A photography session contains different lighting and scenes. A single global adjustment is not sufficient.
-
----
-
-# Photo Selection Architecture
-
-Culling happens before editing.
-
-The system evaluates:
-
-- Sharpness
-- Focus quality
-- Blur
-- Closed eyes
-- Facial expression
-- Duplicate burst images
-- Exposure problems
-
-Output:
-
-```text
-Photo
- |
-Quality Score
- |
-Keep / Review / Reject suggestion
-```
-
-Culling only provides recommendations. Original files are never deleted automatically.
-
----
-
-# Reference Style Architecture
-
-Reference photos are the source of visual intent.
-
-Flow:
-
-```text
-Reference Photos
-        |
-        v
-Style Analysis
-        |
-        v
-Recipe Template
-        |
-        v
-Apply to Photo Group
-```
-
-Analyzed attributes:
-
-- Exposure preference
-- White balance
-- Contrast
-- Color tone
-- Skin tone preference
-- Lighting style
-
-The goal is consistent batch editing, not pixel copying.
+Photo Group is a first-class object because real photography sessions contain different scenes and lighting conditions.
 
 ---
 
 # Non-destructive Editing
 
-Original RAW files are immutable.
-
-Architecture:
-
 ```text
 RAW
  |
- v
 Edit Graph
  |
- v
 Recipe
  |
- +-------------+
- |             |
- v             v
-XMP          Export
++----------+
+|          |
+XMP      Export
 ```
 
-RAW is never modified.
+Rules:
+
+- RAW files are immutable.
+- XMP is the primary Lightroom bridge.
+- Export uses the same Recipe model.
 
 ---
 
-# Recipe System
+# Development Priority
 
-Recipe is the unified editing decision format.
-
-All output paths use the same Recipe:
+Priority is user photography value:
 
 ```text
-Recipe
- |
- +------+
- |      |
-XMP   Export
+Catalog
+ -> Preview
+ -> Grouping
+ -> Culling
+ -> Recipe
+ -> XMP
+ -> Export
+ -> Advanced AI
 ```
 
-This allows Lightroom continuation and direct export without changing workflow design.
+Do not block the workflow on:
 
----
-
-# Batch Processing
-
-Large photo sessions are processed as jobs.
-
-Requirements:
-
-- Progress tracking
-- Checkpoint stages
-- Resume after interruption
-- Failed item isolation
-- Safe export
-- Source protection
-
----
-
-# Local AI Architecture
-
-Local-first operations:
-
-- Quality analysis
-- Similarity search
-- Scene classification
-- Portrait analysis
-- Style analysis
-- Recipe suggestion
-
-Models and caches must be versioned.
-
-Large generated files should not be created unless explicitly requested.
-
----
-
-# Platform Boundary
-
-Windows and Android share the same workflow model.
-
-Platform-specific code must stay isolated:
-
-- File access
-- Hardware acceleration
-- UI
-- Packaging
-
-Business logic belongs in shared crates whenever possible.
+- full RAW engine replacement
+- Lightroom plugin
+- cloud service
 
 ---
 
 # Future Expansion
 
-Later phases may add:
+Later:
 
-- Advanced RAW processing
-- GPU acceleration
+- advanced RAW processing
+- personal style profile
 - AI retouch planning
-- Personal style learning
+- advanced GPU acceleration
 
-These must not block the core workflow:
+The foundation remains:
 
-RAW → Recipe → XMP → Lightroom
+```text
+RAW -> Recipe -> XMP -> Lightroom
+```

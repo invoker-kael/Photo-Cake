@@ -14,6 +14,7 @@ pub mod export_stage;
 pub mod export_store;
 pub mod export_worker;
 pub mod grouping;
+pub mod group_refinement;
 pub mod handoff;
 pub mod handoff_store;
 pub mod importer;
@@ -70,6 +71,9 @@ pub use export_worker::{
 };
 pub use grouping::{
     initial_group_raw_assets, GroupingBasis, InitialGroupingConfig, PhotoGroup, PhotoGroupKind,
+};
+pub use group_refinement::{
+    refine_collection_semantic_groups, SemanticRefinementError, SemanticRefinementReport,
 };
 pub use handoff::{
     plan_finish, xmp_sidecar_path, EditCompatibility, FallbackReason, FinishPlan, FinishTarget,

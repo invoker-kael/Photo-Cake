@@ -40,6 +40,12 @@ pub struct GroupColorIntent {
     pub semantic: Vec<SemanticColorIntent>,
 }
 
+impl GroupColorIntent {
+    pub fn white_balance(&self) -> Option<(f32, f32)> {
+        self.target_temperature_k.zip(self.target_tint)
+    }
+}
+
 impl Default for GroupColorIntent {
     fn default() -> Self {
         Self {
@@ -63,6 +69,12 @@ pub struct PhotoColorAnalysis {
     #[serde(default)]
     pub tint: Option<f32>,
     pub confidence: f32,
+}
+
+impl PhotoColorAnalysis {
+    pub fn white_balance(&self) -> Option<(f32, f32)> {
+        self.temperature_k.zip(self.tint)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -122,11 +134,24 @@ pub fn derive_auto_group_intent(
     if analyses.is_empty() {
         return Err(ColorSyncError::EmptyAnalysis);
     }
+    let measured_white_balance = analyses
+        .iter()
+        .filter_map(PhotoColorAnalysis::white_balance)
+        .collect::<Vec<_>>();
+    let (target_temperature_k, target_tint) = if measured_white_balance.is_empty() {
+        (None, None)
+    } else {
+        (
+            Some(median(measured_white_balance.iter().map(|value| value.0))),
+            Some(median(measured_white_balance.iter().map(|value| value.1))),
+        )
+    };
+
     Ok(GroupColorIntent {
         name: "Auto Balanced".to_string(),
         target_exposure_ev: median(analyses.iter().map(|a| a.exposure_ev)),
-        target_temperature_k: median_optional(analyses.iter().filter_map(|a| a.temperature_k)),
-        target_tint: median_optional(analyses.iter().filter_map(|a| a.tint)),
+        target_temperature_k,
+        target_tint,
         contrast: 0.0,
         saturation: 0.0,
         semantic: Vec::new(),
@@ -187,11 +212,16 @@ pub fn build_adaptive_group_plan(
         let edit = match mode {
             GroupSyncMode::ManualCopy => {
                 let source = manual_copy_edit.expect("validated above");
+                let (temperature_delta_k, tint_delta) = source
+                    .temperature_delta_k
+                    .zip(source.tint_delta)
+                    .map(|value| (Some(value.0), Some(value.1)))
+                    .unwrap_or((None, None));
                 ResolvedColorEdit {
                     asset_id: *asset_id,
                     exposure_delta_ev: source.exposure_delta_ev,
-                    temperature_delta_k: source.temperature_delta_k,
-                    tint_delta: source.tint_delta,
+                    temperature_delta_k,
+                    tint_delta,
                     contrast: source.contrast,
                     saturation: source.saturation,
                     semantic: source.semantic.clone(),
@@ -254,16 +284,19 @@ fn resolve_adaptive_edit(
     analysis: &PhotoColorAnalysis,
     intent: &GroupColorIntent,
 ) -> ResolvedColorEdit {
+    let (temperature_delta_k, tint_delta) = match (intent.white_balance(), analysis.white_balance()) {
+        (Some((target_temperature, target_tint)), Some((measured_temperature, measured_tint))) => (
+            Some(clamp(target_temperature - measured_temperature, -4000.0, 4000.0)),
+            Some(clamp(target_tint - measured_tint, -150.0, 150.0)),
+        ),
+        _ => (None, None),
+    };
+
     ResolvedColorEdit {
         asset_id: analysis.asset_id,
         exposure_delta_ev: clamp(intent.target_exposure_ev - analysis.exposure_ev, -4.0, 4.0),
-        temperature_delta_k: zip_delta(
-            intent.target_temperature_k,
-            analysis.temperature_k,
-            -4000.0,
-            4000.0,
-        ),
-        tint_delta: zip_delta(intent.target_tint, analysis.tint, -150.0, 150.0),
+        temperature_delta_k,
+        tint_delta,
         contrast: intent.contrast,
         saturation: intent.saturation,
         semantic: intent.semantic.clone(),
@@ -272,19 +305,13 @@ fn resolve_adaptive_edit(
 
 fn reference_score(analysis: &PhotoColorAnalysis, intent: &GroupColorIntent) -> f32 {
     let mut score = (analysis.exposure_ev - intent.target_exposure_ev).abs() * 2.0;
-    if let (Some(value), Some(target)) = (analysis.temperature_k, intent.target_temperature_k) {
-        score += (value - target).abs() / 2000.0;
-    }
-    if let (Some(value), Some(target)) = (analysis.tint, intent.target_tint) {
-        score += (value - target).abs() / 50.0;
+    if let (Some((temperature, tint)), Some((target_temperature, target_tint))) =
+        (analysis.white_balance(), intent.white_balance())
+    {
+        score += (temperature - target_temperature).abs() / 2000.0;
+        score += (tint - target_tint).abs() / 50.0;
     }
     score + (1.0 - analysis.confidence.clamp(0.0, 1.0)) * 0.5
-}
-
-fn zip_delta(target: Option<f32>, measured: Option<f32>, min: f32, max: f32) -> Option<f32> {
-    target
-        .zip(measured)
-        .map(|(target, measured)| clamp(target - measured, min, max))
 }
 
 fn median(values: impl Iterator<Item = f32>) -> f32 {
@@ -296,11 +323,6 @@ fn median(values: impl Iterator<Item = f32>) -> f32 {
     } else {
         values[middle]
     }
-}
-
-fn median_optional(values: impl Iterator<Item = f32>) -> Option<f32> {
-    let values = values.collect::<Vec<_>>();
-    (!values.is_empty()).then(|| median(values.into_iter()))
 }
 
 fn clamp(value: f32, min: f32, max: f32) -> f32 {
@@ -344,6 +366,24 @@ mod tests {
         assert_eq!(plan.intent.target_tint, None);
         assert!(plan.resolved.iter().all(|edit| edit.temperature_delta_k.is_none()));
         assert!(plan.resolved.iter().all(|edit| edit.tint_delta.is_none()));
+    }
+
+    #[test]
+    fn partial_white_balance_is_treated_as_unknown() {
+        let asset_id = Uuid::new_v4();
+        let analyses = vec![PhotoColorAnalysis {
+            asset_id,
+            exposure_ev: 0.0,
+            temperature_k: Some(5600.0),
+            tint: None,
+            confidence: 1.0,
+        }];
+
+        let plan = build_auto_group_plan(Uuid::new_v4(), &[asset_id], &analyses, 1).unwrap();
+        assert_eq!(plan.intent.target_temperature_k, None);
+        assert_eq!(plan.intent.target_tint, None);
+        assert_eq!(plan.resolved[0].temperature_delta_k, None);
+        assert_eq!(plan.resolved[0].tint_delta, None);
     }
 
     #[test]

@@ -1,74 +1,29 @@
 # Photo-Cake Documentation
 
-## Luna Execution Entry
+The `docs/` directory intentionally contains only five authoritative files.
 
-Luna must read in this order:
+Read order for Luna:
 
-1. `LUNA_EXECUTION_SPEC.md`
-2. `PRODUCT_REQUIREMENTS.md`
-3. `ARCHITECTURE.md`
-4. `PRODUCT_ROADMAP.md`
+1. `LUNA_EXECUTION_SPEC.md` — execution authority and reuse rules.
+2. `PRODUCT_REQUIREMENTS.md` — the user's photography workflow and success criteria.
+3. `ARCHITECTURE.md` — how the current code implements that workflow.
+4. `PRODUCT_ROADMAP.md` — remaining gaps and later evolution.
 
-`LUNA_EXECUTION_SPEC.md` is the execution authority.
+`README.md` is navigation only.
 
----
+Do not create additional requirement/plan/workflow documents when one of these files already owns the subject. Update the existing owner instead.
 
-## Document Roles
+Core product direction:
 
-### LUNA_EXECUTION_SPEC.md
-
-Execution rules:
-
-- current implementation target
-- development constraints
-- completion criteria
-- scope control
-
-### PRODUCT_REQUIREMENTS.md
-
-Photography workflow definition:
-
-- RAW workflow
-- smart culling
-- grouping
-- reference style editing
-- Lightroom XMP workflow
-- direct export requirements
-
-### ARCHITECTURE.md
-
-Technical implementation:
-
-- system design
-- data model
-- processing pipeline
-- local AI architecture
-- storage and job management
-
-### PRODUCT_ROADMAP.md
-
-Future evolution:
-
-- development phases
-- feature priorities
-- long-term direction
-
----
-
-## Execution Flow
-
-```
-Read docs
-   ↓
-Inspect implementation
-   ↓
-Implement current phase
-   ↓
-Test
-   ↓
-Build verification
-   ↓
-Deliver
+```text
+RAW collection
+ -> smart selection + meaningful groups
+ -> photographer reference/style
+ -> adaptive per-photo Recipes
+ -> review
+ -> same-basename XMP for Lightroom
+      or
+    explicit direct export
 ```
 
-The product goal is a local semi-automatic photography workflow assistant, not a Lightroom replacement or a generic image converter.
+Original RAWs remain unchanged; large intermediate files are not the default.

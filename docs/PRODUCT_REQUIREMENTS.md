@@ -185,3 +185,10 @@ The workstation Library should expose the camera identity and capture time used 
 Photo-Cake now captures exact DNG/TIFF white-balance source evidence when present, including `AsShotNeutral` and `AsShotWhiteXY`, and persists that evidence by stable asset ID. These raw values are provenance, not Lightroom slider values.
 
 White balance remains a paired adjustment contract: Temperature and Tint must both be supported by reliable derived evidence before Reference, Recipe or XMP may apply them. A partial measurement is treated as unknown and omitted. Photo-Cake must not convert rendered preview colors or EXIF Auto/Manual white-balance mode into fabricated Lightroom Kelvin/Tint values.
+
+
+## Android Companion Boundary
+
+Android is a decision companion, not a second RAW workstation. Its real bridge reuses the same local project stores for Library context, effective groups, Cull recommendations/reviews and Reference selection. Workstation-only capabilities such as RAW import/analyze control, StyleProfile editing, Recipe exception editing, direct export and Lightroom XMP writing must remain absent from the Android capability surface.
+
+Cross-device project transfer/synchronization is still a separate gap. Until that transport exists, the companion operates on project state present in its own app data; do not invent cloud accounts or duplicate photography logic to bridge devices.

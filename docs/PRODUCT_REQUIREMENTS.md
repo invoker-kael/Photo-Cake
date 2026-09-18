@@ -332,3 +332,13 @@ Eligibility is intentionally stricter than the ordinary per-group candidate list
 The photographer selects the target groups explicitly. `Select eligible` is only a convenience for that visible eligible set; the actual write still occurs only after the explicit `Set suggested References` action. Groups with an existing Reference are excluded and are never silently replaced.
 
 The backend revalidates every selected group/candidate pair and then creates all missing ReferenceSets/bindings in one transaction. Any stale group, duplicate group, invalid membership, existing binding or newly-invalid Cull state aborts the whole batch without partial Reference creation. After the batch, each group remains fully editable through the normal individual candidate surface.
+
+### Clear-group Recipe confirmation
+
+Large travel, family and burst shoots should not require a full-card pass over every ordinary adaptive Recipe after the photographer has already established the group look. Recipe Review therefore keeps exception-first Triage as the inspection surface and adds an explicit clear-group confirmation path for groups whose remaining Recipes have no current attention signal.
+
+A group is clear only when it has a selected Reference, resolved target-bound Recipes, at least one current unconfirmed deliverable Recipe, and every such Recipe has completed culling evidence or an explicit photographer decision. Saved per-photo exceptions, photographer Review decisions, unresolved AI Review/RejectSuggestion evidence, or pending/missing culling evidence keep the group out of clear-group confirmation. Photographer Keep remains authoritative over an AI suggestion; photographer Reject photos remain excluded from the deliverable Recipe set.
+
+The UI may offer both one-group and all-clear-groups actions, but the backend always re-resolves current Recipes and revalidates the complete selected group set. All selected groups must still be clear before any new review fingerprint is written. Their current Recipe fingerprints are then confirmed in one transaction, so a stale group cannot produce a partial batch confirmation.
+
+This is an explicit photographer acceptance shortcut, not automatic quality approval. Reference/style/Recipe-exception changes continue to invalidate affected confirmations through the existing fingerprint contract and return those photos to Review when appropriate. The workflow follows the efficient standard-photo pattern used by mature batch photo editors: establish the look, synchronize adaptively, inspect exceptions, explicitly accept the clear remainder, then hand off to Lightroom.

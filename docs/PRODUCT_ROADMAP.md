@@ -165,3 +165,5 @@ Grouping correction now closes the main real-shoot gap in Milestone C: semantic 
 
 
 Reference setup now scales across large shoots without weakening photographer authority: unreferenced groups can multi-select their existing best-supported shortlist candidate and create all chosen References transactionally. Batch eligibility excludes evidence-pending and unresolved RejectSuggestion candidates, existing References are never overwritten, and every group remains individually adjustable afterward.
+
+Recipe review now closes the standard-photo batch loop for large shoots: after Reference and adaptive Recipe synchronization, the workstation can explicitly confirm one clear group or all currently clear groups without forcing a full All-view pass. Eligibility reuses the same Cull/exception evidence as Triage, the backend revalidates every selected group, and all new Recipe fingerprints commit transactionally. Exception or evidence-pending groups remain individual review work before Lightroom handoff.

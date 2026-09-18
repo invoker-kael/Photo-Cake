@@ -20,6 +20,7 @@ import App, {
   type BackendReferenceBinding,
   type BackendRecipeReviewBatchItem,
   type BackendRecipeReviewBatchResult,
+  type BackendRecipeReviewGroupBatchResult,
   type BackendRecipeReviewOverride,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
@@ -114,6 +115,8 @@ const bridge: PhotoCakeBridge = {
     invoke<void>("set_recipe_reviewed", { groupId, assetId }),
   confirmRecipeReviews: (items: BackendRecipeReviewBatchItem[]) =>
     invoke<BackendRecipeReviewBatchResult>("confirm_recipe_reviews", { items }),
+  confirmRecipeReviewGroups: (groupIds) =>
+    invoke<BackendRecipeReviewGroupBatchResult>("confirm_recipe_review_groups", { groupIds }),
   clearRecipeReviewed: (assetId) =>
     invoke<void>("clear_recipe_reviewed", { assetId }),
   renderRecipePreview: async (groupId, assetId) => {

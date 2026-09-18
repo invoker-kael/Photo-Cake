@@ -130,4 +130,7 @@ pub use xmp::{
     XmpHandoffVerification, XmpParseError, XmpSidecarPreflight, XmpWriteError,
 };
 
-pub use workflow::{derive_workflow_status, WorkflowFacts, WorkflowFocus, WorkflowStatus};
+pub use workflow::{
+    derive_workflow_status, recipe_review_group_can_confirm, recipe_review_requires_attention,
+    RecipeReviewSignal, WorkflowFacts, WorkflowFocus, WorkflowStatus,
+};

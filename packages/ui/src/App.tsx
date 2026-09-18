@@ -17,6 +17,7 @@ import {
   type BackendReferenceBinding,
   type BackendRecipeReviewBatchItem,
   type BackendRecipeReviewBatchResult,
+  type BackendRecipeReviewGroupBatchResult,
   type BackendRecipeReviewOverride,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
@@ -48,6 +49,7 @@ export type {
   BackendReferenceBinding,
   BackendRecipeReviewBatchItem,
   BackendRecipeReviewBatchResult,
+  BackendRecipeReviewGroupBatchResult,
   BackendRecipeReviewOverride,
   BackendReviewRenderResult,
   BackendSemanticRefinementReport,
@@ -297,6 +299,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [styleBatchNote, setStyleBatchNote] = useState<string | null>(null);
   const [reviewUpdating, setReviewUpdating] = useState<string | null>(null);
   const [reviewBatchUpdating, setReviewBatchUpdating] = useState(false);
+  const [reviewBatchNote, setReviewBatchNote] = useState<string | null>(null);
   const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
   const [handoffPreflightLoading, setHandoffPreflightLoading] = useState(false);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
@@ -363,6 +366,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setGroupRefinementNote(null);
     setReferenceBatchTargets([]);
     setReferenceBatchNote(null);
+    setReviewBatchNote(null);
   }, [activeBatchId]);
 
   useEffect(() => {
@@ -788,6 +792,37 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     exceptions: recipeReviewItems.filter((item) => item.exception).length,
     rejected: rejectedReviewCount,
   };
+
+  const clearRecipeReviewGroups = (photoContext?.groups ?? []).flatMap((group) => {
+    const preview = referencePreviews[group.id];
+    const cullingGroup = culling.find((value) => value.group_id === group.id);
+    if (!preview || preview.pending_asset_id || !cullingGroup) return [];
+
+    const pending = new Set(cullingGroup.pending_asset_ids);
+    const assetIds = preview.recipes.flatMap((recipe) => {
+      const assetId = recipe.target_asset_id;
+      if (
+        !assetId ||
+        cullingReviews[assetId] === "REJECT" ||
+        reviewedRecipeAssetIds.has(assetId)
+      ) return [];
+      return [assetId];
+    });
+    if (assetIds.length === 0) return [];
+
+    const clear = assetIds.every((assetId) => {
+      const userDecision = cullingReviews[assetId];
+      if (!userDecision && (pending.has(assetId) || !cullingRecommendations.has(assetId))) {
+        return false;
+      }
+      return recipeReviewPriority(assetId) >= 10;
+    });
+    return clear ? [{ group_id: group.id, asset_ids: assetIds }] : [];
+  });
+  const clearRecipeReviewAssetCount = clearRecipeReviewGroups.reduce(
+    (total, group) => total + group.asset_ids.length,
+    0,
+  );
 
   const cullingGroupNumbers = useMemo(
     () => new Map(culling.map((group, index) => [group.group_id, index + 1])),
@@ -1370,28 +1405,56 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     }
   };
 
+  const applyConfirmedRecipeAssets = (assetIds: string[]) => {
+    const confirmed = new Set(assetIds);
+    setReferencePreviews((current) => {
+      const next = { ...current };
+      for (const [groupId, preview] of Object.entries(current)) {
+        const reviewedIds = new Set(preview.reviewed_asset_ids ?? []);
+        let changed = false;
+        for (const recipe of preview.recipes) {
+          const assetId = recipe.target_asset_id;
+          if (assetId && confirmed.has(assetId) && !reviewedIds.has(assetId)) {
+            reviewedIds.add(assetId);
+            changed = true;
+          }
+        }
+        if (changed) {
+          next[groupId] = { ...preview, reviewed_asset_ids: Array.from(reviewedIds) };
+        }
+      }
+      return next;
+    });
+  };
+
   const confirmVisibleRecipeReviews = async () => {
     if (!bridge?.confirmRecipeReviews || visibleRecipeReviewItems.length === 0) return;
     setReviewBatchUpdating(true);
+    setReviewBatchNote(null);
     try {
       const result: BackendRecipeReviewBatchResult =
         await bridge.confirmRecipeReviews(visibleRecipeReviewItems);
-      const confirmed = new Set(result.asset_ids);
-      setReferencePreviews((current) => {
-        const next = { ...current };
-        for (const item of visibleRecipeReviewItems) {
-          if (!confirmed.has(item.asset_id)) continue;
-          const preview = next[item.group_id];
-          if (!preview) continue;
-          const reviewedIds = new Set(preview.reviewed_asset_ids ?? []);
-          reviewedIds.add(item.asset_id);
-          next[item.group_id] = {
-            ...preview,
-            reviewed_asset_ids: Array.from(reviewedIds),
-          };
-        }
-        return next;
-      });
+      applyConfirmedRecipeAssets(result.asset_ids);
+      setReviewBatchNote(`Confirmed ${result.asset_ids.length} visible Recipes.`);
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setReviewBatchUpdating(false);
+    }
+  };
+
+  const confirmClearRecipeGroups = async (groupIds: string[]) => {
+    if (!bridge?.confirmRecipeReviewGroups || groupIds.length === 0) return;
+    setReviewBatchUpdating(true);
+    setReviewBatchNote(null);
+    try {
+      const result: BackendRecipeReviewGroupBatchResult =
+        await bridge.confirmRecipeReviewGroups(groupIds);
+      applyConfirmedRecipeAssets(result.asset_ids);
+      setReviewBatchNote(
+        `Confirmed ${result.asset_ids.length} straightforward Recipes across ${result.group_ids.length} clear groups.`,
+      );
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -2519,6 +2582,24 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             disabled={
               reviewBatchUpdating ||
               reviewUpdating != null ||
+              !bridge?.confirmRecipeReviewGroups ||
+              clearRecipeReviewGroups.length === 0
+            }
+            onClick={() =>
+              void confirmClearRecipeGroups(
+                clearRecipeReviewGroups.map((group) => group.group_id),
+              )
+            }
+          >
+            {reviewBatchUpdating
+              ? "Confirming…"
+              : `Confirm clear groups (${clearRecipeReviewGroups.length} · ${clearRecipeReviewAssetCount} photos)`}
+          </button>
+          <button
+            className="cull-batch-action"
+            disabled={
+              reviewBatchUpdating ||
+              reviewUpdating != null ||
               !bridge?.confirmRecipeReviews ||
               visibleRecipeReviewItems.length === 0
             }
@@ -2542,6 +2623,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           </div>
         </div>
       </div>
+      {reviewBatchNote && <div className="review-batch-note">{reviewBatchNote}</div>}
       <div className="recipe-review-groups">
         {photoContext?.groups.map((group, groupIndex) => {
           const preview = referencePreviews[group.id];
@@ -2609,14 +2691,32 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               recipe.target_asset_id != null &&
               recipeReviews[recipe.target_asset_id] != null,
           ).length;
+          const clearGroup = clearRecipeReviewGroups.find(
+            (value) => value.group_id === group.id,
+          );
 
           return (
             <div className="recipe-review-group" key={group.id}>
               <div className="recipe-review-head">
                 <strong>Group {groupIndex + 1}</strong>
-                <span>
-                  {`${groupAttentionCount} attention · ${groupConfirmedCount} confirmed · ${groupExceptionCount} exceptions · ${recipesWithTargets.length} total`}
-                </span>
+                <div className="recipe-review-head-actions">
+                  <span>
+                    {`${groupAttentionCount} attention · ${groupConfirmedCount} confirmed · ${groupExceptionCount} exceptions · ${recipesWithTargets.length} total`}
+                  </span>
+                  {clearGroup && (
+                    <button
+                      className="cull-batch-action"
+                      disabled={
+                        reviewBatchUpdating ||
+                        reviewUpdating != null ||
+                        !bridge?.confirmRecipeReviewGroups
+                      }
+                      onClick={() => void confirmClearRecipeGroups([group.id])}
+                    >
+                      Confirm clear group ({clearGroup.asset_ids.length})
+                    </button>
+                  )}
+                </div>
               </div>
               {reviewViewMode === "TRIAGE" && reviewRecipes.length === 0 && (
                 <div className="panel-note">

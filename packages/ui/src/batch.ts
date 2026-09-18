@@ -280,6 +280,11 @@ export interface BackendRecipeReviewBatchResult {
   asset_ids: string[];
 }
 
+export interface BackendRecipeReviewGroupBatchResult {
+  group_ids: string[];
+  asset_ids: string[];
+}
+
 export interface BackendReviewRenderResult {
   asset_id: string;
   recipe_id: string;
@@ -332,6 +337,7 @@ export interface PhotoCakeBridge {
   clearRecipeReview?(assetId: string): Promise<void>;
   setRecipeReviewed?(groupId: string, assetId: string): Promise<void>;
   confirmRecipeReviews?(items: BackendRecipeReviewBatchItem[]): Promise<BackendRecipeReviewBatchResult>;
+  confirmRecipeReviewGroups?(groupIds: string[]): Promise<BackendRecipeReviewGroupBatchResult>;
   clearRecipeReviewed?(assetId: string): Promise<void>;
   renderRecipePreview?(groupId: string, assetId: string): Promise<BackendReviewRenderResult>;
   loadReferenceStyles?(batchId: string): Promise<BackendGroupReferenceStyle[]>;

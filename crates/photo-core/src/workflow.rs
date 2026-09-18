@@ -1,3 +1,5 @@
+use crate::culling::CullingDecision;
+use crate::culling_store::CullingUserDecision;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +33,41 @@ pub struct WorkflowFacts {
 pub struct WorkflowStatus {
     pub next_focus: WorkflowFocus,
     pub facts: WorkflowFacts,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RecipeReviewSignal {
+    pub confirmed: bool,
+    pub has_exception: bool,
+    pub user_decision: Option<CullingUserDecision>,
+    pub ai_decision: Option<CullingDecision>,
+    pub evidence_pending: bool,
+}
+
+pub fn recipe_review_requires_attention(signal: &RecipeReviewSignal) -> bool {
+    if signal.confirmed {
+        return false;
+    }
+    if signal.has_exception {
+        return true;
+    }
+    match signal.user_decision {
+        Some(CullingUserDecision::Review) => return true,
+        Some(CullingUserDecision::Keep | CullingUserDecision::Reject) => return false,
+        None => {}
+    }
+    matches!(
+        signal.ai_decision,
+        Some(CullingDecision::Review | CullingDecision::RejectSuggestion)
+    )
+}
+
+pub fn recipe_review_group_can_confirm(signals: &[RecipeReviewSignal]) -> bool {
+    signals.iter().any(|signal| !signal.confirmed)
+        && signals.iter().all(|signal| {
+            signal.confirmed
+                || (!signal.evidence_pending && !recipe_review_requires_attention(signal))
+        })
 }
 
 pub fn derive_workflow_status(facts: WorkflowFacts) -> WorkflowStatus {
@@ -125,5 +162,61 @@ mod tests {
             derive_workflow_status(facts()).next_focus,
             WorkflowFocus::Complete
         );
+    }
+
+    #[test]
+    fn recipe_attention_prefers_photographer_decisions_over_ai() {
+        let mut signal = RecipeReviewSignal {
+            ai_decision: Some(CullingDecision::RejectSuggestion),
+            ..RecipeReviewSignal::default()
+        };
+        assert!(recipe_review_requires_attention(&signal));
+        signal.user_decision = Some(CullingUserDecision::Keep);
+        assert!(!recipe_review_requires_attention(&signal));
+        signal.user_decision = Some(CullingUserDecision::Review);
+        assert!(recipe_review_requires_attention(&signal));
+    }
+
+    #[test]
+    fn saved_exception_requires_attention_until_current_recipe_is_confirmed() {
+        let mut signal = RecipeReviewSignal {
+            has_exception: true,
+            ..RecipeReviewSignal::default()
+        };
+        assert!(recipe_review_requires_attention(&signal));
+        signal.confirmed = true;
+        assert!(!recipe_review_requires_attention(&signal));
+    }
+
+    #[test]
+    fn clear_group_confirmation_requires_complete_non_attention_recipes() {
+        let clear = RecipeReviewSignal {
+            ai_decision: Some(CullingDecision::Keep),
+            ..RecipeReviewSignal::default()
+        };
+        assert!(recipe_review_group_can_confirm(&[clear]));
+        assert!(!recipe_review_group_can_confirm(&[
+            clear,
+            RecipeReviewSignal { evidence_pending: true, ..clear }
+        ]));
+        assert!(!recipe_review_group_can_confirm(&[
+            clear,
+            RecipeReviewSignal {
+                ai_decision: Some(CullingDecision::Review),
+                ..clear
+            }
+        ]));
+    }
+
+    #[test]
+    fn already_confirmed_group_is_not_offered_as_new_batch_work() {
+        let confirmed = RecipeReviewSignal {
+            confirmed: true,
+            has_exception: true,
+            ai_decision: Some(CullingDecision::RejectSuggestion),
+            evidence_pending: true,
+            ..RecipeReviewSignal::default()
+        };
+        assert!(!recipe_review_group_can_confirm(&[confirmed]));
     }
 }

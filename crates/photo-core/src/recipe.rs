@@ -45,6 +45,12 @@ impl Recipe {
         plan: &GroupColorSyncPlan,
         resolved: &ResolvedColorEdit,
     ) -> Self {
+        let (temperature, tint) = plan
+            .intent
+            .white_balance()
+            .map(|value| (Some(value.0), Some(value.1)))
+            .unwrap_or((None, None));
+
         Self {
             id: Uuid::new_v4(),
             name: name.into(),
@@ -55,8 +61,8 @@ impl Recipe {
                 contrast: Some(resolved.contrast),
                 highlights: None,
                 shadows: None,
-                temperature: plan.intent.target_temperature_k,
-                tint: plan.intent.target_tint,
+                temperature,
+                tint,
                 saturation: Some(resolved.saturation),
             },
         }
@@ -131,6 +137,30 @@ mod tests {
         assert_eq!(recipe.adjustments.exposure, Some(0.6));
         assert_eq!(recipe.adjustments.temperature, Some(5900.0));
         assert_eq!(recipe.adjustments.tint, Some(6.0));
+    }
+
+    #[test]
+    fn partial_group_white_balance_never_materializes_into_recipe() {
+        let reference_id = Uuid::new_v4();
+        let asset_id = Uuid::new_v4();
+        let mut plan = group_plan(
+            reference_id,
+            vec![ResolvedColorEdit {
+                asset_id,
+                exposure_delta_ev: 0.0,
+                temperature_delta_k: None,
+                tint_delta: None,
+                contrast: 0.0,
+                saturation: 0.0,
+                semantic: vec![],
+            }],
+        );
+        plan.intent.target_temperature_k = Some(5800.0);
+        plan.intent.target_tint = None;
+
+        let recipe = Recipe::materialize_group("group", &[reference_id], &plan).remove(0);
+        assert!(recipe.adjustments.temperature.is_none());
+        assert!(recipe.adjustments.tint.is_none());
     }
 
     #[test]

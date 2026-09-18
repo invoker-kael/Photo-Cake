@@ -1,7 +1,8 @@
 use crate::{
-    refine_group_by_similarity, AnalysisCache, AnalysisCacheError, CatalogError,
-    ClassificationStore, ClassificationStoreError, GroupingBasis, ImageEmbedding, InferenceTask,
-    PhotoGroup, RawCatalog, SemanticGroupingConfig, SemanticGroupingError,
+    detect_exposure_brackets, refine_group_by_similarity, AnalysisCache, AnalysisCacheError,
+    CatalogError, ClassificationStore, ClassificationStoreError, ExposureBracketError,
+    GroupingBasis, ImageEmbedding, InferenceTask, PhotoGroup, RawCatalog, SemanticGroupingConfig,
+    SemanticGroupingError,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -12,6 +13,8 @@ use uuid::Uuid;
 pub struct SemanticRefinementReport {
     pub collection_id: Uuid,
     pub refined_parent_group_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub protected_bracket_parent_group_ids: Vec<Uuid>,
     pub pending_asset_ids: Vec<Uuid>,
     pub effective_groups: Vec<PhotoGroup>,
 }
@@ -24,6 +27,8 @@ pub enum SemanticRefinementError {
     Classification(#[from] ClassificationStoreError),
     #[error(transparent)]
     Analysis(#[from] AnalysisCacheError),
+    #[error(transparent)]
+    Bracketing(#[from] ExposureBracketError),
     #[error(transparent)]
     Grouping(#[from] SemanticGroupingError),
     #[error("invalid cached embedding for asset {asset_id}: {message}")]
@@ -43,6 +48,7 @@ pub fn refine_collection_semantic_groups(
 ) -> Result<SemanticRefinementReport, SemanticRefinementError> {
     let parents = catalog.list_groups_for_collection(collection_id)?;
     let mut refined_parent_group_ids = Vec::new();
+    let mut protected_bracket_parent_group_ids = Vec::new();
     let mut pending_asset_ids = HashSet::new();
 
     for parent in parents {
@@ -99,6 +105,13 @@ pub fn refine_collection_semantic_groups(
             continue;
         }
 
+        let brackets = detect_exposure_brackets(analysis, &parent)?;
+        if brackets.len() == 1 && brackets[0].members.len() == parent.asset_ids.len() {
+            catalog.replace_semantic_groups(parent.id, &[])?;
+            protected_bracket_parent_group_ids.push(parent.id);
+            continue;
+        }
+
         let existing = catalog.list_semantic_groups_for_parent(parent.id)?;
         let mut refined = refine_group_by_similarity(
             &parent,
@@ -117,6 +130,7 @@ pub fn refine_collection_semantic_groups(
     Ok(SemanticRefinementReport {
         collection_id,
         refined_parent_group_ids,
+        protected_bracket_parent_group_ids,
         pending_asset_ids,
         effective_groups: catalog.list_effective_groups_for_collection(collection_id)?,
     })
@@ -168,6 +182,30 @@ mod tests {
             file_time_ms: None,
             sequence_number: Some(sequence),
         }
+    }
+
+    fn save_exposure(analysis: &AnalysisCache, asset_id: Uuid, exposure_ev: f32) {
+        analysis
+            .put(&AnalysisArtifact {
+                key: AnalysisCacheKey {
+                    asset_id,
+                    source_fingerprint: "raw".into(),
+                    preview_revision: "preview".into(),
+                    task: InferenceTask::ExposureAnalysis,
+                    model_id: "preview-relative-exposure".into(),
+                    model_version: "1".into(),
+                    config_hash: "test".into(),
+                },
+                payload_json: serde_json::to_value(crate::PhotoColorAnalysis {
+                    asset_id,
+                    exposure_ev,
+                    temperature_k: None,
+                    tint: None,
+                    confidence: 0.95,
+                })
+                .unwrap(),
+            })
+            .unwrap();
     }
 
     fn save_evidence(
@@ -252,6 +290,52 @@ mod tests {
             .effective_groups
             .iter()
             .all(|group| group.basis == GroupingBasis::SemanticSimilarity));
+    }
+
+    #[test]
+    fn full_exposure_bracket_parent_is_preserved_from_semantic_splitting() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("project.sqlite3");
+        let catalog = RawCatalog::open(&db).unwrap();
+        let classifications = ClassificationStore::open(&db).unwrap();
+        let analysis = AnalysisCache::open(&db).unwrap();
+        let assets = catalog
+            .ensure_assets(&[
+                asset("base.cr3", 1),
+                asset("under.cr3", 2),
+                asset("over.cr3", 3),
+            ])
+            .unwrap();
+        let collection = Uuid::new_v4();
+        let parents = initial_group_raw_assets(&assets, InitialGroupingConfig::default());
+        catalog
+            .replace_automatic_groups(collection, &parents)
+            .unwrap();
+
+        for (asset, exposure, vector) in [
+            (&assets[0], 0.0, vec![1.0, 0.0]),
+            (&assets[1], -1.0, vec![0.999, 0.01]),
+            (&assets[2], 1.0, vec![0.998, -0.01]),
+        ] {
+            save_evidence(&classifications, &analysis, asset.id, vector, false);
+            save_exposure(&analysis, asset.id, exposure);
+        }
+
+        let report = refine_collection_semantic_groups(
+            &catalog,
+            &classifications,
+            &analysis,
+            collection,
+            SemanticGroupingConfig {
+                portrait_similarity_threshold: 1.0,
+                scene_similarity_threshold: 1.0,
+            },
+        )
+        .unwrap();
+
+        assert!(report.refined_parent_group_ids.is_empty());
+        assert_eq!(report.protected_bracket_parent_group_ids, vec![parents[0].id]);
+        assert_eq!(report.effective_groups, parents);
     }
 
     #[test]

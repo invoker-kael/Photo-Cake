@@ -5,10 +5,11 @@
 //! evidence that has not been measured yet.
 
 use crate::{
-    embedding_similarity, AnalysisCache, AnalysisCacheError, ClassificationSignals, ImageEmbedding,
-    InferenceTask, PhotoGroup,
+    detect_exposure_brackets, embedding_similarity, AnalysisCache, AnalysisCacheError,
+    ClassificationSignals, ExposureBracketError, ExposureBracketSet, ImageEmbedding, InferenceTask,
+    PhotoGroup,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -64,6 +65,7 @@ pub enum CullingReason {
     LowSharpness,
     BlurRisk,
     ExposureRisk,
+    ExposureBracketMember,
     NearDuplicate,
     LowTechnicalQuality,
 }
@@ -234,17 +236,62 @@ pub fn rank_group_candidates_with_embeddings(
     rank_group_candidates(&enriched)
 }
 
+fn protect_exposure_bracket_members(
+    recommendations: &mut [CullingRecommendation],
+    brackets: &[ExposureBracketSet],
+) {
+    let bracket_assets = brackets
+        .iter()
+        .flat_map(|set| set.members.iter().map(|member| member.asset_id))
+        .collect::<HashSet<_>>();
+
+    for recommendation in recommendations {
+        if !bracket_assets.contains(&recommendation.asset_id) {
+            continue;
+        }
+
+        recommendation
+            .reasons
+            .retain(|reason| *reason != CullingReason::NearDuplicate);
+
+        if recommendation.decision == CullingDecision::RejectSuggestion {
+            recommendation.decision = CullingDecision::Review;
+            recommendation
+                .reasons
+                .retain(|reason| *reason != CullingReason::LowTechnicalQuality);
+        } else if recommendation.decision == CullingDecision::Review
+            && recommendation.quality_score >= 0.85
+            && recommendation.reasons.is_empty()
+        {
+            recommendation.decision = CullingDecision::Keep;
+        }
+
+        if !recommendation
+            .reasons
+            .contains(&CullingReason::ExposureBracketMember)
+        {
+            recommendation
+                .reasons
+                .push(CullingReason::ExposureBracketMember);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupCullingResult {
     pub group_id: Uuid,
     pub recommendations: Vec<CullingRecommendation>,
     pub pending_asset_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub exposure_brackets: Vec<ExposureBracketSet>,
 }
 
 #[derive(Debug, Error)]
 pub enum CullingEvidenceError {
     #[error(transparent)]
     Analysis(#[from] AnalysisCacheError),
+    #[error(transparent)]
+    Bracketing(#[from] ExposureBracketError),
     #[error("invalid cached culling evidence for asset {asset_id}: {source}")]
     Json {
         asset_id: Uuid,
@@ -337,10 +384,14 @@ pub fn build_group_culling_result(
             .cloned();
     }
 
+    let exposure_brackets = detect_exposure_brackets(cache, group)?;
+    protect_exposure_bracket_members(&mut recommendations, &exposure_brackets);
+
     Ok(GroupCullingResult {
         group_id: group.id,
         recommendations,
         pending_asset_ids,
+        exposure_brackets,
     })
 }
 
@@ -551,6 +602,64 @@ mod tests {
             CullingDecision::Review
         );
         assert_eq!(result.pending_asset_ids, vec![pending]);
+        assert!(result.exposure_brackets.is_empty());
+    }
+
+    #[test]
+    fn exposure_brackets_are_preserved_from_ordinary_culling_rejection() {
+        let dir = tempdir().unwrap();
+        let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
+        let base = Uuid::new_v4();
+        let under = Uuid::new_v4();
+        let over = Uuid::new_v4();
+        let group = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Moment,
+            basis: GroupingBasis::TimeAndSequence,
+            asset_ids: vec![base, under, over],
+            manual_locked: false,
+        };
+
+        for (asset_id, quality, exposure_ev, embedding) in [
+            (base, 0.95, 0.0, vec![1.0, 0.0]),
+            (under, 0.30, -1.0, vec![0.999, 0.01]),
+            (over, 0.35, 1.0, vec![0.998, -0.01]),
+        ] {
+            cache_artifact(
+                &cache,
+                asset_id,
+                InferenceTask::QualityScoring,
+                serde_json::to_value(score(quality, None)).unwrap(),
+            );
+            cache_artifact(
+                &cache,
+                asset_id,
+                InferenceTask::ExposureAnalysis,
+                serde_json::to_value(crate::PhotoColorAnalysis {
+                    asset_id,
+                    exposure_ev,
+                    temperature_k: None,
+                    tint: None,
+                    confidence: 0.95,
+                })
+                .unwrap(),
+            );
+            cache_artifact(
+                &cache,
+                asset_id,
+                InferenceTask::ImageEmbedding,
+                serde_json::json!({ "embedding": embedding }),
+            );
+        }
+
+        let result = build_group_culling_result(&cache, &group, 1.0).unwrap();
+        assert_eq!(result.exposure_brackets.len(), 1);
+        assert_eq!(result.exposure_brackets[0].center_asset_id, base);
+        assert!(result.recommendations.iter().all(|item| {
+            item.decision != CullingDecision::RejectSuggestion
+                && item.reasons.contains(&CullingReason::ExposureBracketMember)
+                && !item.reasons.contains(&CullingReason::NearDuplicate)
+        }));
     }
 
     #[test]

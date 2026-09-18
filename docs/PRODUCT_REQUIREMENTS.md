@@ -368,3 +368,12 @@ The workstation re-resolves the current editable group before any write. The sou
 Any changed target Recipe loses its current review state through the existing fingerprint contract and returns to Review. Edited previews are invalidated and Lightroom delivery is recalculated from the changed canonical Recipes. This makes synchronization a fast way to create a small exception cohort, not a shortcut around quality review.
 
 The interaction borrows the useful standard-photo/selective-sync pattern of mature batch editors, but does not introduce a preset-copy engine or allow exception deltas to cross group boundaries.
+
+
+### Exposure-bracket workflow
+
+AEB/HDR source frames must not be treated as expendable burst duplicates. After Analyze has produced exposure and embedding evidence, the workstation conservatively detects same-composition symmetric exposure ladders and surfaces them as bracket sets in Cull/Groups.
+
+Detected bracket members remain photographer-reviewable and are protected from ordinary duplicate-driven rejection. A full Moment that is exactly one bracket set remains intact through semantic refinement. For batch Reference setup, the measured center exposure is the preferred starting candidate when it is otherwise eligible, while an explicit photographer Keep remains authoritative.
+
+Photo-Cake does not claim to merge HDR RAWs yet. The current requirement is to preserve the bracket, keep its intent visible, and hand the original RAW set forward non-destructively. HDR/DNG merging or Direct Export from brackets requires a real RAW-domain merge plus canonical Recipe/color/metadata renderer and must not be simulated with embedded-JPEG preview logic.

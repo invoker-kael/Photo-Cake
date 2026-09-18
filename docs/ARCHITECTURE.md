@@ -397,3 +397,22 @@ The batch request sends explicit `group_id + asset_id` pairs. The Windows backen
 After all requests validate, ReferenceStore creates the missing single-photo ReferenceSets and group bindings in one SQLite transaction. Duplicate groups, stale group membership, photographer Reject, missing culling evidence, AI RejectSuggestion, or an already-bound group aborts the complete request before any selected group is written.
 
 This is a batch confirmation surface, not automatic Reference selection. It follows the same scalable pattern as Cull `Confirm visible`, Recipe `Confirm visible`, batch look sync and Lightroom batch handoff: derive useful defaults, let the photographer choose the scope, then commit that scope transactionally.
+
+
+## Exposure Bracket / HDR Source Protection
+
+Photo-Cake treats exposure bracketing as capture topology that must survive the normal batch workflow, not as ordinary near-duplicate clutter.
+
+Analyze already produces two reusable evidence sources that make conservative detection possible without a second scanner: preview-relative exposure and image embeddings. Within one existing PhotoGroup, Photo-Cake looks for contiguous odd-sized 3/5/7/9-frame ladders whose measured exposure values are symmetric around a center frame and whose embeddings still describe essentially the same composition.
+
+When a bracket is detected:
+
+- every source frame is marked as an exposure-bracket member in Cull;
+- near-duplicate evidence no longer acts as a reason to discard a bracket member;
+- a bracket member is never left as an automatic RejectSuggestion through the ordinary culling path; uncertain frames remain Reviewable;
+- if one complete Moment parent is exactly one bracket set, semantic refinement preserves that parent instead of splitting the exposure ladder;
+- batch Reference setup prefers the measured center exposure when it is otherwise eligible, while an explicit photographer Keep remains authoritative.
+
+This is intentionally **not** an HDR merge implementation. Photo-Cake preserves and prepares the source RAWs and can still hand off non-destructive XMP per source. A future HDR merge belongs only after there is a real RAW-domain merge/render path with trustworthy color and metadata behavior. Until then, Lightroom/Camera Raw remains the appropriate place to merge bracketed RAWs when the photographer wants an HDR DNG.
+
+The scalable editing pattern remains the existing one: establish a standard Reference/look, synchronize only the shared preference layer, let adaptive Recipes resolve per-photo differences, then inspect exceptions. This adopts the useful standard-photo -> selective batch synchronization -> focused exception-review production pattern from mature batch photo editors without introducing a second preset-copy engine.

@@ -141,6 +141,7 @@ export interface BackendPhotoContext {
 export interface BackendSemanticRefinementReport {
   collection_id: string;
   refined_parent_group_ids: string[];
+  protected_bracket_parent_group_ids: string[];
   pending_asset_ids: string[];
   effective_groups: BackendPhotoGroup[];
 }
@@ -157,6 +158,7 @@ export type CullingReason =
   | "LOW_SHARPNESS"
   | "BLUR_RISK"
   | "EXPOSURE_RISK"
+  | "EXPOSURE_BRACKET_MEMBER"
   | "NEAR_DUPLICATE"
   | "LOW_TECHNICAL_QUALITY";
 
@@ -165,6 +167,23 @@ export interface BackendCullingPortraitEvidence {
   face_count: number;
   primary_subject_ratio: number;
   people_confidence: number;
+}
+
+export type BackendExposureBracketRole = "UNDER" | "BASE" | "OVER";
+
+export interface BackendExposureBracketMember {
+  asset_id: string;
+  exposure_ev: number;
+  offset_from_center_ev: number;
+  role: BackendExposureBracketRole;
+}
+
+export interface BackendExposureBracketSet {
+  group_id: string;
+  center_asset_id: string;
+  members: BackendExposureBracketMember[];
+  span_ev: number;
+  minimum_embedding_similarity: number;
 }
 
 export interface BackendCullingRecommendation {
@@ -180,6 +199,7 @@ export interface BackendGroupCullingResult {
   group_id: string;
   recommendations: BackendCullingRecommendation[];
   pending_asset_ids: string[];
+  exposure_brackets?: BackendExposureBracketSet[];
 }
 
 export interface BackendCullingReview {

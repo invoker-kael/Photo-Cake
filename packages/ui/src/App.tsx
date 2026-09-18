@@ -193,6 +193,7 @@ function cullingReasonLabel(reason: CullingReason) {
     LOW_SHARPNESS: "Low sharpness",
     BLUR_RISK: "Blur risk",
     EXPOSURE_RISK: "Exposure risk",
+    EXPOSURE_BRACKET_MEMBER: "Exposure bracket · preserve frame",
     NEAR_DUPLICATE: "Near duplicate",
     LOW_TECHNICAL_QUALITY: "Low technical quality",
   };
@@ -868,6 +869,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     [culling],
   );
 
+  const cullingGroupsById = useMemo(
+    () => new Map(culling.map((group) => [group.group_id, group])),
+    [culling],
+  );
+  const bracketSetsForGroup = (groupId: string) =>
+    cullingGroupsById.get(groupId)?.exposure_brackets ?? [];
+
   const visibleCulling = useMemo(() => {
     if (cullViewMode === "ALL") return culling;
 
@@ -928,8 +936,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     [cullingReviews, selectedReferenceAssetIds, visibleCulling],
   );
 
-  const referenceCandidatesForGroup = (assetIds: string[]) =>
-    assetIds
+  const referenceCandidatesForGroup = (groupId: string, assetIds: string[]) => {
+    const bracketCenters = new Set(
+      bracketSetsForGroup(groupId).map((set) => set.center_asset_id),
+    );
+    return assetIds
       .filter((assetId) => cullingReviews[assetId] !== "REJECT")
       .sort((left, right) => {
         const score = (assetId: string) => {
@@ -944,6 +955,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         const byClass = score(left) - score(right);
         if (byClass !== 0) return byClass;
 
+        const byBracketCenter =
+          Number(bracketCenters.has(right)) - Number(bracketCenters.has(left));
+        if (byBracketCenter !== 0) return byBracketCenter;
+
         const byQuality =
           (cullingRecommendations.get(right)?.quality_score ?? -1) -
           (cullingRecommendations.get(left)?.quality_score ?? -1);
@@ -954,9 +969,26 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           (cullingRecommendations.get(right)?.group_rank ?? Number.MAX_SAFE_INTEGER)
         );
       });
+  };
 
-  const batchReferenceCandidateForGroup = (assetIds: string[]) =>
-    referenceCandidatesForGroup(assetIds).find((assetId) => {
+  const batchReferenceCandidateForGroup = (groupId: string, assetIds: string[]) => {
+    const candidates = referenceCandidatesForGroup(groupId, assetIds);
+    const explicitKeep = candidates.find(
+      (assetId) => cullingReviews[assetId] === "KEEP",
+    );
+    if (explicitKeep) return explicitKeep;
+
+    const bracketCenters = new Set(
+      bracketSetsForGroup(groupId).map((set) => set.center_asset_id),
+    );
+    const bracketCenter = candidates.find((assetId) => {
+      if (!bracketCenters.has(assetId)) return false;
+      const recommendation = cullingRecommendations.get(assetId);
+      return recommendation != null && recommendation.decision !== "REJECT_SUGGESTION";
+    });
+    if (bracketCenter) return bracketCenter;
+
+    return candidates.find((assetId) => {
       const user = cullingReviews[assetId];
       if (user === "KEEP" || user === "REVIEW") return true;
       if (user === "REJECT") return false;
@@ -966,6 +998,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         recommendation.decision !== "REJECT_SUGGESTION"
       );
     });
+  };
 
   const isPaused = bridge
     ? summary.paused > 0 && summary.running === 0 && summary.pending === 0
@@ -1055,10 +1088,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       setGroupSplitPoints({});
       setGroupRevision((value) => value + 1);
       setEditedPreviews({});
+      const bracketNote = report.protected_bracket_parent_group_ids.length
+        ? ` · ${report.protected_bracket_parent_group_ids.length} exposure-bracket group(s) preserved`
+        : "";
       setGroupRefinementNote(
         report.pending_asset_ids.length
-          ? `${report.refined_parent_group_ids.length} parent groups refined · ${report.pending_asset_ids.length} photos still waiting for analysis`
-          : `${report.refined_parent_group_ids.length} parent groups refined · ${report.effective_groups.length} effective groups ready`,
+          ? `${report.refined_parent_group_ids.length} parent groups refined · ${report.pending_asset_ids.length} photos still waiting for analysis${bracketNote}`
+          : `${report.refined_parent_group_ids.length} parent groups refined · ${report.effective_groups.length} effective groups ready${bracketNote}`,
       );
       setBackendError(null);
     } catch (error) {
@@ -1910,6 +1946,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <strong>Group {cullingGroupNumbers.get(group.group_id) ?? "—"}</strong>
                 <span>
                   {group.recommendations.length} scored · {group.pending_asset_ids.length} pending
+                  {!!group.exposure_brackets?.length &&
+                    ` · ${group.exposure_brackets.length} exposure bracket set(s)`}
                 </span>
               </div>
               <div className="cull-list">
@@ -2109,6 +2147,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <div className="group-detail-grid group-correction-grid">
           {groups.map((group, index) => {
             const semantic = group.basis === "SEMANTIC_SIMILARITY";
+            const brackets = bracketSetsForGroup(group.id);
             const canMerge = !semantic;
             const splitBeforeAssetId =
               groupSplitPoints[group.id] ?? group.asset_ids[1] ?? "";
@@ -2121,6 +2160,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     <small>
                       {group.kind.toLowerCase()} · {group.basis.replaceAll("_", " ").toLowerCase()}
                     </small>
+                    {brackets.length > 0 && (
+                      <small>
+                        Exposure bracket · {brackets
+                          .map((set) => `${set.members.length} frames / ${set.span_ev.toFixed(1)} EV`)
+                          .join(" · ")}
+                      </small>
+                    )}
                   </div>
                   {mode === "workstation" && bridge?.mergeGroups && canMerge && (
                     <label className="group-merge-check">
@@ -2236,7 +2282,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     );
     const eligibleReferenceItems: BackendReferenceBatchItem[] =
       missingReferenceGroups.flatMap((group) => {
-        const assetId = batchReferenceCandidateForGroup(group.asset_ids);
+        const assetId = batchReferenceCandidateForGroup(group.id, group.asset_ids);
         return assetId ? [{ group_id: group.id, asset_id: assetId }] : [];
       });
     const eligibleReferenceGroupIds = new Set(
@@ -2317,7 +2363,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <strong>Suggested candidate → selected groups</strong>
               </div>
               <small>
-                Uses the existing per-group shortlist only. AI Reject suggestions and evidence-pending candidates are not batch-eligible unless you already marked the photo Keep/Review.
+                Uses the existing per-group shortlist only. For a detected exposure bracket, the measured center exposure is preferred as the starting Reference when eligible; an explicit photographer Keep still wins. AI Reject suggestions and evidence-pending candidates remain individual-review work.
               </small>
             </div>
             <div className="reference-batch-setup-status">
@@ -2474,7 +2520,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           const binding = referenceBindings[group.id];
           const style = referenceStyles[group.id]?.style_profile;
           const preview = referencePreviews[group.id];
-          const candidates = referenceCandidatesForGroup(group.asset_ids);
+          const candidates = referenceCandidatesForGroup(group.id, group.asset_ids);
           const recommendedReferenceAssetId =
             candidates.find((assetId) => {
               const user = cullingReviews[assetId];
@@ -2645,7 +2691,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       <div className="reference-candidate-badges">
                         {recommended && <em>Best starting point</em>}
                         {!binding &&
-                          batchReferenceCandidateForGroup(group.asset_ids) === assetId && (
+                          batchReferenceCandidateForGroup(group.id, group.asset_ids) === assetId && (
                             <em>Batch eligible</em>
                           )}
                         {selected && <em>Selected</em>}

@@ -1,197 +1,125 @@
 # Photo-Cake Product Requirements
 
-## Product Position
+## Product Goal
 
-Photo-Cake is a local-first semi-automatic photography workflow assistant.
+Photo-Cake is a personal, local-first, semi-automatic photography assistant for processing large RAW shoots with less repetitive Lightroom work.
 
-The goal is to reduce repetitive work in large RAW photo processing while preserving a professional Lightroom workflow.
+It is not intended to replace Lightroom or become a generic image editor. The normal result is an intelligently prepared RAW + XMP workflow that the photographer can continue editing, with direct final export available when Lightroom is unnecessary.
 
-Photo-Cake is not:
-
-- a Lightroom replacement
-- a full RAW engine replacement
-- a cloud editing service
-
-The product follows a Pixel-Cake style workflow: automate repetitive selection and editing decisions while keeping photographer control.
-
----
-
-# Main Photography Workflow
+## User Workflow
 
 ```text
-RAW Import
-    |
-    v
-Catalog
-    |
-    v
-Preview + Metadata
-    |
-    v
-Smart Culling
-    |
-    v
-Photo Grouping
-    |
-    v
-Reference Style Learning
-    |
-    v
-Adaptive Group Sync
-    |
-    v
-Per-photo Recipe Generation
-    |
-    v
-Review
-    |
-    +----------------+
-    |                |
-    v                v
-XMP Lightroom    Direct Export
+RAW import
+  -> fast catalog + previews
+  -> smart culling suggestions
+  -> meaningful photo groups
+  -> choose/edit one or more references
+  -> learn desired look
+  -> adapt that look per photo
+  -> review exceptions/results
+  -> Lightroom XMP or direct export
 ```
 
----
+## Non-destructive and Storage Requirements
 
-# Core Principles
-
-- Original RAW files are never modified.
-- RAW + XMP is the primary workflow.
-- Recipe is the single source of editing decisions.
-- Export is optional and generated from Recipe.
-- Avoid unnecessary TIFF/JPEG intermediate storage; the normal handoff is the original RAW plus a small XMP sidecar.
-- Local-first operation.
-- Existing code is extended before creating new systems.
-
----
-
-# Existing Code Alignment
-
-Photo-Cake should evolve from the current implementation.
-
-```text
-photo-core
- |
- +-- catalog
- +-- importer
- +-- raw
- +-- metadata
- +-- grouping
- +-- preview
- +-- recipe/edit model
- +-- export
-
-photo-inference
- |
- +-- image analysis
- +-- similarity
- +-- segmentation
- +-- future culling/style models
-```
-
----
-
-# Photography Features
-
-## Catalog and Import
-
-Purpose: understand the user's photo collection.
-
-Required:
-
-- RAW indexing
-- metadata extraction
-- asset identity
-- preview generation
+- Original RAW bytes are immutable.
+- Existing source folders remain the photo source of truth.
+- Normal Lightroom handoff is the original RAW plus a small same-basename `.xmp`.
+- Do not create full-size TIFF/JPEG working copies by default.
+- Preview/model/cache data belongs in managed application storage.
+- JPEG/TIFF output is generated only when direct export is requested.
+- No mandatory cloud upload, account or subscription workflow.
 
 ## Smart Culling
 
-Purpose: reduce the number of photos requiring manual review.
+Culling reduces what the user must inspect. It should combine technical and content evidence such as:
 
-Analyze:
+- focus/sharpness and blur;
+- severe exposure failure;
+- closed eyes and expression quality where people are present;
+- duplicate/near-duplicate burst detection;
+- obvious low-value frames.
 
-- focus quality
-- blur
-- closed eyes
-- expression quality
-- duplicate burst photos
-- exposure issues
+Output is advisory: Keep, Review or RejectSuggestion. The user owns the decision and originals are never deleted automatically.
 
-The system suggests decisions. It never deletes originals automatically.
+Within duplicates/bursts, the goal is to surface the strongest candidates rather than merely mark every similar image as bad.
 
 ## Photo Grouping
 
-Photo Group is the main editing unit.
+Photo Group is the main editing context.
 
-Examples:
+Grouping is two-stage:
 
-- travel scenes
-- portraits
-- landscapes
-- indoor family photos
-- night photos
+1. immediately create conservative moment groups from capture time, camera and filename sequence;
+2. refine only inside those groups using local classification and visual embeddings.
 
-Different groups can have different Recipes.
+Useful contexts include portrait sequences, travel scenes, landscape moments, indoor/family scenes and night photography. Manual group decisions override automatic refinement.
 
-## Reference Style Workflow
+## Reference-driven Editing
 
-The user provides preferred photos.
+The photographer can select a preferred edited photo or a reusable reference from another compatible group.
 
 ```text
-Reference Photos
-        |
-        v
-Style Analysis
-        |
-        v
-Recipe
-        |
-        v
-Apply to Group
+Reference photo
+   + editable StyleProfile
+   -> shared GroupColorIntent
+   -> compare against each target photo
+   -> per-photo Recipe
 ```
 
-The system learns:
+The reference establishes the desired look. Photo-Cake must adapt exposure/white balance and later semantic/local controls to each target image instead of blindly copying reference numbers.
 
-- color preference
-- exposure preference
-- contrast
-- white balance
-- skin tone style
-- lighting preference
+Multiple reference sets may coexist for different looks/scenes.
 
-## Output
+## Recipe Requirements
 
-Primary:
+Recipe is the canonical editable representation of Photo-Cake decisions.
+
+Current/basic controls include:
+
+- exposure;
+- contrast;
+- highlights;
+- shadows;
+- temperature;
+- tint;
+- saturation.
+
+The model should expand without changing the workflow to support HSL, curves, skin/color preferences, masks and other non-destructive controls.
+
+Every applied target photo has its own Recipe with reference lineage.
+
+## Lightroom Workflow
+
+Primary handoff:
 
 ```text
-RAW + same-basename XMP -> Lightroom
+IMG_0001.CR3
+IMG_0001.xmp
 ```
 
-Secondary:
+The XMP must contain only mapped edits, remain small, and be traceable to the target Recipe/asset. Lightroom/Camera Raw should be able to continue from those edits.
 
-```text
-Recipe -> Direct Export
-```
+No early requirement for Lightroom catalog modification, database writing or a Lightroom plugin.
 
----
+## Direct Export
 
-# User Success Criteria
+The same Recipe can feed the existing renderer/export pipeline for requested JPEG/TIFF output. Direct export is a supported product path, but it must not become a separate editing model.
 
-A photographer can process hundreds of RAW files by:
+## Platforms
 
-1. Importing photos
-2. Automatically organizing and analyzing them
-3. Selecting a preferred style
-4. Generating editing decisions
-5. Reviewing results
-6. Continuing in Lightroom or exporting directly
+Windows is the primary workstation for large RAW collections, batch processing, GPU acceleration and Lightroom handoff.
 
+Android is a companion for selection, preview, reference management and lightweight processing. Both platforms reuse shared core workflow rules and data semantics.
 
-## Adaptive Batch Editing
+## Success Criteria
 
-A group must not receive a blind copy of one photo's values. The reference defines the desired look; Photo-Cake resolves that intent against each photo's measured exposure/white-balance state, then creates a target-bound Recipe and XMP sidecar for that photo.
+For a large personal shoot, the user can:
 
-
-## Grouping Behavior
-
-Photo-Cake first creates conservative moment groups from capture time/camera/sequence, then refines only within those groups using classification and visual similarity. This gives useful groups quickly while preventing visually similar but unrelated photos from different events from being merged together.
+1. point Photo-Cake at existing RAWs without copying them;
+2. quickly see previews and useful groups;
+3. reduce manual review with culling suggestions;
+4. select a preferred look/reference;
+5. have Photo-Cake adapt it across similar photos;
+6. review exceptions rather than every repetitive adjustment;
+7. create tiny XMP sidecars for Lightroom or explicitly export final images.

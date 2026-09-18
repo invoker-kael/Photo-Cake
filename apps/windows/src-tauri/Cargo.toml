@@ -22,3 +22,4 @@ serde_json.workspace = true
 uuid.workspace = true
 photo-core = { path = "../../../crates/photo-core" }
 photo-inference = { path = "../../../crates/photo-inference" }
+tauri-plugin-dialog = "2"

@@ -1,7 +1,8 @@
 use photo_core::{
-    AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor, ClassificationStore,
-    JobStatus, ModelBundleManifest, ModelPlatform, PhotoGroup, RawAsset, RawCatalog,
-    RawImportResult, RawImporter, RunStep,
+    build_group_culling_result, AnalysisCache, AutomationRunner, Batch, BatchStore,
+    ClassificationRoutingExecutor, ClassificationStore, GroupCullingResult, JobStatus,
+    ModelBundleManifest, ModelPlatform, PhotoGroup, RawAsset, RawCatalog, RawImportResult,
+    RawImporter, RunStep,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
@@ -67,6 +68,7 @@ struct AppState {
     runner: Arc<Mutex<AppRunner>>,
     store: BatchStore,
     catalog: RawCatalog,
+    analysis_cache: AnalysisCache,
     raw_importer: RawImporter,
     controls: Arc<Mutex<HashMap<Uuid, Arc<BatchControl>>>>,
 }
@@ -281,6 +283,24 @@ fn batch_photo_context(
 }
 
 #[tauri::command]
+fn batch_culling(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<GroupCullingResult>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let groups = state
+        .catalog
+        .list_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+
+    groups
+        .iter()
+        .map(|group| build_group_culling_result(&state.analysis_cache, group, 0.98))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn create_batch(
     name: String,
     paths: Vec<String>,
@@ -429,6 +449,7 @@ pub fn run() {
 
             let store = BatchStore::open(&database)?;
             let catalog = RawCatalog::open(&database)?;
+            let analysis_cache = AnalysisCache::open(&database)?;
             let classification_store = ClassificationStore::open(&database)?;
             let analyze_executor = LocalAnalyzeExecutor::new(
                 &database,
@@ -445,6 +466,7 @@ pub fn run() {
                 runner: Arc::new(Mutex::new(runner)),
                 store,
                 catalog,
+                analysis_cache,
                 raw_importer,
                 controls: Arc::new(Mutex::new(HashMap::new())),
             });
@@ -453,6 +475,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_batches,
             batch_photo_context,
+            batch_culling,
             create_batch,
             import_raw_paths,
             import_raw_directory,

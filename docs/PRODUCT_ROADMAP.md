@@ -20,7 +20,7 @@ The roadmap is gap-driven. Do not restart completed foundations just because the
 
 Current code already contains substantial reusable groundwork:
 
-- RAW scanning and catalog persistence;
+- RAW scanning and catalog persistence, with best-effort EXIF capture-time/camera metadata for initial grouping;
 - stable asset identity;
 - preview extraction/cache and local analysis;
 - portrait/scene classification;
@@ -120,7 +120,7 @@ Not early priorities:
 - destructive generative replacement as the default workflow.
 
 
-Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view, evidence-backed Cull view, persisted photographer Cull decisions, and persisted per-group Reference selection are connected to the Rust core. ReferenceSet now previews adaptive exposure-only Recipes from cached exposure evidence and the Windows workstation has an explicit reviewed XMP handoff that leaves white balance untouched when unknown, excludes photographer-confirmed Reject photos, and refuses partial/overwrite writes. Cull, Reference and Review now use real cached RAW previews. Review has an on-demand canonical Before/After approximation; StyleProfile edits persist across reference changes; per-photo Recipe exception overrides persist by stable asset ID and feed both preview and explicit XMP handoff. Moment parents plus semantic children now persist separately and effective groups drive downstream workflow. Newly written XMP is parsed back and validated locally before success. The next gaps are real Lightroom/Camera Raw fixture validation, reliable RAW/metadata color evidence, richer culling semantics and Android review/reference parity.
+Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view, evidence-backed Cull view, persisted photographer Cull decisions, and persisted per-group Reference selection are connected to the Rust core. ReferenceSet now previews adaptive exposure-only Recipes from cached exposure evidence and the Windows workstation has an explicit reviewed XMP handoff that leaves white balance untouched when unknown, excludes photographer-confirmed Reject photos, and refuses partial/overwrite writes. Cull, Reference and Review now use real cached RAW previews. Review has an on-demand canonical Before/After approximation; StyleProfile edits persist across reference changes; per-photo Recipe exception overrides persist by stable asset ID and feed both preview and explicit XMP handoff. Moment parents plus semantic children now persist separately and effective groups drive downstream workflow. Newly written XMP is parsed back and validated locally before success. The import path now prefers standard RAW/EXIF capture time and camera Make/Model for Moment grouping, falling back to filesystem time when unavailable. The remaining color gap is reliable numeric RAW white-balance evidence; next gaps also include real Lightroom/Camera Raw fixture validation, richer culling semantics and Android review/reference parity.
 
 
 Implemented since the previous milestone: the workstation Cull view now supports persisted photographer Keep/Review/Reject overrides on top of AI suggestions. Remaining selection work is before/after compare UX and semantic evidence such as eyes/expression when reliable local evidence is available.

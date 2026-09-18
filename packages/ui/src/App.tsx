@@ -176,6 +176,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [cullingReviews, setCullingReviews] = useState<Record<string, CullingUserDecision>>({});
   const [cullingLoading, setCullingLoading] = useState(false);
   const [cullViewMode, setCullViewMode] = useState<CullViewMode>("TRIAGE");
+  const [cullBatchUpdating, setCullBatchUpdating] = useState(false);
   const [groupRevision, setGroupRevision] = useState(0);
   const [groupRefining, setGroupRefining] = useState(false);
   const [groupRefinementNote, setGroupRefinementNote] = useState<string | null>(null);
@@ -527,6 +528,19 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       );
   }, [cullViewMode, culling, cullingReviews]);
 
+  const visibleSuggestionCount = useMemo(
+    () =>
+      visibleCulling.reduce(
+        (total, group) =>
+          total +
+          group.recommendations.filter(
+            (item) => !cullingReviews[item.asset_id],
+          ).length,
+        0,
+      ),
+    [cullingReviews, visibleCulling],
+  );
+
   const referenceCandidatesForGroup = (assetIds: string[]) =>
     assetIds
       .filter((assetId) => cullingReviews[assetId] !== "REJECT")
@@ -664,6 +678,40 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
+    }
+  };
+
+  const confirmVisibleSuggestions = async () => {
+    if (!bridge?.setCullingReviews) return;
+
+    const reviews: BackendCullingReview[] = visibleCulling.flatMap((group) =>
+      group.recommendations
+        .filter((item) => !cullingReviews[item.asset_id])
+        .map((item) => ({
+          asset_id: item.asset_id,
+          decision:
+            item.decision === "KEEP"
+              ? "KEEP"
+              : item.decision === "REVIEW"
+                ? "REVIEW"
+                : "REJECT",
+        })),
+    );
+    if (reviews.length === 0) return;
+
+    setCullBatchUpdating(true);
+    try {
+      await bridge.setCullingReviews(reviews);
+      setCullingReviews((current) => ({
+        ...current,
+        ...Object.fromEntries(reviews.map((review) => [review.asset_id, review.decision])),
+      }));
+      setEditedPreviews({});
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setCullBatchUpdating(false);
     }
   };
 
@@ -978,16 +1026,30 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               ? "Triage shows unconfirmed Review / Reject suggestions and analysis-pending photos first."
               : "All shows the complete culling set, including AI Keep and already confirmed photos."}
           </span>
-          <div className="cull-view-switch" role="group" aria-label="Culling view mode">
-            {(["TRIAGE", "ALL"] as CullViewMode[]).map((viewMode) => (
+          <div className="cull-toolbar-actions">
+            {bridge?.setCullingReviews && (
               <button
-                className={cullViewMode === viewMode ? "active" : ""}
-                key={viewMode}
-                onClick={() => setCullViewMode(viewMode)}
+                className="cull-batch-action"
+                disabled={cullBatchUpdating || visibleSuggestionCount === 0}
+                onClick={() => void confirmVisibleSuggestions()}
+                title="Persist only currently visible unconfirmed AI suggestions; pending photos and existing photographer decisions are unchanged."
               >
-                {viewMode === "TRIAGE" ? "Triage" : "All"}
+                {cullBatchUpdating
+                  ? "Confirming…"
+                  : `Confirm visible (${visibleSuggestionCount})`}
               </button>
-            ))}
+            )}
+            <div className="cull-view-switch" role="group" aria-label="Culling view mode">
+              {(["TRIAGE", "ALL"] as CullViewMode[]).map((viewMode) => (
+                <button
+                  className={cullViewMode === viewMode ? "active" : ""}
+                  key={viewMode}
+                  onClick={() => setCullViewMode(viewMode)}
+                >
+                  {viewMode === "TRIAGE" ? "Triage" : "All"}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         {cullingLoading && <div className="panel-note">Refreshing cached culling evidence…</div>}

@@ -83,6 +83,36 @@ h1 { font-size: clamp(25px, 3vw, 38px); }
 h2 { font-size: 19px; }
 .batch-head p:not(.eyebrow) { margin: 8px 0 0; color: #858d92; }
 
+
+.photo-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 1fr)) minmax(210px, 1.5fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.overview-card {
+  min-height: 78px;
+  padding: 14px;
+  display: grid;
+  align-content: space-between;
+  gap: 8px;
+  border: 1px solid #252a2d;
+  border-radius: 10px;
+  background: #121517;
+}
+.overview-card span { color: #727a7f; font-size: 10px; text-transform: uppercase; letter-spacing: .7px; }
+.overview-card strong { font-size: 20px; font-weight: 600; }
+.overview-card.wide strong { font-size: 13px; line-height: 1.4; }
+
+.group-strip { margin-bottom: 14px; border: 1px solid #252a2d; border-radius: 12px; background: #121517; padding: 14px; }
+.group-strip-head { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
+.group-strip-head span { color: #737b80; font-size: 11px; }
+.group-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.group-card { min-width: 0; padding: 11px; display: grid; gap: 4px; border-radius: 8px; background: #191d1f; }
+.group-card span { color: #737b80; font-size: 10px; }
+.group-card strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.group-card small { color: #636b70; font-size: 10px; text-transform: capitalize; }
+
 .queue-card { border: 1px solid #252a2d; border-radius: 12px; background: #121517; overflow: hidden; }
 .queue-title { display: flex; justify-content: space-between; padding: 17px 18px; border-bottom: 1px solid #252a2d; }
 .queue-title span { color: #737b80; font-size: 12px; }
@@ -128,6 +158,8 @@ h2 { font-size: 19px; }
     grid-template-areas: "top top" "side work";
   }
   .automation-panel { display: none; }
+  .photo-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .nav-item { padding: 0 8px; text-align: center; font-size: 11px; }
   .sidebar-foot { display: none; }
 }
@@ -144,7 +176,10 @@ h2 { font-size: 19px; }
   .batch-head { align-items: stretch; flex-direction: column; }
   .batch-controls { width: 100%; }
   .batch-controls .button { flex: 1; }
-  .queue-title span { display: none; }
+  .queue-title span, .group-strip-head span { display: none; }
+  .photo-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-card.wide { grid-column: 1 / -1; }
+  .group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .job-row { grid-template-columns: 44px minmax(0, 1fr); padding: 12px; }
   .thumb { width: 44px; height: 40px; }
   .job-percent { display: none; }

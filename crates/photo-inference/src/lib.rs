@@ -2,6 +2,7 @@ mod executor;
 mod litert_runtime;
 mod local_models;
 mod raw_preview;
+mod quality;
 
 pub use executor::{AnalyzeError, LocalAnalyzeExecutor};
 pub use local_models::{
@@ -10,6 +11,7 @@ pub use local_models::{
 pub use raw_preview::{
     ExtractedPreviewInfo, RawPreviewError, extract_largest_embedded_jpeg, source_fingerprint,
 };
+pub use quality::score_image_quality;
 
 #[cfg(test)]
 mod tests {

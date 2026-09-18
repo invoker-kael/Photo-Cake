@@ -356,15 +356,26 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   const cullingSummary = useMemo(() => {
     const recommendations = culling.flatMap((group) => group.recommendations);
-    const effective = recommendations.map((item) => {
+    let keep = 0;
+    let review = 0;
+    let reject = 0;
+    let rejectSuggestions = 0;
+
+    for (const item of recommendations) {
       const user = cullingReviews[item.asset_id];
-      if (user) return user;
-      return item.decision === "REJECT_SUGGESTION" ? "REJECT" : item.decision;
-    });
+      if (user === "KEEP") keep += 1;
+      else if (user === "REVIEW") review += 1;
+      else if (user === "REJECT") reject += 1;
+      else if (item.decision === "KEEP") keep += 1;
+      else if (item.decision === "REVIEW") review += 1;
+      else rejectSuggestions += 1;
+    }
+
     return {
-      keep: effective.filter((decision) => decision === "KEEP").length,
-      review: effective.filter((decision) => decision === "REVIEW").length,
-      reject: effective.filter((decision) => decision === "REJECT").length,
+      keep,
+      review,
+      reject,
+      rejectSuggestions,
       pending: culling.reduce((total, group) => total + group.pending_asset_ids.length, 0),
       confirmed: Object.keys(cullingReviews).length,
     };
@@ -382,12 +393,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   const referenceCandidatesForGroup = (assetIds: string[]) =>
     assetIds
-      .filter((assetId) => {
-        const user = cullingReviews[assetId];
-        if (user === "REJECT") return false;
-        const recommendation = cullingRecommendations.get(assetId);
-        return user != null || recommendation?.decision !== "REJECT_SUGGESTION";
-      })
+      .filter((assetId) => cullingReviews[assetId] !== "REJECT")
       .sort((left, right) => {
         const score = (assetId: string) => {
           const user = cullingReviews[assetId];
@@ -645,7 +651,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       <section className="photo-overview">
         <div className="overview-card"><span>Keep</span><strong>{cullingSummary.keep}</strong></div>
         <div className="overview-card"><span>Review</span><strong>{cullingSummary.review}</strong></div>
-        <div className="overview-card"><span>Reject</span><strong>{cullingSummary.reject}</strong></div>
+        <div className="overview-card">
+          <span>Reject / AI suggestion</span>
+          <strong>{cullingSummary.reject} / {cullingSummary.rejectSuggestions}</strong>
+        </div>
         <div className="overview-card"><span>Confirmed / pending</span><strong>{cullingSummary.confirmed} / {cullingSummary.pending}</strong></div>
       </section>
 

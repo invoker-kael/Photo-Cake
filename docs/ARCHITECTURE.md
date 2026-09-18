@@ -212,3 +212,8 @@ The review is keyed by stable RAW asset ID so re-importing the same source keeps
 ## Culling Semantic Evidence Boundary
 
 `build_group_culling_result` may attach cached segmentation-derived portrait evidence to each recommendation without changing the technical quality score. The UI can display people count, face count, primary-subject ratio and people confidence. Do not translate segmentation into eye-state or expression claims; those require dedicated evidence.
+
+
+## Metadata Transparency Surface
+
+Windows Library reads the persisted `RawAsset.camera_id` and `capture_time_ms` fields and shows them directly. This is an inspection surface only; it does not create a second metadata store. Missing capture metadata is presented as fallback/unavailable so grouping provenance remains understandable.

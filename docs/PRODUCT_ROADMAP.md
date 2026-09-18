@@ -2,67 +2,122 @@
 
 ## Product Goal
 
-Photo-Cake is a local-first semi-automatic AI photo workflow. It is not a Lightroom replacement; it reduces repetitive editing work by preparing and applying consistent edits across batches.
+Photo-Cake is a local-first semi-automatic AI photography workflow assistant.
+
+It reduces repetitive Lightroom editing work while preserving a professional RAW workflow.
+
+Primary workflow:
+
+```
+RAW Import
+  ↓
+Smart Culling
+  ↓
+Photo Grouping
+  ↓
+Reference Style Learning
+  ↓
+Recipe Generation
+  ↓
+Review
+  ↓
+XMP / Direct Export
+```
 
 ## Development Order
 
-### Phase 1 - Automation Foundation
+### Phase 1 - Photography Workflow Foundation
 
-- persistent batch jobs
-- background worker
-- checkpoint/resume
-- crash recovery
-- safe export
+Goal: establish a complete non-destructive workflow.
 
-### Phase 2 - Photo Library Foundation
-
-- project model
-- catalog database
+- RAW indexing
+- metadata extraction
+- project/catalog foundation
+- preview foundation
 - asset identity
-- preview cache
-- metadata indexing
+- Recipe schema
+- XMP sidecar generation
+- direct export framework
 
-### Phase 3 - AI Analysis
+Acceptance:
 
-- local classification
-- embeddings
-- similarity grouping
+A RAW file can generate an XMP sidecar that Lightroom can read.
+
+---
+
+### Phase 2 - Smart Photo Organization
+
+Goal: reduce manual photo management.
+
+- similarity detection
 - duplicate detection
-- AI culling scores
+- burst grouping
+- scene grouping
+- event grouping
+- preview comparison
 
-### Phase 4 - Non-destructive Editing
+---
 
-- edit graph
-- presets/recipes
-- reference photo workflow
-- history and rollback
+### Phase 3 - Intelligent Selection
 
-### Phase 5 - Semi-automatic AI Retouch
+Goal: reduce the number of photos requiring review.
 
-Priority features:
+- blur detection
+- focus quality
+- closed eyes
+- expression quality
+- exposure issues
+- best photo recommendation
 
-- exposure and white balance correction
-- portrait detection
-- skin refinement
-- face enhancement
+AI assists selection; original files are never removed automatically.
+
+---
+
+### Phase 4 - Reference Driven Editing
+
+Goal: reproduce user's preferred photography style.
+
+- reference photo selection
+- style analysis
+- color characteristics
+- exposure preference
+- skin tone preference
+- group-based Recipe generation
+
+---
+
+### Phase 5 - Semi-automatic AI Processing
+
+Goal: prepare editable professional adjustments.
+
+- exposure adjustment planning
+- white balance suggestions
+- portrait enhancement planning
 - lighting balance
 - background adjustment
-- group-based batch application
+- batch Recipe application
 
-### Phase 6 - Review and Export Experience
+---
 
-- representative preview review
-- exception handling
+### Phase 6 - Advanced Review and Export
+
 - batch approval
+- before/after comparison
+- exception handling
 - JPEG/TIFF export
-- optional Lightroom/Photoshop handoff
+- Lightroom workflow integration improvements
+
+---
 
 ## Non-goals for early development
 
 - cloud dependency
-- multi-user features
+- multi-user platform
 - enterprise workflow
-- plugin ecosystem
-- full professional color suite
+- Lightroom database modification
+- full RAW replacement engine
+- automatic destructive editing
 
-The priority is a fast local workflow that turns large photo batches into reviewable, consistent results with minimal manual editing.
+Priority:
+
+A fast local workflow that transforms large RAW collections into consistent, reviewable Lightroom-compatible edits.

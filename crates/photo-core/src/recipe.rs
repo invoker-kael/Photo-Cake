@@ -61,6 +61,73 @@ impl Recipe {
             },
         }
     }
+
+    pub fn materialize_group(
+        name_prefix: &str,
+        reference_ids: &[Uuid],
+        plan: &GroupColorSyncPlan,
+    ) -> Vec<Self> {
+        plan.resolved
+            .iter()
+            .map(|resolved| {
+                Self::from_group_sync(
+                    format!("{name_prefix}-{}", resolved.asset_id),
+                    reference_ids.to_vec(),
+                    plan,
+                    resolved,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn group_materialization_preserves_shared_style_and_per_photo_exposure() {
+        let reference_id = Uuid::new_v4();
+        let dark = Uuid::new_v4();
+        let bright = Uuid::new_v4();
+        let plan = GroupColorSyncPlan {
+            group_id: Uuid::new_v4(),
+            mode: GroupSyncMode::ReferenceDriven,
+            reference_asset_id: Some(reference_id),
+            intent: GroupColorIntent {
+                name: "Shared look".into(),
+                target_exposure_ev: 0.0,
+                target_temperature_k: 5700.0,
+                target_tint: 4.0,
+                contrast: 6.0,
+                saturation: 3.0,
+                semantic: vec![],
+            },
+            revision: 1,
+            resolved: vec![
+                ResolvedColorEdit {
+                    asset_id: dark,
+                    exposure_delta_ev: 0.8,
+                    temperature_delta_k: 500.0,
+                    tint_delta: 4.0,
+                    contrast: 6.0,
+                    saturation: 3.0,
+                    semantic: vec![],
+                },
+                ResolvedColorEdit {
+                    asset_id: bright,
+                    exposure_delta_ev: -0.35,
+                    temperature_delta_k: -200.0,
+                    tint_delta: 4.0,
+                    contrast: 6.0,
+                    saturation: 3.0,
+                    semantic: vec![],
+                },
+            ],
+        };
+
+        let recipes = Recipe::materialize_group("group", &[reference_id], &plan);
+        assert_eq!(recipes.len(), 2);
+        assert_eq!(recipes[0].adjustments.exposure, Some(0.8));
+        assert_eq!(recipes[1].adjustments.exposure, Some(-0.35));
+        assert_eq!(recipes[0].adjustments.temperature, Some(5700.0));
+        assert_eq!(recipes[1].adjustments.temperature, Some(5700.0));
+    }
 }
 
 #[cfg(test)]

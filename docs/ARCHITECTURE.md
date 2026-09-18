@@ -234,3 +234,21 @@ This layer intentionally stops before Lightroom slider synthesis. `PhotoColorAna
 ## XMP Interoperability Hardening
 
 Photo-Cake parses supported Camera Raw attributes by local XML attribute name rather than assuming a fixed namespace prefix, so a valid XMP processor may rename `crs`/Photo-Cake prefixes without breaking parse-back validation. Existing-sidecar preflight treats both lowercase `.xmp` and uppercase `.XMP` as occupied targets before group writes. Unknown Lightroom/metadata attributes remain ignored rather than destroyed because Photo-Cake still refuses to overwrite an existing sidecar.
+
+
+## Android Companion Contract
+
+The Android shell now uses real `photo-core` stores instead of a demo command:
+
+```text
+BatchStore / RawCatalog / AnalysisCache
+        + CullingReviewStore
+        + ReferenceStore
+              |
+              v
+Android Library / Cull / Groups / Reference
+```
+
+The shared UI exposes platform capabilities rather than assuming every bridge implements workstation actions. Android does not expose RAW import/analyze controls, semantic-refine execution, StyleProfile editing, per-photo Recipe review or Lightroom/XMP handoff. It may display locally available cached previews through the app-data asset protocol.
+
+The remaining platform gap is project transport/synchronization between workstation and companion. That transport should move/share project state and preview context, not fork the domain model or introduce a second editing engine.

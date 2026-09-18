@@ -534,11 +534,26 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         (total, group) =>
           total +
           group.recommendations.filter(
-            (item) => !cullingReviews[item.asset_id],
+            (item) =>
+              !cullingReviews[item.asset_id] &&
+              !(
+                item.decision === "REJECT_SUGGESTION" &&
+                selectedReferenceAssetIds.has(item.asset_id)
+              ),
           ).length,
         0,
       ),
-    [cullingReviews, visibleCulling],
+    [cullingReviews, selectedReferenceAssetIds, visibleCulling],
+  );
+
+  const selectedReferenceAssetIds = useMemo(
+    () =>
+      new Set(
+        Object.values(referenceBindings).map(
+          (binding) => binding.selected_reference_asset_id,
+        ),
+      ),
+    [referenceBindings],
   );
 
   const referenceCandidatesForGroup = (assetIds: string[]) =>
@@ -686,7 +701,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
     const reviews: BackendCullingReview[] = visibleCulling.flatMap((group) =>
       group.recommendations
-        .filter((item) => !cullingReviews[item.asset_id])
+        .filter(
+          (item) =>
+            !cullingReviews[item.asset_id] &&
+            !(
+              item.decision === "REJECT_SUGGESTION" &&
+              selectedReferenceAssetIds.has(item.asset_id)
+            ),
+        )
         .map((item) => ({
           asset_id: item.asset_id,
           decision:
@@ -1032,7 +1054,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 className="cull-batch-action"
                 disabled={cullBatchUpdating || visibleSuggestionCount === 0}
                 onClick={() => void confirmVisibleSuggestions()}
-                title="Persist only currently visible unconfirmed AI suggestions; pending photos and existing photographer decisions are unchanged."
+                title="Persist only currently visible unconfirmed AI suggestions; pending photos, existing photographer decisions and selected references are unchanged."
               >
                 {cullBatchUpdating
                   ? "Confirming…"

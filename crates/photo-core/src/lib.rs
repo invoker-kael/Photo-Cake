@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod batch;
 pub mod batch_export;
 pub mod bracketing;
+pub mod bracketing_store;
 pub mod catalog;
 pub mod classification;
 pub mod classification_store;
@@ -45,9 +46,10 @@ pub use analysis::{
 pub use batch::{Batch, BatchItem, BatchStage, JobStatus};
 pub use batch_export::{BatchExportExecutor, BatchExportItem};
 pub use bracketing::{
-    detect_exposure_brackets, ExposureBracketError, ExposureBracketMember, ExposureBracketRole,
-    ExposureBracketSet,
+    detect_exposure_brackets, route_exposure_bracket_sources, ExposureBracketError,
+    ExposureBracketMember, ExposureBracketRole, ExposureBracketRouting, ExposureBracketSet,
 };
+pub use bracketing_store::{ExposureBracketMergeStore, ExposureBracketMergeStoreError};
 pub use catalog::{CatalogError, RawCatalog};
 pub use classification::{
     classify_photo, processing_route, reclassification_invalidation, should_run_portrait_retouch,

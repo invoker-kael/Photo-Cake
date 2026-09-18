@@ -119,7 +119,7 @@ function workflowFocusDetail(status: BackendWorkflowStatus) {
     case "REVIEW":
       return `${facts.review_attention} Recipe attention · ${facts.review_pending_groups} groups waiting for evidence`;
     case "LIGHTROOM":
-      return `${facts.lightroom_conflict_groups} conflict groups · ${facts.lightroom_missing_sidecars} missing XMP · ${facts.lightroom_unresolved_groups} unresolved`;
+      return `${facts.lightroom_hdr_merge_groups} HDR merge · ${facts.lightroom_conflict_groups} conflict groups · ${facts.lightroom_missing_sidecars} missing XMP · ${facts.lightroom_unresolved_groups} unresolved`;
     case "COMPLETE":
       return `${facts.lightroom_current_groups} groups are current for Lightroom delivery`;
   }
@@ -320,6 +320,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [handoffPreflightRevision, setHandoffPreflightRevision] = useState(0);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
   const [handoffRunning, setHandoffRunning] = useState<string | null>(null);
+  const [hdrMergeUpdating, setHdrMergeUpdating] = useState<string | null>(null);
   const [handoffBatchRunning, setHandoffBatchRunning] = useState(false);
   const [handoffBatchTargets, setHandoffBatchTargets] = useState<string[]>([]);
   const [handoffBatchNote, setHandoffBatchNote] = useState<string | null>(null);
@@ -585,7 +586,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       return;
     }
 
+    const bracketGroupIds = new Set(
+      culling
+        .filter((group) => (group.exposure_brackets?.length ?? 0) > 0)
+        .map((group) => group.group_id),
+    );
     const groups = photoContext.groups.filter((group) => {
+      if (bracketGroupIds.has(group.id)) return true;
       const preview = referencePreviews[group.id];
       return (
         referenceBindings[group.id] != null &&
@@ -635,6 +642,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   }, [
     activeView,
     bridge,
+    culling,
     cullingReviews,
     handoffPreflightRevision,
     photoContext,
@@ -1627,6 +1635,33 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     }
   };
 
+  const setHdrMergeCompleted = async (groupId: string, merged: boolean) => {
+    if (!bridge?.setHdrMerged) return;
+    setHdrMergeUpdating(groupId);
+    try {
+      const completed = await bridge.setHdrMerged(groupId, merged);
+      setHandoffPreflights((current) => {
+        const previous = current[groupId];
+        if (!previous) return current;
+        return {
+          ...current,
+          [groupId]: {
+            ...previous,
+            hdr_merge_completed: completed,
+            hdr_merge_required:
+              previous.hdr_source_asset_ids.length > 0 && !completed,
+          },
+        };
+      });
+      setHandoffPreflightRevision((value) => value + 1);
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setHdrMergeUpdating(null);
+    }
+  };
+
   const writeGroupXmp = async (groupId: string) => {
     if (!bridge?.writeGroupXmp) return;
     setHandoffRunning(groupId);
@@ -2280,8 +2315,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     const missingReferenceGroups = groups.filter(
       (group) => referenceBindings[group.id] == null,
     );
+    const hdrReferenceGroups = missingReferenceGroups.filter(
+      (group) => bracketSetsForGroup(group.id).length > 0,
+    );
+    const standardReferenceGroups = missingReferenceGroups.filter(
+      (group) => bracketSetsForGroup(group.id).length === 0,
+    );
     const eligibleReferenceItems: BackendReferenceBatchItem[] =
-      missingReferenceGroups.flatMap((group) => {
+      standardReferenceGroups.flatMap((group) => {
         const assetId = batchReferenceCandidateForGroup(group.id, group.asset_ids);
         return assetId ? [{ group_id: group.id, asset_id: assetId }] : [];
       });
@@ -2292,7 +2333,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       referenceBatchTargets.includes(item.group_id),
     );
     const blockedReferenceGroupCount =
-      missingReferenceGroups.length - eligibleReferenceItems.length;
+      standardReferenceGroups.length - eligibleReferenceItems.length;
 
     const toggleReferenceBatchTarget = (groupId: string) => {
       setReferenceBatchTargets((current) =>
@@ -2363,13 +2404,16 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <strong>Suggested candidate → selected groups</strong>
               </div>
               <small>
-                Uses the existing per-group shortlist only. For a detected exposure bracket, the measured center exposure is preferred as the starting Reference when eligible; an explicit photographer Keep still wins. AI Reject suggestions and evidence-pending candidates remain individual-review work.
+                Uses the existing per-group shortlist only. Exposure-bracket groups are intentionally excluded from batch Reference setup because their RAWs must preserve capture exposure for HDR merge. AI Reject suggestions and evidence-pending candidates remain individual-review work.
               </small>
             </div>
             <div className="reference-batch-setup-status">
               <span>{missingReferenceGroups.length} missing</span>
               <span>{eligibleReferenceItems.length} eligible</span>
               <span>{blockedReferenceGroupCount} need Cull review</span>
+              {hdrReferenceGroups.length > 0 && (
+                <span>{hdrReferenceGroups.length} HDR merge first</span>
+              )}
             </div>
             <div className="batch-look-actions reference-batch-actions">
               <button
@@ -2691,6 +2735,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       <div className="reference-candidate-badges">
                         {recommended && <em>Best starting point</em>}
                         {!binding &&
+                          bracketSetsForGroup(group.id).length === 0 &&
                           batchReferenceCandidateForGroup(group.id, group.asset_ids) === assetId && (
                             <em>Batch eligible</em>
                           )}
@@ -2740,6 +2785,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <div><span>Exceptions</span><strong>{recipeReviewSummary.exceptions}</strong></div>
         <div><span>Reject skipped</span><strong>{recipeReviewSummary.rejected}</strong></div>
       </div>
+      {culling.some((group) => (group.exposure_brackets?.length ?? 0) > 0) && (
+        <div className="group-refine-note">
+          Exposure-bracket RAWs are excluded from ordinary Adaptive Recipe review so their intentional EV differences remain intact for HDR merge in Lightroom/Camera Raw.
+        </div>
+      )}
       <div className="cull-toolbar">
         <span>
           {reviewViewMode === "TRIAGE"
@@ -3129,6 +3179,19 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       const preflight = handoffPreflights[group.id];
       const preflightError = handoffPreflightErrors[group.id];
       const result = handoffResults[group.id];
+      const bracketSets = bracketSetsForGroup(group.id);
+      const detectedHdrSourceAssetIds = Array.from(
+        new Set(bracketSets.flatMap((set) => set.members.map((member) => member.asset_id))),
+      );
+      const hdrSourceAssetIds =
+        preflight?.hdr_source_asset_ids ?? detectedHdrSourceAssetIds;
+      const hdrMergeCompleted = preflight?.hdr_merge_completed ?? false;
+      const hdrMergeRequired =
+        preflight?.hdr_merge_required ?? (hdrSourceAssetIds.length > 0 && !hdrMergeCompleted);
+      const hdrSourceIdSet = new Set(hdrSourceAssetIds);
+      const standardSourceCount = group.asset_ids.filter(
+        (assetId) => !hdrSourceIdSet.has(assetId),
+      ).length;
       const deliverableRecipes =
         preview?.recipes.filter((recipe) => recipe.target_asset_id != null) ?? [];
       const rejectedCount = group.asset_ids.filter(
@@ -3147,24 +3210,28 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       const currentCount = preflight?.current_sidecars.length ?? 0;
       const preflightReady = !bridge?.preflightGroupXmp || preflight != null;
       const missingCount = preflight?.missing_sidecars.length ?? deliverableRecipes.length;
+      const standardDeliveryExpected = standardSourceCount > 0;
       const unresolved =
-        binding == null ||
-        preview == null ||
-        preview.pending_asset_id != null ||
-        deliverableRecipes.length === 0 ||
+        (standardDeliveryExpected &&
+          (binding == null ||
+            preview == null ||
+            preview.pending_asset_id != null ||
+            deliverableRecipes.length === 0)) ||
         preflightError != null ||
         !preflightReady;
       const ready =
+        standardDeliveryExpected &&
         !unresolved &&
         conflictCount === 0 &&
         missingCount > 0;
-      const safeBatchReady = ready && reviewAttentionCount === 0;
+      const safeBatchReady =
+        ready && reviewAttentionCount === 0 && !hdrMergeRequired;
       const writesWhiteBalance = deliverableRecipes.some(
         (recipe) =>
           recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
       );
       const priority =
-        conflictCount > 0 || preflightError != null
+        hdrMergeRequired || conflictCount > 0 || preflightError != null
           ? 0
           : unresolved
             ? 1
@@ -3194,6 +3261,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         ready,
         safeBatchReady,
         writesWhiteBalance,
+        hdrSourceAssetIds,
+        hdrMergeRequired,
+        hdrMergeCompleted,
+        standardSourceCount,
         priority,
       };
     });
@@ -3228,6 +3299,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     const conflictGroupCount = allHandoffGroups.filter(
       (item) => item.conflictCount > 0,
     ).length;
+    const hdrMergeGroupCount = allHandoffGroups.filter(
+      (item) => item.hdrMergeRequired,
+    ).length;
     const actionGroupCount = allHandoffGroups.length - currentGroupCount;
     const verifiedTargetCount = Object.values(handoffResults).reduce(
       (total, result) => total + result.verified_sidecar_count,
@@ -3247,7 +3321,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
         <div className="review-summary">
           <div><span>Needs action</span><strong>{actionGroupCount}</strong></div>
-          <div><span>Current groups</span><strong>{currentGroupCount}</strong></div>
+          <div><span>HDR merge</span><strong>{hdrMergeGroupCount}</strong></div>
           <div><span>XMP conflicts</span><strong>{conflictGroupCount}</strong></div>
           <div><span>Verified this session</span><strong>{verifiedTargetCount}</strong></div>
         </div>
@@ -3293,8 +3367,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             <span>Safe batch handoff</span>
             <strong>{safeBatchMissingCount} missing XMP across {safeBatchGroups.length} review-clear groups</strong>
             <small>
-              Safe batch only includes groups whose Recipe attention is clear and whose XMP preflight succeeded without conflicts.
-              Exceptional groups stay in Needs action for individual review.
+              Safe batch only includes groups whose Recipe attention is clear, whose XMP preflight succeeded without conflicts, and which contain no pending HDR bracket sources.
+              HDR groups stay in Needs action so capture EV is preserved until merge.
             </small>
             <div className="handoff-batch-controls">
               <button
@@ -3374,6 +3448,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               ready,
               safeBatchReady,
               writesWhiteBalance,
+              hdrSourceAssetIds,
+              hdrMergeRequired,
+              hdrMergeCompleted,
+              standardSourceCount,
             } = item;
 
             return (
@@ -3384,7 +3462,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   <small>
                     {binding
                       ? `Reference: ${assetNames.get(binding.selected_reference_asset_id) ?? binding.selected_reference_asset_id.slice(0, 8)}`
-                      : "Choose a reference first"}
+                      : hdrSourceAssetIds.length > 0 && standardSourceCount === 0
+                        ? hdrMergeCompleted
+                          ? "HDR merge complete · no Reference needed"
+                          : "No Reference required before HDR merge"
+                        : "Choose a reference first"}
                   </small>
                   <small>
                     {preview?.pending_asset_id
@@ -3400,8 +3482,43 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           ]
                             .filter(Boolean)
                             .join(" · ")
-                        : "Resolve adaptive Recipes first"}
+                        : hdrSourceAssetIds.length > 0 && standardSourceCount === 0
+                          ? hdrMergeCompleted
+                            ? "HDR source set marked merged externally"
+                            : "HDR source set waiting for external merge"
+                          : "Resolve adaptive Recipes first"}
                   </small>
+                  {hdrMergeRequired && (
+                    <small className="attention-text">
+                      HDR source set: {hdrSourceAssetIds
+                        .map((assetId) => assetNames.get(assetId) ?? assetId.slice(0, 8))
+                        .join(", ")}. Merge these RAWs in Lightroom/Camera Raw first; Photo-Cake leaves their normalization XMP untouched.
+                    </small>
+                  )}
+                  {hdrMergeCompleted && hdrSourceAssetIds.length > 0 && (
+                    <small className="success-text">
+                      HDR merge marked complete for the current bracket membership. A changed bracket set will automatically reopen this action.
+                    </small>
+                  )}
+                  {hdrSourceAssetIds.length > 0 && bridge?.setHdrMerged && (
+                    <button
+                      className="review-choice clear"
+                      disabled={
+                        hdrMergeUpdating === group.id ||
+                        handoffRunning != null ||
+                        handoffBatchRunning
+                      }
+                      onClick={() =>
+                        void setHdrMergeCompleted(group.id, !hdrMergeCompleted)
+                      }
+                    >
+                      {hdrMergeUpdating === group.id
+                        ? "Updating HDR state…"
+                        : hdrMergeCompleted
+                          ? "Reopen HDR merge"
+                          : "Mark HDR merged"}
+                    </button>
+                  )}
                   {safeBatchReady && (
                     <label className="handoff-batch-check">
                       <input
@@ -3450,18 +3567,22 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       >
                         {handoffRunning === group.id
                           ? "Writing + verifying XMP…"
-                          : conflictCount > 0
-                            ? "Existing XMP conflict"
-                            : !preflightReady && handoffPreflightLoading
-                              ? "Checking XMP…"
-                              : preflightReady && missingCount === 0 && deliverableRecipes.length > 0
-                                ? "XMP already current"
-                                : ready
-                                  ? `Write + verify ${missingCount} missing XMP`
-                                  : "Not ready"}
+                          : hdrSourceAssetIds.length > 0 && standardSourceCount === 0
+                            ? hdrMergeCompleted
+                              ? "HDR merge complete"
+                              : "HDR merge first"
+                            : conflictCount > 0
+                              ? "Existing XMP conflict"
+                              : !preflightReady && handoffPreflightLoading
+                                ? "Checking XMP…"
+                                : preflightReady && missingCount === 0 && deliverableRecipes.length > 0
+                                  ? "XMP already current"
+                                  : ready
+                                    ? `Write + verify ${missingCount} standard XMP`
+                                    : "Not ready"}
                       </button>
                       <small>
-                        No overwrite: existing conflicts stop the group; successful writes pass full-group semantic verification.
+                        No overwrite: existing conflicts stop the group. For mixed groups, individual handoff may write standard peers while bracket RAWs remain untouched for HDR merge.
                       </small>
                     </>
                   )}

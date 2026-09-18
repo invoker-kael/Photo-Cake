@@ -3,6 +3,7 @@ use crate::{
     PhotoGroup,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -35,6 +36,13 @@ pub struct ExposureBracketSet {
     pub members: Vec<ExposureBracketMember>,
     pub span_ev: f32,
     pub minimum_embedding_similarity: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExposureBracketRouting {
+    pub sets: Vec<ExposureBracketSet>,
+    pub source_asset_ids: Vec<Uuid>,
+    pub standard_asset_ids: Vec<Uuid>,
 }
 
 #[derive(Debug, Error)]
@@ -97,6 +105,38 @@ pub fn detect_exposure_brackets(
     }
 
     Ok(sets)
+}
+
+/// Split one photography group into intentional HDR/AEB source frames and
+/// ordinary frames that may continue through the standard Reference -> Recipe
+/// -> Lightroom XMP path. Asset order remains identical to the group order.
+pub fn route_exposure_bracket_sources(
+    cache: &AnalysisCache,
+    group: &PhotoGroup,
+) -> Result<ExposureBracketRouting, ExposureBracketError> {
+    let sets = detect_exposure_brackets(cache, group)?;
+    let source_ids = sets
+        .iter()
+        .flat_map(|set| set.members.iter().map(|member| member.asset_id))
+        .collect::<HashSet<_>>();
+    let source_asset_ids = group
+        .asset_ids
+        .iter()
+        .copied()
+        .filter(|asset_id| source_ids.contains(asset_id))
+        .collect::<Vec<_>>();
+    let standard_asset_ids = group
+        .asset_ids
+        .iter()
+        .copied()
+        .filter(|asset_id| !source_ids.contains(asset_id))
+        .collect::<Vec<_>>();
+
+    Ok(ExposureBracketRouting {
+        sets,
+        source_asset_ids,
+        standard_asset_ids,
+    })
 }
 
 fn load_observation(
@@ -308,6 +348,28 @@ mod tests {
         let detected = detect_exposure_brackets(&cache, &group(ids)).unwrap();
         assert_eq!(detected.len(), 2);
         assert!(detected.iter().all(|value| value.members.len() == 3));
+    }
+
+    #[test]
+    fn routing_keeps_bracket_sources_out_of_standard_recipe_targets() {
+        let dir = tempdir().unwrap();
+        let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
+        let base = Uuid::new_v4();
+        let under = Uuid::new_v4();
+        let over = Uuid::new_v4();
+        let normal = Uuid::new_v4();
+        put_observation(&cache, base, 0.0, vec![1.0, 0.0]);
+        put_observation(&cache, under, -1.0, vec![0.999, 0.01]);
+        put_observation(&cache, over, 1.0, vec![0.998, -0.01]);
+        put_observation(&cache, normal, 3.2, vec![0.0, 1.0]);
+
+        let routing =
+            route_exposure_bracket_sources(&cache, &group(vec![base, under, over, normal]))
+                .unwrap();
+
+        assert_eq!(routing.sets.len(), 1);
+        assert_eq!(routing.source_asset_ids, vec![base, under, over]);
+        assert_eq!(routing.standard_asset_ids, vec![normal]);
     }
 
     #[test]

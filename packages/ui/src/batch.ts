@@ -35,6 +35,7 @@ export interface BackendWorkflowFacts {
   review_attention: number;
   review_pending_groups: number;
   lightroom_conflict_groups: number;
+  lightroom_hdr_merge_groups: number;
   lightroom_missing_sidecars: number;
   lightroom_unresolved_groups: number;
   lightroom_current_groups: number;
@@ -265,6 +266,7 @@ export interface BackendGroupReferencePreview {
   recipes: BackendRecipe[];
   pending_asset_id: string | null;
   reviewed_asset_ids: string[];
+  exposure_brackets: BackendExposureBracketSet[];
 }
 
 export interface BackendLightroomHandoffPreflight {
@@ -273,6 +275,9 @@ export interface BackendLightroomHandoffPreflight {
   current_sidecars: string[];
   missing_sidecars: string[];
   conflicting_sidecars: string[];
+  hdr_source_asset_ids: string[];
+  hdr_merge_required: boolean;
+  hdr_merge_completed: boolean;
 }
 
 export interface BackendLightroomHandoffResult {
@@ -395,6 +400,7 @@ export interface PhotoCakeBridge {
     targetGroupIds: string[],
   ): Promise<BackendGroupReferenceStyleBatchResult>;
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
+  setHdrMerged?(groupId: string, merged: boolean): Promise<boolean>;
   preflightGroupXmp?(groupId: string): Promise<BackendLightroomHandoffPreflight>;
   writeGroupXmp?(groupId: string): Promise<BackendLightroomHandoffResult>;
   writeBatchXmp?(groupIds: string[]): Promise<BackendLightroomBatchHandoffResult>;

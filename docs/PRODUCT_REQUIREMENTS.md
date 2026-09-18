@@ -374,6 +374,12 @@ The interaction borrows the useful standard-photo/selective-sync pattern of matu
 
 AEB/HDR source frames must not be treated as expendable burst duplicates. After Analyze has produced exposure and embedding evidence, the workstation conservatively detects same-composition symmetric exposure ladders and surfaces them as bracket sets in Cull/Groups.
 
-Detected bracket members remain photographer-reviewable and are protected from ordinary duplicate-driven rejection. A full Moment that is exactly one bracket set remains intact through semantic refinement. For batch Reference setup, the measured center exposure is the preferred starting candidate when it is otherwise eligible, while an explicit photographer Keep remains authoritative.
+Detected bracket members remain photographer-reviewable and are protected from ordinary duplicate-driven rejection. A full Moment that is exactly one bracket set remains intact through semantic refinement.
 
-Photo-Cake does not claim to merge HDR RAWs yet. The current requirement is to preserve the bracket, keep its intent visible, and hand the original RAW set forward non-destructively. HDR/DNG merging or Direct Export from brackets requires a real RAW-domain merge plus canonical Recipe/color/metadata renderer and must not be simulated with embedded-JPEG preview logic.
+Bracket source RAWs are **not** ordinary Adaptive Recipe targets. Their intentional capture EV differences must remain unchanged until HDR merge, so automatic batch Reference setup and safe batch XMP delivery exclude groups that still contain bracket sources. The measured center exposure may still be shown as a useful manual reference candidate, but it must not cause -EV/+EV source frames to be normalized.
+
+Lightroom preflight must identify the exact HDR source asset IDs. Pure bracket groups require no fake Reference before merge. Mixed groups may continue normal Recipe/XMP work only for non-bracket peers, and only through individual handoff while the HDR source set remains visible as Needs action.
+
+After completing the merge in Lightroom/Camera Raw, the photographer must be able to explicitly mark that bracket merge complete. Completion must be fingerprint-bound to the currently detected bracket members/center so a changed stack automatically returns to Needs action. Marking a pure bracket source group complete must close its workflow action without creating placeholder XMP sidecars.
+
+Photo-Cake does not claim to merge HDR RAWs yet. The current production path is to preserve the bracket, keep its intent visible, merge the source RAWs in Lightroom/Camera Raw, mark the source stack merged, then import/use the resulting HDR DNG when desired. HDR/DNG merging or Direct Export from brackets requires a real RAW-domain merge plus canonical Recipe/color/metadata renderer and must not be simulated with embedded-JPEG preview logic.

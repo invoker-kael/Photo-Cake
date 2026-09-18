@@ -24,6 +24,7 @@ pub struct WorkflowFacts {
     pub review_attention: usize,
     pub review_pending_groups: usize,
     pub lightroom_conflict_groups: usize,
+    pub lightroom_hdr_merge_groups: usize,
     pub lightroom_missing_sidecars: usize,
     pub lightroom_unresolved_groups: usize,
     pub lightroom_current_groups: usize,
@@ -80,6 +81,7 @@ pub fn derive_workflow_status(facts: WorkflowFacts) -> WorkflowStatus {
     } else if facts.review_pending_groups > 0 || facts.review_attention > 0 {
         WorkflowFocus::Review
     } else if facts.lightroom_conflict_groups > 0
+        || facts.lightroom_hdr_merge_groups > 0
         || facts.lightroom_unresolved_groups > 0
         || facts.lightroom_missing_sidecars > 0
     {
@@ -150,6 +152,17 @@ mod tests {
         let mut value = facts();
         value.lightroom_current_groups = 1;
         value.lightroom_missing_sidecars = 7;
+        assert_eq!(
+            derive_workflow_status(value).next_focus,
+            WorkflowFocus::Lightroom
+        );
+    }
+
+    #[test]
+    fn hdr_merge_routes_to_lightroom_without_fake_recipe_completion() {
+        let mut value = facts();
+        value.lightroom_current_groups = 3;
+        value.lightroom_hdr_merge_groups = 1;
         assert_eq!(
             derive_workflow_status(value).next_focus,
             WorkflowFocus::Lightroom

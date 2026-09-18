@@ -3,11 +3,12 @@ use photo_core::{
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
     derive_workflow_status, recipe_review_group_can_confirm, recipe_review_requires_attention,
     preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
-    write_group_sidecars, write_sidecar_batch, AnalysisCache,
+    route_exposure_bracket_sources, write_group_sidecars, write_sidecar_batch, AnalysisCache,
     AssetMetadataEvidence, AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor,
     ClassificationStore, CompanionDecisionPatch, CompanionPatchApplyReport, CompanionSnapshot,
     CompanionSnapshotStore, CullingDecision, CullingReview, CullingReviewStore, CullingUserDecision,
-    GroupCullingResult, GroupReferenceBinding, JobStatus, ModelBundleManifest, ModelPlatform,
+    ExposureBracketMergeStore, ExposureBracketSet, GroupCullingResult, GroupReferenceBinding,
+    JobStatus, ModelBundleManifest, ModelPlatform,
     PhotoGroup, PreviewArtifact, PreviewStore, RawAsset, RawCatalog, RawImportResult, RawImporter,
     RawMetadataStore, Recipe, RecipeReviewOverride, RecipeReviewSignal, RecipeReviewStore,
     RecipeReviewSyncFields, ReferenceStore,
@@ -83,6 +84,7 @@ struct GroupReferencePreview {
     recipes: Vec<Recipe>,
     pending_asset_id: Option<Uuid>,
     reviewed_asset_ids: Vec<Uuid>,
+    exposure_brackets: Vec<ExposureBracketSet>,
 }
 
 #[derive(Clone, Serialize)]
@@ -92,6 +94,17 @@ struct LightroomHandoffPreflight {
     current_sidecars: Vec<String>,
     missing_sidecars: Vec<String>,
     conflicting_sidecars: Vec<String>,
+    hdr_source_asset_ids: Vec<Uuid>,
+    hdr_merge_required: bool,
+    hdr_merge_completed: bool,
+}
+
+struct LightroomResolvedHandoff {
+    assets: Vec<RawAsset>,
+    recipes: Vec<Recipe>,
+    exposure_brackets: Vec<ExposureBracketSet>,
+    hdr_source_asset_ids: Vec<Uuid>,
+    hdr_merge_completed: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -171,6 +184,7 @@ struct AppState {
     companion_snapshots: CompanionSnapshotStore,
     classifications: ClassificationStore,
     recipe_reviews: RecipeReviewStore,
+    bracket_merges: ExposureBracketMergeStore,
     raw_importer: RawImporter,
     cache_root: PathBuf,
     controls: Arc<Mutex<HashMap<Uuid, Arc<BatchControl>>>>,
@@ -202,6 +216,24 @@ fn editable_group(
         asset_ids,
         manual_locked: group.manual_locked,
     })
+}
+
+fn delivery_group(
+    group: &PhotoGroup,
+    state: &AppState,
+) -> Result<(PhotoGroup, Vec<ExposureBracketSet>, Vec<Uuid>), String> {
+    let routing = route_exposure_bracket_sources(&state.analysis_cache, group)
+        .map_err(|error| error.to_string())?;
+    let source_ids = routing
+        .source_asset_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    let mut editable = editable_group(group, &state.culling_reviews)?;
+    editable
+        .asset_ids
+        .retain(|asset_id| !source_ids.contains(asset_id));
+    Ok((editable, routing.sets, routing.source_asset_ids))
 }
 
 fn apply_recipe_reviews(
@@ -272,8 +304,14 @@ fn resolve_reviewed_group_recipes(
         .get_set(binding.reference_set_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
-    let editable = editable_group(&group, &state.culling_reviews)?;
+    let (editable, exposure_brackets, _) = delivery_group(&group, state)?;
     if editable.asset_ids.is_empty() {
+        if !exposure_brackets.is_empty() {
+            return Err(
+                "exposure-bracket source frames are reserved for HDR merge and have no standard Recipe to review"
+                    .to_string(),
+            );
+        }
         return Err("all photos in this group are explicitly rejected".to_string());
     }
 
@@ -751,6 +789,24 @@ fn batch_workflow_status(
             }
         }
 
+        let (editable, exposure_brackets, _) = delivery_group(&group, &state)?;
+        let hdr_merge_completed = state
+            .bracket_merges
+            .is_currently_merged(group.id, &exposure_brackets)
+            .map_err(|error| error.to_string())?;
+        if !exposure_brackets.is_empty() && !hdr_merge_completed {
+            facts.lightroom_hdr_merge_groups += 1;
+        }
+        if editable.asset_ids.is_empty() {
+            if exposure_brackets.is_empty() {
+                facts.reference_attention_groups += 1;
+                facts.lightroom_unresolved_groups += 1;
+            } else if hdr_merge_completed {
+                facts.lightroom_current_groups += 1;
+            }
+            continue;
+        }
+
         let Some(binding) = state
             .reference_store
             .group_binding(group.id)
@@ -777,12 +833,6 @@ fn batch_workflow_status(
             .get_set(binding.reference_set_id)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
-        let editable = editable_group(&group, &state.culling_reviews)?;
-        if editable.asset_ids.is_empty() {
-            facts.reference_attention_groups += 1;
-            facts.lightroom_unresolved_groups += 1;
-            continue;
-        }
 
         let mut resolved = match reference_set.resolve_group_from_cache(
             &state.analysis_cache,
@@ -873,7 +923,10 @@ fn batch_workflow_status(
             facts.lightroom_conflict_groups += 1;
         }
         facts.lightroom_missing_sidecars += missing_count;
-        if conflict_count == 0 && missing_count == 0 {
+        if conflict_count == 0
+            && missing_count == 0
+            && (exposure_brackets.is_empty() || hdr_merge_completed)
+        {
             facts.lightroom_current_groups += 1;
         }
     }
@@ -989,6 +1042,13 @@ fn set_group_references(
             .ok_or_else(|| format!("photo group is not part of batch {batch_id}: {group_id}"))?;
         if !group.asset_ids.contains(&asset_id) {
             return Err(format!("asset {asset_id} is not part of group {group_id}"));
+        }
+        let bracket_routing = route_exposure_bracket_sources(&state.analysis_cache, group)
+            .map_err(|error| error.to_string())?;
+        if !bracket_routing.sets.is_empty() {
+            return Err(format!(
+                "group {group_id} contains exposure-bracket sources; merge HDR first or choose a Reference individually"
+            ));
         }
         if state
             .reference_store
@@ -1427,7 +1487,7 @@ fn batch_reference_previews(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
 
-        let editable = editable_group(&group, &state.culling_reviews)?;
+        let (editable, exposure_brackets, _) = delivery_group(&group, &state)?;
         if state
             .culling_reviews
             .get(binding.selected_reference_asset_id)
@@ -1438,6 +1498,21 @@ fn batch_reference_previews(
                 "selected reference {} is explicitly rejected",
                 binding.selected_reference_asset_id
             ));
+        }
+
+        if editable.asset_ids.is_empty() && !exposure_brackets.is_empty() {
+            previews.push(GroupReferencePreview {
+                group_id: group.id,
+                selected_reference_asset_id: binding.selected_reference_asset_id,
+                recipes: Vec::new(),
+                pending_asset_id: None,
+                reviewed_asset_ids: Vec::new(),
+                exposure_brackets,
+            });
+            continue;
+        }
+        if editable.asset_ids.is_empty() {
+            continue;
         }
 
         match set.resolve_group_from_cache(
@@ -1456,6 +1531,7 @@ fn batch_reference_previews(
                     recipes: result.recipes,
                     pending_asset_id: None,
                     reviewed_asset_ids,
+                    exposure_brackets,
                 });
             }
             Err(ReferenceWorkflowError::MissingExposureAnalysis(asset_id)) => {
@@ -1465,6 +1541,7 @@ fn batch_reference_previews(
                     recipes: Vec::new(),
                     pending_asset_id: Some(asset_id),
                     reviewed_asset_ids: Vec::new(),
+                    exposure_brackets,
                 });
             }
             Err(error) => return Err(error.to_string()),
@@ -1703,12 +1780,31 @@ fn render_group_recipe_preview(
 fn resolve_lightroom_handoff(
     group_id: Uuid,
     state: &AppState,
-) -> Result<(Vec<RawAsset>, Vec<Recipe>), String> {
+) -> Result<LightroomResolvedHandoff, String> {
     let group = state
         .catalog
         .find_group(group_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("photo group not found: {group_id}"))?;
+    let (editable, exposure_brackets, hdr_source_asset_ids) = delivery_group(&group, state)?;
+    let hdr_merge_completed = state
+        .bracket_merges
+        .is_currently_merged(group.id, &exposure_brackets)
+        .map_err(|error| error.to_string())?;
+
+    if editable.asset_ids.is_empty() {
+        if !hdr_source_asset_ids.is_empty() {
+            return Ok(LightroomResolvedHandoff {
+                assets: Vec::new(),
+                recipes: Vec::new(),
+                exposure_brackets,
+                hdr_source_asset_ids,
+                hdr_merge_completed,
+            });
+        }
+        return Err("all photos in this group are explicitly rejected".to_string());
+    }
+
     let binding = state
         .reference_store
         .group_binding(group_id)
@@ -1728,10 +1824,6 @@ fn resolve_lightroom_handoff(
         .get_set(binding.reference_set_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
-    let editable = editable_group(&group, &state.culling_reviews)?;
-    if editable.asset_ids.is_empty() {
-        return Err("all photos in this group are explicitly rejected".to_string());
-    }
 
     let mut resolved = reference_set
         .resolve_group_from_cache(
@@ -1752,7 +1844,49 @@ fn resolve_lightroom_handoff(
         .filter(|asset| editable_ids.contains(&asset.id))
         .collect::<Vec<_>>();
 
-    Ok((assets, resolved.recipes))
+    Ok(LightroomResolvedHandoff {
+        assets,
+        recipes: resolved.recipes,
+        exposure_brackets,
+        hdr_source_asset_ids,
+        hdr_merge_completed,
+    })
+}
+#[tauri::command]
+fn set_group_hdr_merged(
+    group_id: String,
+    merged: bool,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let group = state
+        .catalog
+        .find_group(group_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("photo group not found: {group_id}"))?;
+    let routing = route_exposure_bracket_sources(&state.analysis_cache, &group)
+        .map_err(|error| error.to_string())?;
+    if routing.sets.is_empty() {
+        return Err("photo group has no detected exposure bracket to mark merged".to_string());
+    }
+
+    if merged {
+        state
+            .bracket_merges
+            .mark_merged(group_id, &routing.sets)
+            .map_err(|error| error.to_string())?;
+    } else {
+        state
+            .bracket_merges
+            .clear(group_id)
+            .map_err(|error| error.to_string())?;
+    }
+
+    state
+        .bracket_merges
+        .is_currently_merged(group_id, &routing.sets)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1762,9 +1896,13 @@ fn preflight_group_reference_xmp(
 ) -> Result<LightroomHandoffPreflight, String> {
     let group_id = Uuid::parse_str(&group_id)
         .map_err(|error| format!("invalid group id: {error}"))?;
-    let (assets, recipes) = resolve_lightroom_handoff(group_id, &state)?;
-    let targets = preflight_group_sidecars(&assets, &recipes)
-        .map_err(|error| error.to_string())?;
+    let resolved = resolve_lightroom_handoff(group_id, &state)?;
+    let targets = if resolved.recipes.is_empty() {
+        Vec::new()
+    } else {
+        preflight_group_sidecars(&resolved.assets, &resolved.recipes)
+            .map_err(|error| error.to_string())?
+    };
 
     Ok(LightroomHandoffPreflight {
         group_id,
@@ -1797,6 +1935,9 @@ fn preflight_group_reference_xmp(
                     .map(|path| path.to_string_lossy().into_owned())
             })
             .collect(),
+        hdr_source_asset_ids: resolved.hdr_source_asset_ids.clone(),
+        hdr_merge_required: !resolved.exposure_brackets.is_empty() && !resolved.hdr_merge_completed,
+        hdr_merge_completed: resolved.hdr_merge_completed,
     })
 }
 
@@ -1807,9 +1948,20 @@ fn write_group_reference_xmp(
 ) -> Result<LightroomHandoffResult, String> {
     let group_id = Uuid::parse_str(&group_id)
         .map_err(|error| format!("invalid group id: {error}"))?;
-    let (assets, recipes) = resolve_lightroom_handoff(group_id, &state)?;
-    let verified_sidecar_count = recipes.len();
-    let written = write_group_sidecars(&assets, &recipes)
+    let resolved = resolve_lightroom_handoff(group_id, &state)?;
+    if resolved.recipes.is_empty() && !resolved.hdr_source_asset_ids.is_empty() {
+        return Err(
+            if resolved.hdr_merge_completed {
+                "HDR merge is already marked complete; this source group has no standard XMP targets"
+                    .to_string()
+            } else {
+                "HDR merge is required for this exposure-bracket source set; Photo-Cake will not write normalization XMP to the bracket RAWs"
+                    .to_string()
+            },
+        );
+    }
+    let verified_sidecar_count = resolved.recipes.len();
+    let written = write_group_sidecars(&resolved.assets, &resolved.recipes)
         .map_err(|error| error.to_string())?;
 
     Ok(LightroomHandoffResult {
@@ -1842,8 +1994,19 @@ fn write_reference_xmp_batch(
             return Err(format!("duplicate Lightroom group in batch handoff: {group_id}"));
         }
 
+        let resolved = resolve_lightroom_handoff(group_id, &state)?;
+        if !resolved.hdr_source_asset_ids.is_empty() && !resolved.hdr_merge_completed {
+            return Err(format!(
+                "group {group_id} contains pending HDR exposure-bracket sources and is excluded from safe batch handoff"
+            ));
+        }
+        if resolved.recipes.is_empty() {
+            return Err(format!(
+                "group {group_id} has no standard XMP targets for batch handoff"
+            ));
+        }
         resolved_ids.push(group_id);
-        resolved_groups.push(resolve_lightroom_handoff(group_id, &state)?);
+        resolved_groups.push((resolved.assets, resolved.recipes));
     }
 
     let verified_counts = resolved_groups
@@ -2026,6 +2189,7 @@ pub fn run() {
             let reference_store = ReferenceStore::open(&database)?;
             let companion_snapshots = CompanionSnapshotStore::open(&database)?;
             let recipe_reviews = RecipeReviewStore::open(&database)?;
+            let bracket_merges = ExposureBracketMergeStore::open(&database)?;
             let classification_store = ClassificationStore::open(&database)?;
             let analyze_executor = LocalAnalyzeExecutor::new(
                 &database,
@@ -2052,6 +2216,7 @@ pub fn run() {
                 companion_snapshots,
                 classifications: classification_store,
                 recipe_reviews,
+                bracket_merges,
                 raw_importer,
                 cache_root,
                 controls: Arc::new(Mutex::new(HashMap::new())),
@@ -2091,6 +2256,7 @@ pub fn run() {
             confirm_recipe_review_groups,
             clear_recipe_reviewed,
             render_group_recipe_preview,
+            set_group_hdr_merged,
             preflight_group_reference_xmp,
             write_group_reference_xmp,
             write_reference_xmp_batch,

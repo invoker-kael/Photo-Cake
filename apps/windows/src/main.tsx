@@ -169,6 +169,8 @@ const bridge: PhotoCakeBridge = {
     }),
   loadReferencePreviews: (batchId) =>
     invoke<BackendGroupReferencePreview[]>("batch_reference_previews", { batchId }),
+  setHdrMerged: (groupId, merged) =>
+    invoke<boolean>("set_group_hdr_merged", { groupId, merged }),
   preflightGroupXmp: (groupId) =>
     invoke<BackendLightroomHandoffPreflight>("preflight_group_reference_xmp", { groupId }),
   writeGroupXmp: (groupId) =>

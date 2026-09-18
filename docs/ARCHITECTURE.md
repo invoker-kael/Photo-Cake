@@ -411,8 +411,29 @@ When a bracket is detected:
 - near-duplicate evidence no longer acts as a reason to discard a bracket member;
 - a bracket member is never left as an automatic RejectSuggestion through the ordinary culling path; uncertain frames remain Reviewable;
 - if one complete Moment parent is exactly one bracket set, semantic refinement preserves that parent instead of splitting the exposure ladder;
-- batch Reference setup prefers the measured center exposure when it is otherwise eligible, while an explicit photographer Keep remains authoritative.
+- the measured center exposure remains a useful manual reference candidate, but groups containing bracket sources are excluded from automatic batch Reference setup;
+- bracket source asset IDs are removed from the ordinary Adaptive Recipe target set, so Photo-Cake never "normalizes" -EV/+EV capture intent before HDR merge;
+- Lightroom preflight reports those source RAWs as an explicit HDR-merge action, and safe batch XMP excludes any group that still contains bracket sources;
+- mixed groups may still hand off ordinary non-bracket peers individually, while bracket RAWs remain untouched.
 
-This is intentionally **not** an HDR merge implementation. Photo-Cake preserves and prepares the source RAWs and can still hand off non-destructive XMP per source. A future HDR merge belongs only after there is a real RAW-domain merge/render path with trustworthy color and metadata behavior. Until then, Lightroom/Camera Raw remains the appropriate place to merge bracketed RAWs when the photographer wants an HDR DNG.
+This is intentionally **not** an HDR merge implementation. Photo-Cake preserves bracket RAW capture exposure and does **not** write normalization XMP to those source frames. The current production boundary is: detect -> protect -> isolate -> merge in Lightroom/Camera Raw -> re-import/use the resulting HDR DNG if the photographer wants Photo-Cake to continue the normal Reference/Recipe path. A native HDR merge belongs only after there is a real RAW-domain merge/render path with trustworthy color and metadata behavior.
 
 The scalable editing pattern remains the existing one: establish a standard Reference/look, synchronize only the shared preference layer, let adaptive Recipes resolve per-photo differences, then inspect exceptions. This adopts the useful standard-photo -> selective batch synchronization -> focused exception-review production pattern from mature batch photo editors without introducing a second preset-copy engine.
+
+
+### Bracket-aware delivery routing
+
+Bracket handling is a routing decision, not a second editing engine:
+
+```text
+Moment / Similar PhotoGroup
+  -> bracket detection from existing Analyze evidence
+  -> HDR source RAWs -----------------------> Lightroom / Camera Raw HDR merge
+  -> ordinary peers -> Reference -> Recipe -> Review -> XMP
+```
+
+The Workflow Cockpit counts unresolved HDR merge groups separately from XMP conflicts/missing sidecars. A pure bracket group therefore does not need a fake Reference or an empty Recipe confirmation just to advance the workflow. It remains a Lightroom action until the photographer explicitly marks the external merge complete.
+
+HDR completion is persisted against a fingerprint of the **current detected bracket membership + center frame**, not just the group ID. If regrouping or new analysis changes the bracket set, the saved completion no longer matches and the HDR action reopens automatically. This prevents a stale "merged" flag from hiding a materially different source stack.
+
+Safe batch handoff is deliberately stricter than individual handoff. Any group with **pending** HDR source RAWs is excluded from the transactional batch cohort. Once the current bracket fingerprint is marked merged, ordinary non-bracket peers in a mixed group may rejoin safe batch delivery. A pure bracket source group can become workflow-current without manufacturing zero-value XMP files.

@@ -129,9 +129,10 @@ Core models and business logic must be shared.
 3. Photo Group model
 4. Smart Culling
 5. Reference Set and Style Profile
-6. Recipe/Edit Graph
-7. Lightroom XMP mapping
-8. Direct export
+6. Reuse color_sync to resolve group intent per photo
+7. Materialize per-photo Recipe/Edit Graph
+8. Lightroom XMP mapping and sidecar writing
+9. Direct export
 9. Advanced AI assistance
 ```
 
@@ -178,3 +179,8 @@ A task is complete when:
 - It reuses current architecture.
 - It has implementation, tests and build validation.
 - It moves Photo-Cake closer to semi-automatic personal editing workflow.
+
+
+## Adaptive Batch Rule
+
+For a Photo Group, preserve one shared style intent but resolve photo-specific adjustments from existing analysis. Reuse `color_sync`; do not introduce a second batch-style engine. Materialize one Recipe per target asset before XMP generation so differently exposed photos do not receive identical numeric corrections.

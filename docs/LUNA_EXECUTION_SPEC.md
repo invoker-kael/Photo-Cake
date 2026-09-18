@@ -130,3 +130,8 @@ The workstation import button must continue to call the existing `import_raw_dir
 ## Culling Execution Rule
 
 Analyze writes `QualityScoring` and image-embedding evidence into `AnalysisCache`. Downstream culling must call `build_group_culling_result` and consume that cache; do not re-run inference from the Cull page. Missing evidence is pending, not a guessed score. Duplicate ranking remains PhotoGroup-scoped, keeps the strongest candidate, and leaves alternatives reviewable.
+
+
+## Human Review Authority
+
+Treat `CullingReviewStore` as authoritative for explicit photographer Keep/Review/Reject decisions. AI output remains a suggestion underneath it. Never overwrite a saved photographer decision when analysis/model versions change, and never translate Reject into file deletion. A cleared override returns control to the latest suggestion.

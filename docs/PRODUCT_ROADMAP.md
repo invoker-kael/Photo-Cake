@@ -120,3 +120,6 @@ Not early priorities:
 
 
 Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view and evidence-backed Cull view are connected to the existing Rust core. Reference selection/apply and explicit Lightroom handoff are the next UI gaps; their core ReferenceSet/Recipe/XMP logic already exists.
+
+
+Implemented since the previous milestone: the workstation Cull view now supports persisted photographer Keep/Review/Reject overrides on top of AI suggestions. Remaining selection work is richer preview/compare UX and semantic evidence such as eyes/expression when reliable local evidence is available.

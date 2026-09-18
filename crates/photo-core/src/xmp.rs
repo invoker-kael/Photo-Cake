@@ -166,6 +166,8 @@ mod tests {
         assert!(xmp.contains(r#"crs:Exposure2012="0.35""#));
         assert!(xmp.contains(r#"crs:Highlights2012="-40""#));
         assert!(!xmp.contains("crs:Contrast2012"));
+        assert!(!xmp.contains("crs:Temperature"));
+        assert!(!xmp.contains("crs:Tint"));
     }
 
     #[test]

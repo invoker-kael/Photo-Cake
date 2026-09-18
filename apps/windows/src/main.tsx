@@ -50,6 +50,8 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendCullingReview[]>("batch_culling_reviews", { batchId }),
   setCullingReview: (assetId, decision) =>
     invoke<void>("set_culling_review", { assetId, decision }),
+  setCullingReviews: (reviews) =>
+    invoke<void>("set_culling_reviews", { reviews }),
   loadReferenceBindings: (batchId) =>
     invoke<BackendReferenceBinding[]>("batch_reference_bindings", { batchId }),
   setGroupReference: (groupId, assetId) =>

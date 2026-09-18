@@ -101,7 +101,7 @@ Keep graceful fallback: edits that cannot be represented in Lightroom XMP may be
 
 ## Milestone F — Platform Polish
 
-Windows remains the primary production surface. Android now reuses the same project stores and shared UI for Library, Cull, effective Groups and Reference selection without duplicating editing logic. The remaining platform gap is cross-device project/preview transport; workstation-only Recipe editing and Lightroom handoff stay intentionally absent on Android.
+Windows remains the primary production surface. Android now reuses the same project stores and shared UI for Library, Cull, effective Groups and Reference selection without duplicating editing logic. The Android companion contract is wired and photo-core now defines a transport-neutral CompanionSnapshot / CompanionDecisionPatch boundary. The remaining platform gap is the actual private transfer mechanism for snapshot JSON plus preview artifacts; workstation-only Recipe editing and Lightroom handoff stay intentionally absent on Android.
 
 ## Later / Optional
 

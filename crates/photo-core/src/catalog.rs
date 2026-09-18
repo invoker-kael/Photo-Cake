@@ -117,17 +117,29 @@ impl RawCatalog {
         let mut canonical = Vec::with_capacity(assets.len());
 
         for incoming in assets {
-            let existing_id = tx
+            let existing = tx
                 .query_row(
-                    "SELECT id FROM raw_assets WHERE source_path = ?1",
+                    "SELECT id, camera_id, capture_time_ms FROM raw_assets WHERE source_path = ?1",
                     [&incoming.source_path],
-                    |row| row.get::<_, String>(0),
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<i64>>(2)?,
+                        ))
+                    },
                 )
                 .optional()?;
 
             let mut asset = incoming.clone();
-            if let Some(id) = existing_id {
+            if let Some((id, existing_camera_id, existing_capture_time_ms)) = existing {
                 asset.id = Uuid::parse_str(&id)?;
+                if asset.camera_id.is_none() {
+                    asset.camera_id = existing_camera_id;
+                }
+                if asset.capture_time_ms.is_none() {
+                    asset.capture_time_ms = existing_capture_time_ms;
+                }
                 tx.execute(
                     "UPDATE raw_assets
                      SET filename = ?2, extension = ?3, camera_id = ?4,
@@ -585,6 +597,42 @@ mod tests {
         let second = sample_asset("C:/shoot/IMG_1001.CR3", 1001);
         let second_id = catalog.ensure_assets(&[second]).unwrap()[0].id;
         assert_eq!(first_id, second_id);
+    }
+
+    #[test]
+    fn reimport_does_not_erase_existing_capture_metadata_when_new_read_is_missing() {
+        let dir = tempdir().unwrap();
+        let catalog = RawCatalog::open(dir.path().join("catalog.sqlite3")).unwrap();
+        let source = "C:/shoot/IMG_2001.CR3";
+
+        let original = RawAsset {
+            id: Uuid::new_v4(),
+            source_path: source.to_string(),
+            filename: "IMG_2001.CR3".into(),
+            extension: "cr3".into(),
+            camera_id: Some("Canon EOS R5".into()),
+            capture_time_ms: Some(1_700_000_000_000),
+            file_time_ms: Some(1_700_000_100_000),
+            sequence_number: Some(2001),
+        };
+        let first = catalog.ensure_assets(&[original]).unwrap().remove(0);
+
+        let missing_metadata = RawAsset {
+            id: Uuid::new_v4(),
+            source_path: source.to_string(),
+            filename: "IMG_2001.CR3".into(),
+            extension: "cr3".into(),
+            camera_id: None,
+            capture_time_ms: None,
+            file_time_ms: Some(1_700_000_200_000),
+            sequence_number: Some(2001),
+        };
+        let second = catalog.ensure_assets(&[missing_metadata]).unwrap().remove(0);
+
+        assert_eq!(second.id, first.id);
+        assert_eq!(second.camera_id.as_deref(), Some("Canon EOS R5"));
+        assert_eq!(second.capture_time_ms, Some(1_700_000_000_000));
+        assert_eq!(second.file_time_ms, Some(1_700_000_200_000));
     }
 
     #[test]

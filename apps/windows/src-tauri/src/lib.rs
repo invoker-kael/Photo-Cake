@@ -1,9 +1,9 @@
 use photo_core::{
     build_group_culling_result, AnalysisCache, AutomationRunner, Batch, BatchStore,
-    ClassificationRoutingExecutor, ClassificationStore, CullingReview, CullingReviewStore,
-    CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus, ModelBundleManifest,
-    ModelPlatform, PhotoGroup, RawAsset, RawCatalog, RawImportResult, RawImporter, Recipe,
-    ReferenceStore, ReferenceWorkflowError, RunStep,
+    write_group_sidecars, ClassificationRoutingExecutor, ClassificationStore, CullingReview,
+    CullingReviewStore, CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus,
+    ModelBundleManifest, ModelPlatform, PhotoGroup, RawAsset, RawCatalog, RawImportResult,
+    RawImporter, Recipe, ReferenceStore, ReferenceWorkflowError, RunStep,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
@@ -73,6 +73,12 @@ struct GroupReferencePreview {
     pending_asset_id: Option<Uuid>,
 }
 
+#[derive(Clone, Serialize)]
+struct LightroomHandoffResult {
+    group_id: Uuid,
+    written_sidecars: Vec<String>,
+}
+
 struct AppState {
     runner: Arc<Mutex<AppRunner>>,
     store: BatchStore,
@@ -86,6 +92,30 @@ struct AppState {
 
 fn parse_batch_id(value: &str) -> Result<Uuid, String> {
     Uuid::parse_str(value).map_err(|error| format!("invalid batch id: {error}"))
+}
+
+fn editable_group(
+    group: &PhotoGroup,
+    reviews: &CullingReviewStore,
+) -> Result<PhotoGroup, String> {
+    let mut asset_ids = Vec::with_capacity(group.asset_ids.len());
+    for asset_id in &group.asset_ids {
+        let rejected = reviews
+            .get(*asset_id)
+            .map_err(|error| error.to_string())?
+            .is_some_and(|review| review.decision == CullingUserDecision::Reject);
+        if !rejected {
+            asset_ids.push(*asset_id);
+        }
+    }
+
+    Ok(PhotoGroup {
+        id: group.id,
+        kind: group.kind,
+        basis: group.basis,
+        asset_ids,
+        manual_locked: group.manual_locked,
+    })
 }
 
 fn lock_runner<T>(
@@ -397,6 +427,14 @@ fn set_group_reference(
     if !group.asset_ids.contains(&asset_id) {
         return Err(format!("asset {asset_id} is not part of group {group_id}"));
     }
+    if state
+        .culling_reviews
+        .get(asset_id)
+        .map_err(|error| error.to_string())?
+        .is_some_and(|review| review.decision == CullingUserDecision::Reject)
+    {
+        return Err("an explicitly rejected photo cannot be used as the group reference".to_string());
+    }
 
     state
         .reference_store
@@ -444,9 +482,22 @@ fn batch_reference_previews(
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
 
+        let editable = editable_group(&group, &state.culling_reviews)?;
+        if state
+            .culling_reviews
+            .get(binding.selected_reference_asset_id)
+            .map_err(|error| error.to_string())?
+            .is_some_and(|review| review.decision == CullingUserDecision::Reject)
+        {
+            return Err(format!(
+                "selected reference {} is explicitly rejected",
+                binding.selected_reference_asset_id
+            ));
+        }
+
         match set.resolve_group_from_cache(
             &state.analysis_cache,
-            &group,
+            &editable,
             binding.selected_reference_asset_id,
             1,
         ) {
@@ -469,6 +520,72 @@ fn batch_reference_previews(
     }
 
     Ok(previews)
+}
+
+#[tauri::command]
+fn write_group_reference_xmp(
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<LightroomHandoffResult, String> {
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let group = state
+        .catalog
+        .list_groups()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|group| group.id == group_id)
+        .ok_or_else(|| format!("photo group not found: {group_id}"))?;
+    let binding = state
+        .reference_store
+        .group_binding(group_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "select a reference photo before Lightroom handoff".to_string())?;
+    if state
+        .culling_reviews
+        .get(binding.selected_reference_asset_id)
+        .map_err(|error| error.to_string())?
+        .is_some_and(|review| review.decision == CullingUserDecision::Reject)
+    {
+        return Err("selected reference is explicitly rejected; choose another reference".to_string());
+    }
+
+    let reference_set = state
+        .reference_store
+        .get_set(binding.reference_set_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
+    let editable = editable_group(&group, &state.culling_reviews)?;
+    if editable.asset_ids.is_empty() {
+        return Err("all photos in this group are explicitly rejected".to_string());
+    }
+
+    let resolved = reference_set
+        .resolve_group_from_cache(
+            &state.analysis_cache,
+            &editable,
+            binding.selected_reference_asset_id,
+            1,
+        )
+        .map_err(|error| error.to_string())?;
+    let editable_ids = editable.asset_ids.iter().copied().collect::<HashSet<_>>();
+    let assets = state
+        .catalog
+        .list_assets()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|asset| editable_ids.contains(&asset.id))
+        .collect::<Vec<_>>();
+    let written = write_group_sidecars(&assets, &resolved.recipes)
+        .map_err(|error| error.to_string())?;
+
+    Ok(LightroomHandoffResult {
+        group_id,
+        written_sidecars: written
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+    })
 }
 
 #[tauri::command]
@@ -657,6 +774,7 @@ pub fn run() {
             set_group_reference,
             clear_group_reference,
             batch_reference_previews,
+            write_group_reference_xmp,
             create_batch,
             import_raw_paths,
             import_raw_directory,

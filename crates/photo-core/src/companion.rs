@@ -131,6 +131,10 @@ pub enum CompanionError {
     ConcurrentCullingChange(Uuid),
     #[error("workstation reference changed since snapshot for group {0}")]
     ConcurrentReferenceChange(Uuid),
+    #[error("companion patch contains duplicate culling change for asset {0}")]
+    DuplicateCullingChange(Uuid),
+    #[error("companion patch contains duplicate reference change for group {0}")]
+    DuplicateReferenceChange(Uuid),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -241,18 +245,37 @@ pub fn apply_companion_patch(
         .iter()
         .map(|review| (review.asset_id, Some(review.decision)))
         .collect::<HashMap<_, _>>();
+    let mut seen_assets = HashSet::new();
 
     for change in &patch.culling_changes {
         if !asset_ids.contains(&change.asset_id) {
             return Err(CompanionError::UnknownAsset(change.asset_id));
         }
+        if !seen_assets.insert(change.asset_id) {
+            return Err(CompanionError::DuplicateCullingChange(change.asset_id));
+        }
         final_decisions.insert(change.asset_id, change.decision);
     }
+
+    let mut final_references = snapshot
+        .references
+        .iter()
+        .map(|state| {
+            (
+                state.binding.group_id,
+                Some(state.binding.selected_reference_asset_id),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut seen_groups = HashSet::new();
 
     for change in &patch.reference_changes {
         let group = groups
             .get(&change.group_id)
             .ok_or(CompanionError::UnknownGroup(change.group_id))?;
+        if !seen_groups.insert(change.group_id) {
+            return Err(CompanionError::DuplicateReferenceChange(change.group_id));
+        }
         if let Some(asset_id) = change.selected_reference_asset_id {
             if !group.asset_ids.contains(&asset_id) {
                 return Err(CompanionError::ReferenceOutsideGroup {
@@ -260,14 +283,18 @@ pub fn apply_companion_patch(
                     asset_id,
                 });
             }
-            if final_decisions.get(&asset_id).copied().flatten()
-                == Some(CullingUserDecision::Reject)
-            {
-                return Err(CompanionError::RejectedReference {
-                    group_id: change.group_id,
-                    asset_id,
-                });
-            }
+        }
+        final_references.insert(change.group_id, change.selected_reference_asset_id);
+    }
+
+    for (group_id, selected_reference_asset_id) in final_references {
+        let Some(asset_id) = selected_reference_asset_id else {
+            continue;
+        };
+        if final_decisions.get(&asset_id).copied().flatten()
+            == Some(CullingUserDecision::Reject)
+        {
+            return Err(CompanionError::RejectedReference { group_id, asset_id });
         }
     }
 
@@ -482,6 +509,75 @@ mod tests {
         ));
         assert!(culling.get(asset_id).unwrap().is_none());
         assert!(references.group_binding(group_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn cannot_reject_existing_reference_without_clearing_or_replacing_it() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("project.sqlite3");
+        let culling = CullingReviewStore::open(&db).unwrap();
+        let references = ReferenceStore::open(&db).unwrap();
+        let asset_id = Uuid::new_v4();
+        let group_id = Uuid::new_v4();
+        let mut snapshot = snapshot(asset_id, group_id);
+        let (reference_set, binding) = references
+            .set_single_photo_reference(group_id, asset_id, "Group reference")
+            .unwrap();
+        snapshot.references.push(CompanionReferenceState {
+            binding,
+            reference_set,
+        });
+
+        let patch = CompanionDecisionPatch {
+            schema_version: COMPANION_SNAPSHOT_SCHEMA_VERSION,
+            base_snapshot_id: snapshot.snapshot_id,
+            batch_id: snapshot.batch_id,
+            culling_changes: vec![CompanionCullingChange {
+                asset_id,
+                decision: Some(CullingUserDecision::Reject),
+            }],
+            reference_changes: Vec::new(),
+        };
+
+        assert!(matches!(
+            apply_companion_patch(&snapshot, &patch, &culling, &references),
+            Err(CompanionError::RejectedReference { group_id: id, asset_id: asset })
+                if id == group_id && asset == asset_id
+        ));
+        assert!(culling.get(asset_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn duplicate_changes_are_rejected_before_writes() {
+        let dir = tempdir().unwrap();
+        let db = dir.path().join("project.sqlite3");
+        let culling = CullingReviewStore::open(&db).unwrap();
+        let references = ReferenceStore::open(&db).unwrap();
+        let asset_id = Uuid::new_v4();
+        let group_id = Uuid::new_v4();
+        let snapshot = snapshot(asset_id, group_id);
+        let patch = CompanionDecisionPatch {
+            schema_version: COMPANION_SNAPSHOT_SCHEMA_VERSION,
+            base_snapshot_id: snapshot.snapshot_id,
+            batch_id: snapshot.batch_id,
+            culling_changes: vec![
+                CompanionCullingChange {
+                    asset_id,
+                    decision: Some(CullingUserDecision::Keep),
+                },
+                CompanionCullingChange {
+                    asset_id,
+                    decision: Some(CullingUserDecision::Review),
+                },
+            ],
+            reference_changes: Vec::new(),
+        };
+
+        assert!(matches!(
+            apply_companion_patch(&snapshot, &patch, &culling, &references),
+            Err(CompanionError::DuplicateCullingChange(id)) if id == asset_id
+        ));
+        assert!(culling.get(asset_id).unwrap().is_none());
     }
 
     #[test]

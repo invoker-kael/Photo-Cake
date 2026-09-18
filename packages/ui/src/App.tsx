@@ -10,6 +10,7 @@ import {
   type BackendLightroomHandoffResult,
   type BackendPhotoContext,
   type BackendReferenceBinding,
+  type BackendRecipeReviewOverride,
   type BatchJob,
   type BatchStage,
   type CullingDecision,
@@ -27,11 +28,12 @@ export type {
   BackendPhotoContext,
   BackendRawImportResult,
   BackendReferenceBinding,
+  BackendRecipeReviewOverride,
   BatchWorkerEvent,
   PhotoCakeBridge,
 } from "./batch";
 
-type WorkspaceView = "library" | "cull" | "groups" | "reference" | "lightroom";
+type WorkspaceView = "library" | "cull" | "groups" | "reference" | "review" | "lightroom";
 
 const stageProgress: Record<BatchStage, number> = {
   IMPORT: 5,
@@ -139,7 +141,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [referenceBindings, setReferenceBindings] = useState<Record<string, BackendReferenceBinding>>({});
   const [referenceStyles, setReferenceStyles] = useState<Record<string, BackendGroupReferenceStyle>>({});
   const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
+  const [recipeReviews, setRecipeReviews] = useState<Record<string, BackendRecipeReviewOverride>>({});
   const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
+  const [reviewUpdating, setReviewUpdating] = useState<string | null>(null);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
   const [handoffRunning, setHandoffRunning] = useState<string | null>(null);
 
@@ -317,6 +321,30 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   }, [activeBatchId, bridge, referenceBindings]);
 
   useEffect(() => {
+    if (!bridge?.loadRecipeReviews || !activeBatchId) {
+      setRecipeReviews({});
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadRecipeReviews(activeBatchId)
+      .then((reviews) => {
+        if (disposed) return;
+        setRecipeReviews(
+          Object.fromEntries(reviews.map((review) => [review.asset_id, review])),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeBatchId, bridge]);
+
+  useEffect(() => {
     if (!bridge?.loadReferencePreviews || !activeBatchId) {
       setReferencePreviews({});
       return;
@@ -338,7 +366,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     return () => {
       disposed = true;
     };
-  }, [activeBatchId, analysisRevision, bridge, referenceBindings, referenceStyles]);
+  }, [activeBatchId, analysisRevision, bridge, recipeReviews, referenceBindings, referenceStyles]);
 
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
@@ -587,6 +615,77 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     void saveReferenceStyle(groupId, 0, 0, 0);
   };
 
+  const saveRecipeReview = async (
+    assetId: string,
+    exposureDeltaEv: number,
+    contrastDelta: number,
+    saturationDelta: number,
+  ) => {
+    if (!bridge?.setRecipeReview) return;
+    setReviewUpdating(assetId);
+    try {
+      const review = await bridge.setRecipeReview(
+        assetId,
+        exposureDeltaEv,
+        contrastDelta,
+        saturationDelta,
+      );
+      setRecipeReviews((current) => {
+        const next = { ...current };
+        const neutral =
+          Math.abs(review.exposure_delta_ev) <= Number.EPSILON &&
+          Math.abs(review.contrast_delta) <= Number.EPSILON &&
+          Math.abs(review.saturation_delta) <= Number.EPSILON;
+        if (neutral) delete next[assetId];
+        else next[assetId] = review;
+        return next;
+      });
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setReviewUpdating(null);
+    }
+  };
+
+  const adjustRecipeReview = (
+    assetId: string,
+    field: "exposure" | "contrast" | "saturation",
+    delta: number,
+  ) => {
+    const current = recipeReviews[assetId];
+    let exposure = current?.exposure_delta_ev ?? 0;
+    let contrast = current?.contrast_delta ?? 0;
+    let saturation = current?.saturation_delta ?? 0;
+
+    if (field === "exposure") exposure = Math.max(-3, Math.min(3, exposure + delta));
+    if (field === "contrast") contrast = Math.max(-100, Math.min(100, contrast + delta));
+    if (field === "saturation") saturation = Math.max(-100, Math.min(100, saturation + delta));
+
+    void saveRecipeReview(assetId, exposure, contrast, saturation);
+  };
+
+  const resetRecipeReview = async (assetId: string) => {
+    if (!bridge?.clearRecipeReview) {
+      void saveRecipeReview(assetId, 0, 0, 0);
+      return;
+    }
+    setReviewUpdating(assetId);
+    try {
+      await bridge.clearRecipeReview(assetId);
+      setRecipeReviews((current) => {
+        const next = { ...current };
+        delete next[assetId];
+        return next;
+      });
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setReviewUpdating(null);
+    }
+  };
+
   const writeGroupXmp = async (groupId: string) => {
     if (!bridge?.writeGroupXmp) return;
     setHandoffRunning(groupId);
@@ -619,7 +718,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           </div>
           <div className="overview-card wide">
             <span>Next workflow</span>
-            <strong>Cull → Groups → Reference → XMP</strong>
+            <strong>Cull → Groups → Reference → Review → XMP</strong>
           </div>
         </section>
       )}
@@ -972,6 +1071,110 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     </section>
   );
 
+  const renderReview = () => (
+    <section className="queue-card">
+      <div className="queue-title">
+        <strong>Recipe review</strong>
+        <span>Group style stays shared · only photo-specific exceptions are stored here</span>
+      </div>
+      <div className="recipe-review-groups">
+        {photoContext?.groups.map((group, groupIndex) => {
+          const preview = referencePreviews[group.id];
+          if (!preview) {
+            return (
+              <div className="recipe-review-group" key={group.id}>
+                <div className="recipe-review-head">
+                  <strong>Group {groupIndex + 1}</strong>
+                  <span>Choose a reference before reviewing adaptive Recipes</span>
+                </div>
+              </div>
+            );
+          }
+          if (preview.pending_asset_id) {
+            return (
+              <div className="recipe-review-group" key={group.id}>
+                <div className="recipe-review-head">
+                  <strong>Group {groupIndex + 1}</strong>
+                  <span>Waiting for local exposure evidence</span>
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div className="recipe-review-group" key={group.id}>
+              <div className="recipe-review-head">
+                <strong>Group {groupIndex + 1}</strong>
+                <span>{preview.recipes.length} adaptive Recipes</span>
+              </div>
+              <div className="recipe-review-grid">
+                {preview.recipes.map((recipe) => {
+                  const assetId = recipe.target_asset_id;
+                  if (!assetId) return null;
+                  const review = recipeReviews[assetId];
+                  const updating = reviewUpdating === assetId;
+                  return (
+                    <article className="recipe-review-card" key={recipe.id}>
+                      {previewUrls.get(assetId) ? (
+                        <img
+                          className="recipe-review-image"
+                          src={previewUrls.get(assetId)}
+                          alt={assetNames.get(assetId) ?? "RAW preview"}
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="recipe-review-placeholder">RAW</div>
+                      )}
+                      <div className="recipe-review-info">
+                        <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
+                        <small>
+                          Final exposure {signed(recipe.adjustments.exposure ?? 0)} EV
+                          {review ? ` · override ${signed(review.exposure_delta_ev)} EV` : ""}
+                        </small>
+                      </div>
+                      <div className="recipe-review-controls">
+                        <div className="mini-adjust">
+                          <span>Exposure</span>
+                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "exposure", -0.1)}>−</button>
+                          <strong>{signed(review?.exposure_delta_ev ?? 0)} EV</strong>
+                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "exposure", 0.1)}>+</button>
+                        </div>
+                        <div className="mini-adjust">
+                          <span>Contrast</span>
+                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "contrast", -5)}>−</button>
+                          <strong>{signed(review?.contrast_delta ?? 0, 0)}</strong>
+                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "contrast", 5)}>+</button>
+                        </div>
+                        <div className="mini-adjust">
+                          <span>Saturation</span>
+                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "saturation", -5)}>−</button>
+                          <strong>{signed(review?.saturation_delta ?? 0, 0)}</strong>
+                          <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "saturation", 5)}>+</button>
+                        </div>
+                      </div>
+                      {review && (
+                        <button
+                          className="review-choice clear recipe-reset"
+                          disabled={updating}
+                          onClick={() => void resetRecipeReview(assetId)}
+                        >
+                          Clear exception
+                        </button>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+        {!photoContext?.groups.length && (
+          <div className="panel-note">Import, analyze and choose references before Recipe review.</div>
+        )}
+      </div>
+    </section>
+  );
+
   const renderLightroom = () => (
     <section className="queue-card">
       <div className="queue-title">
@@ -1081,6 +1284,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             ["cull", "Cull"],
             ["groups", "Groups"],
             ["reference", "Reference"],
+            ["review", "Review"],
             ["lightroom", "Lightroom"],
           ] as const).map(([view, label]) => (
             <button
@@ -1127,6 +1331,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         {activeView === "cull" && renderCull()}
         {activeView === "groups" && renderGroups()}
         {activeView === "reference" && renderReference()}
+        {activeView === "review" && renderReview()}
         {activeView === "lightroom" && renderLightroom()}
       </main>
 
@@ -1145,7 +1350,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             ["3", "Group", "Moment → semantic similarity"],
             ["4", "Reference look", "Your preferred photo/style"],
             ["5", "Adaptive recipe", "Different correction per photo"],
-            ["6", "Lightroom XMP", "Or direct export on demand"],
+            ["6", "Review exceptions", "Persist only per-photo corrections"],
+            ["7", "Lightroom XMP", "Or direct export on demand"],
           ].map(([number, title, detail]) => (
             <div className="workflow-step" key={number}>
               <span className="workflow-number">{number}</span>

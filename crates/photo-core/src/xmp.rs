@@ -30,4 +30,20 @@ impl XmpEditState {
             saturation: recipe.adjustments.saturation,
         }
     }
+
+    /// Minimal Lightroom compatible sidecar foundation.
+    ///
+    /// This intentionally keeps RAW untouched and creates only metadata output.
+    pub fn to_xmp_fragment(&self) -> String {
+        format!(
+            "<crs:Exposure2012>{}</crs:Exposure2012>\n<crs:Contrast2012>{}</crs:Contrast2012>\n<crs:Highlights2012>{}</crs:Highlights2012>\n<crs:Shadows2012>{}</crs:Shadows2012>\n<crs:Temperature>{}</crs:Temperature>\n<crs:Tint>{}</crs:Tint>\n<crs:Saturation>{}</crs:Saturation>",
+            self.exposure,
+            self.contrast,
+            self.highlights,
+            self.shadows,
+            self.temperature,
+            self.tint,
+            self.saturation
+        )
+    }
 }

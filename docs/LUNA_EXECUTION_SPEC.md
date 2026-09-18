@@ -189,3 +189,8 @@ For a Photo Group, preserve one shared style intent but resolve photo-specific a
 ## Reference Style Execution Rule
 
 Use the existing `ReferenceSet::color_intent_from_reference` path to turn a selected reference plus `StyleProfile` into `GroupColorIntent`. Then reuse `color_sync` to resolve individual photos and `Recipe::materialize_group` to create target-bound Recipes. Do not bypass this chain with blind preset copying.
+
+
+## Grouping Execution Rule
+
+Preserve the existing two-stage design: use `initial_group_raw_assets` for fast moment grouping, then `refine_group_by_similarity` for portrait/scene refinement. Promote semantic groups through `SemanticPhotoGroup::to_photo_group` before reference/style/Recipe work. Do not add a parallel scene-grouping subsystem.

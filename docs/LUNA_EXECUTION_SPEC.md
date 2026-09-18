@@ -10,7 +10,7 @@ Goal:
 
 Build a personal semi-automatic photography workflow product.
 
-Photo-Cake is not a Lightroom replacement. It prepares intelligent edits and keeps Lightroom compatibility.
+Photo-Cake is not a Lightroom replacement. It prepares intelligent edits, keeps original RAW files, and provides Lightroom-compatible workflows plus optional direct export.
 
 ---
 
@@ -38,7 +38,13 @@ Photo Analysis
     |
 Quality Assessment / Grouping
     |
+Reference Photo Selection
+    |
+Style Analysis
+    |
 Recipe Generation
+    |
+Edit Graph
     |
 +----------------+
 |                |
@@ -49,15 +55,79 @@ Lightroom        JPEG/TIFF
 
 ---
 
-# Core Rules
+# Core Product Rules
 
 - Original RAW files are immutable.
 - RAW + XMP is the default workflow.
 - Do not create large intermediate files automatically.
-- Direct export remains available.
+- Direct export remains available on demand.
 - XMP and export must use the same Recipe model.
 - Prefer working product features over architecture expansion.
-- Do not implement unnecessary cloud, multi-user, or plugin features.
+- Keep the application local-first.
+- Do not add unnecessary cloud, account, multi-user, or plugin features.
+
+---
+
+# Reference Photo Workflow
+
+Photo-Cake must support a reference-based workflow.
+
+Purpose:
+
+Allow the user to select a preferred edited photo and apply the visual intent to similar photos.
+
+Flow:
+
+```
+Reference Photo
+      |
+      v
+Style Analysis
+      |
+      v
+Generate Recipe
+      |
+      v
+Apply to Similar Photo Group
+```
+
+The system should analyze:
+
+- Exposure style
+- White balance
+- Contrast
+- Color characteristics
+- Skin tone preference
+- Lighting style
+
+The goal is consistent batch editing, not copying pixels.
+
+---
+
+# Non-destructive Editing Model
+
+Editing must be represented as editable data.
+
+Architecture:
+
+```
+RAW
+ |
+ v
+Edit Graph
+ |
+ v
+Recipe
+ |
+ +------------+
+ |            |
+ v            v
+XMP        Render Export
+```
+
+Do not directly modify original files.
+
+Future AI features must generate editable intent instead of destructive image replacement.
 
 ---
 
@@ -65,7 +135,7 @@ Lightroom        JPEG/TIFF
 
 Deliver:
 
-- RAW indexing
+- RAW file indexing
 - Metadata extraction
 - Asset database
 - Recipe schema
@@ -73,16 +143,21 @@ Deliver:
 - Direct export framework
 - Validation tests
 
-Completion:
+User acceptance:
 
-A user can process:
+Given:
 
 ```
 IMG.CR3
+```
+
+Photo-Cake can generate:
+
+```
 IMG.XMP
 ```
 
-and open the result in Lightroom.
+and Lightroom can open the RAW with adjustments available.
 
 ---
 
@@ -95,6 +170,16 @@ Deliver:
 - Face quality analysis
 - Similar photo grouping
 - Best photo selection
+- Scene-based grouping
+
+Examples:
+
+- Travel day groups
+- Landscape groups
+- Portrait groups
+- Indoor/outdoor lighting groups
+
+Different groups should be able to receive different Recipes.
 
 ---
 
@@ -105,6 +190,8 @@ Deliver:
 - Reference look analysis
 - AI Retouch Plan
 - Batch recipe application
+- Portrait enhancement planning
+- Lighting adjustment planning
 
 ---
 
@@ -131,6 +218,8 @@ Secondary:
 ```
 JPEG/TIFF export on demand
 ```
+
+Never generate large exports automatically.
 
 ---
 

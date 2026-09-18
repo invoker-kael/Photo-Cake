@@ -69,9 +69,12 @@ export interface BackendPhotoGroup {
   manual_locked: boolean;
 }
 
-export interface BackendRawImportResult {
+export interface BackendPhotoContext {
   assets: BackendRawAsset[];
   groups: BackendPhotoGroup[];
+}
+
+export interface BackendRawImportResult extends BackendPhotoContext {
   batch: BackendBatch | null;
   skipped_non_raw: string[];
 }
@@ -89,6 +92,7 @@ export interface PhotoCakeBridge {
   resumeBatch(batchId: string): Promise<BackendBatch>;
   cancelBatch(batchId: string): Promise<BackendBatch>;
   importRawDirectory?(): Promise<BackendRawImportResult | null>;
+  loadPhotoContext?(batchId: string): Promise<BackendPhotoContext>;
   subscribeBatchUpdates(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }
 

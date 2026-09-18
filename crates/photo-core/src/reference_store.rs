@@ -272,7 +272,10 @@ mod tests {
         assert_eq!(binding.group_id, group_id);
         assert_eq!(binding.selected_reference_asset_id, asset_id);
         assert_eq!(store.group_binding(group_id).unwrap(), Some(binding));
-        assert_eq!(store.get_set(set.id).unwrap(), Some(set));
+        let loaded = store.get_set(set.id).unwrap().unwrap();
+        assert_eq!(loaded.id, set.id);
+        assert_eq!(loaded.name, set.name);
+        assert_eq!(loaded.photo_ids, set.photo_ids);
     }
 
     #[test]

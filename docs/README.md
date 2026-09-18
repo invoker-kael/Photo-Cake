@@ -2,7 +2,7 @@
 
 ## Luna Execution Entry
 
-Luna must read first:
+Luna must read in this order:
 
 1. `LUNA_EXECUTION_SPEC.md`
 2. `PRODUCT_REQUIREMENTS.md`
@@ -13,44 +13,45 @@ Luna must read first:
 
 ---
 
-## Documents
+## Document Roles
 
-### Execution
+### LUNA_EXECUTION_SPEC.md
 
-- `LUNA_EXECUTION_SPEC.md`
+Execution rules:
 
-Defines:
-- implementation rules
-- current execution phase
+- current implementation target
+- development constraints
 - completion criteria
 - scope control
 
-### Product
+### PRODUCT_REQUIREMENTS.md
 
-- `PRODUCT_REQUIREMENTS.md`
+Photography workflow definition:
 
-Defines:
-- photography workflow
-- RAW + XMP workflow
-- Lightroom compatibility
-- AI processing goals
+- RAW workflow
+- smart culling
+- grouping
+- reference style editing
+- Lightroom XMP workflow
+- direct export requirements
 
-### Architecture
+### ARCHITECTURE.md
 
-- `ARCHITECTURE.md`
+Technical implementation:
 
-Defines:
 - system design
-- technical boundaries
-- implementation architecture
+- data model
+- processing pipeline
+- local AI architecture
+- storage and job management
 
-### Roadmap
+### PRODUCT_ROADMAP.md
 
-- `PRODUCT_ROADMAP.md`
+Future evolution:
 
-Defines:
-- future phases
-- long-term evolution
+- development phases
+- feature priorities
+- long-term direction
 
 ---
 
@@ -58,14 +59,16 @@ Defines:
 
 ```
 Read docs
-   |
-Inspect code
-   |
+   ↓
+Inspect implementation
+   ↓
 Implement current phase
-   |
+   ↓
 Test
-   |
-Verify build
-   |
+   ↓
+Build verification
+   ↓
 Deliver
 ```
+
+The product goal is a local semi-automatic photography workflow assistant, not a Lightroom replacement or a generic image converter.

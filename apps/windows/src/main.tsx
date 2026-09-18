@@ -13,6 +13,7 @@ import App, {
   type BackendPhotoContext,
   type BackendRawImportResult,
   type BackendReferenceBinding,
+  type BackendRecipeReviewOverride,
   type BatchWorkerEvent,
   type PhotoCakeBridge,
 } from "@photo-cake/ui";
@@ -51,6 +52,22 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendReferenceBinding>("set_group_reference", { groupId, assetId }),
   clearGroupReference: (groupId) =>
     invoke<void>("clear_group_reference", { groupId }),
+  loadRecipeReviews: (batchId) =>
+    invoke<BackendRecipeReviewOverride[]>("batch_recipe_reviews", { batchId }),
+  setRecipeReview: (
+    assetId,
+    exposureDeltaEv,
+    contrastDelta,
+    saturationDelta,
+  ) =>
+    invoke<BackendRecipeReviewOverride>("set_recipe_review", {
+      assetId,
+      exposureDeltaEv,
+      contrastDelta,
+      saturationDelta,
+    }),
+  clearRecipeReview: (assetId) =>
+    invoke<void>("clear_recipe_review", { assetId }),
   loadReferenceStyles: (batchId) =>
     invoke<BackendGroupReferenceStyle[]>("batch_reference_styles", { batchId }),
   updateReferenceStyle: (

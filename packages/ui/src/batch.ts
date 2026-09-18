@@ -81,10 +81,32 @@ export interface BackendPreviewArtifact {
   preview_url?: string;
 }
 
+export interface BackendRawRational {
+  num: number;
+  denom: number;
+}
+
+export interface BackendRawWhiteBalanceEvidence {
+  as_shot_neutral: [BackendRawRational, BackendRawRational, BackendRawRational] | null;
+  as_shot_white_xy: [BackendRawRational, BackendRawRational] | null;
+}
+
+export interface BackendRawMetadataEvidence {
+  camera_id: string | null;
+  capture_time_ms: number | null;
+  white_balance: BackendRawWhiteBalanceEvidence | null;
+}
+
+export interface BackendAssetMetadataEvidence {
+  asset_id: string;
+  evidence: BackendRawMetadataEvidence;
+}
+
 export interface BackendPhotoContext {
   assets: BackendRawAsset[];
   groups: BackendPhotoGroup[];
   previews?: BackendPreviewArtifact[];
+  metadata?: BackendAssetMetadataEvidence[];
 }
 
 export interface BackendSemanticRefinementReport {

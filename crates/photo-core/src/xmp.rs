@@ -49,6 +49,13 @@ pub enum XmpWriteError {
 
 impl XmpEditState {
     pub fn from_recipe(recipe: &Recipe) -> Self {
+        let (temperature, tint) = recipe
+            .adjustments
+            .temperature
+            .zip(recipe.adjustments.tint)
+            .map(|value| (Some(value.0), Some(value.1)))
+            .unwrap_or((None, None));
+
         Self {
             recipe_id: recipe.id.to_string(),
             target_asset_id: recipe.target_asset_id.map(|id| id.to_string()),
@@ -56,8 +63,8 @@ impl XmpEditState {
             contrast: recipe.adjustments.contrast,
             highlights: recipe.adjustments.highlights,
             shadows: recipe.adjustments.shadows,
-            temperature: recipe.adjustments.temperature,
-            tint: recipe.adjustments.tint,
+            temperature,
+            tint,
             saturation: recipe.adjustments.saturation,
         }
     }
@@ -71,7 +78,7 @@ impl XmpEditState {
         if let Some(target_asset_id) = &self.target_asset_id {
             attributes.push(format!(r#"pc:TargetAssetId="{target_asset_id}""#));
         }
-        if self.temperature.is_some() || self.tint.is_some() {
+        if self.temperature.is_some() && self.tint.is_some() {
             attributes.push(r#"crs:WhiteBalance="Custom""#.to_string());
         }
 
@@ -325,6 +332,19 @@ mod tests {
         assert!(!xmp.contains("crs:Temperature"));
         assert!(!xmp.contains("crs:Tint"));
         assert!(!xmp.contains("crs:WhiteBalance"));
+    }
+
+    #[test]
+    fn partial_white_balance_is_omitted_from_xmp() {
+        let mut source = recipe(Some(Uuid::nil()));
+        source.adjustments.temperature = Some(5700.0);
+        source.adjustments.tint = None;
+
+        let xmp = XmpEditState::from_recipe(&source).to_xmp_document();
+
+        assert!(!xmp.contains("crs:WhiteBalance"));
+        assert!(!xmp.contains("crs:Temperature"));
+        assert!(!xmp.contains("crs:Tint"));
     }
 
     #[test]

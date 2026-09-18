@@ -5,7 +5,7 @@
 //! Lightroom-compatible sidecars without touching source RAW bytes.
 
 use crate::{RawAsset, Recipe};
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -181,9 +181,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let first_path = dir.path().join("IMG_0001.CR3");
         let second_path = dir.path().join("IMG_0002.CR3");
-        fs::write(&first_path, b"raw-one").unwrap();
-        fs::write(&second_path, b"raw-two").unwrap();
-        fs::write(dir.path().join("IMG_0002.xmp"), b"lightroom-edit").unwrap();
+        std::fs::write(&first_path, b"raw-one").unwrap();
+        std::fs::write(&second_path, b"raw-two").unwrap();
+        std::fs::write(dir.path().join("IMG_0002.xmp"), b"lightroom-edit").unwrap();
 
         let first_id = Uuid::new_v4();
         let second_id = Uuid::new_v4();
@@ -219,7 +219,7 @@ mod tests {
         assert!(matches!(error, XmpWriteError::ExistingSidecar(_)));
         assert!(!dir.path().join("IMG_0001.xmp").exists());
         assert_eq!(
-            fs::read(dir.path().join("IMG_0002.xmp")).unwrap(),
+            std::fs::read(dir.path().join("IMG_0002.xmp")).unwrap(),
             b"lightroom-edit"
         );
     }
@@ -229,8 +229,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let first_path = dir.path().join("IMG_0001.CR3");
         let second_path = dir.path().join("IMG_0002.CR3");
-        fs::write(&first_path, b"raw-one").unwrap();
-        fs::write(&second_path, b"raw-two").unwrap();
+        std::fs::write(&first_path, b"raw-one").unwrap();
+        std::fs::write(&second_path, b"raw-two").unwrap();
 
         let first_id = Uuid::new_v4();
         let second_id = Uuid::new_v4();
@@ -257,8 +257,8 @@ mod tests {
             },
         ];
 
-        let before_first = fs::read(&first_path).unwrap();
-        let before_second = fs::read(&second_path).unwrap();
+        let before_first = std::fs::read(&first_path).unwrap();
+        let before_second = std::fs::read(&second_path).unwrap();
         let paths = write_group_sidecars(
             &assets,
             &[recipe(Some(first_id)), recipe(Some(second_id))],
@@ -268,7 +268,7 @@ mod tests {
         assert_eq!(paths.len(), 2);
         assert!(dir.path().join("IMG_0001.xmp").is_file());
         assert!(dir.path().join("IMG_0002.xmp").is_file());
-        assert_eq!(fs::read(&first_path).unwrap(), before_first);
-        assert_eq!(fs::read(&second_path).unwrap(), before_second);
+        assert_eq!(std::fs::read(&first_path).unwrap(), before_first);
+        assert_eq!(std::fs::read(&second_path).unwrap(), before_second);
     }
 }

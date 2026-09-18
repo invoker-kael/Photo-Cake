@@ -41,11 +41,6 @@ jobs:
       - name: Check Windows and Android UI
         run: pnpm check
 
-      - name: Setup Rust for Android contract check
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Check Android companion Rust contract
-        run: cargo check --manifest-path apps/android/src-tauri/Cargo.toml
 
   windows-rust:
     runs-on: windows-latest
@@ -64,6 +59,9 @@ jobs:
 
       - name: Rust tests
         run: cargo test --workspace
+
+      - name: Check Android companion Rust contract
+        run: cargo check --manifest-path apps/android/src-tauri/Cargo.toml
 
       - name: Fetch and verify pinned Windows models
         run: node scripts/fetch-models.mjs windows

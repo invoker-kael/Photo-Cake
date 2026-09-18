@@ -187,3 +187,8 @@ RAW/EXIF extraction is best-effort. When rescanning a known asset, newly availab
 ## Effective Group Addressing Rule
 
 After semantic refinement, downstream workstation actions must treat persisted semantic children as first-class effective groups. Reference selection, Recipe review and Lightroom/XMP handoff must resolve group IDs through `RawCatalog::find_group` or equivalent effective-group-aware APIs; do not fall back to parent-only `list_groups()` lookups.
+
+
+## Semantic Group Identity Rule
+
+Semantic refinement is repeatable, not identity-destructive. Before replacing persisted children, reuse an existing child ID whenever parent scope, semantic kind and member asset set are unchanged. Do not generate a fresh UUID for an equivalent group, because downstream Reference/Style/XMP state is bound to that effective group identity.

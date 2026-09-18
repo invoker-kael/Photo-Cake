@@ -106,6 +106,21 @@ export interface BackendReferenceBinding {
   selected_reference_asset_id: string;
 }
 
+export interface BackendStyleProfile {
+  exposure_bias_ev: number | null;
+  temperature_bias: number | null;
+  tint_bias: number | null;
+  contrast_preference: number | null;
+  saturation_preference: number | null;
+  notes: string | null;
+}
+
+export interface BackendGroupReferenceStyle {
+  group_id: string;
+  reference_set_id: string;
+  style_profile: BackendStyleProfile;
+}
+
 export interface BackendEditAdjustments {
   exposure: number | null;
   contrast: number | null;
@@ -156,6 +171,13 @@ export interface PhotoCakeBridge {
   loadReferenceBindings?(batchId: string): Promise<BackendReferenceBinding[]>;
   setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
   clearGroupReference?(groupId: string): Promise<void>;
+  loadReferenceStyles?(batchId: string): Promise<BackendGroupReferenceStyle[]>;
+  updateReferenceStyle?(
+    groupId: string,
+    exposureBiasEv: number,
+    contrastPreference: number,
+    saturationPreference: number,
+  ): Promise<BackendGroupReferenceStyle>;
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
   writeGroupXmp?(groupId: string): Promise<BackendLightroomHandoffResult>;
   subscribeBatchUpdates(handler: (batch: BackendBatch) => void): Promise<() => void>;

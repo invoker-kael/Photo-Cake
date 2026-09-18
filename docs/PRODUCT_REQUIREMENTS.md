@@ -70,7 +70,9 @@ Reference photo
 
 The reference establishes the desired look. Photo-Cake must adapt exposure/white balance and later semantic/local controls to each target image instead of blindly copying reference numbers.
 
-Multiple reference sets may coexist for different looks/scenes.
+Multiple reference sets may coexist for different looks/scenes. The photographer's selected reference must persist independently from AI suggestions and survive reopening/re-importing the project.
+
+Selecting a reference does not itself imply that edits are applied. Photo-Cake must have reliable measured color/exposure evidence before producing adaptive white-balance adjustments; it must not fabricate a color temperature from a rendered preview merely to populate XMP.
 
 ## Recipe Requirements
 

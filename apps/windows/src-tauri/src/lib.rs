@@ -392,7 +392,7 @@ fn build_companion_snapshot(
     state: State<'_, AppState>,
 ) -> Result<CompanionSnapshot, String> {
     let batch_id = parse_batch_id(&batch_id)?;
-    build_companion_snapshot_core(
+    let snapshot = build_companion_snapshot_core(
         batch_id,
         &state.store,
         &state.catalog,
@@ -403,7 +403,36 @@ fn build_companion_snapshot(
         &state.reference_store,
         0.98,
     )
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+    state
+        .companion_snapshots
+        .save(&snapshot)
+        .map_err(|error| error.to_string())?;
+    Ok(snapshot)
+}
+
+#[tauri::command]
+fn apply_companion_decision_patch(
+    patch: CompanionDecisionPatch,
+    state: State<'_, AppState>,
+) -> Result<CompanionPatchApplyReport, String> {
+    let snapshot = state
+        .companion_snapshots
+        .get(patch.batch_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("no exported companion snapshot for batch {}", patch.batch_id))?;
+    let report = apply_companion_patch_core(
+        &snapshot,
+        &patch,
+        &state.culling_reviews,
+        &state.reference_store,
+    )
+    .map_err(|error| error.to_string())?;
+    state
+        .companion_snapshots
+        .clear(patch.batch_id)
+        .map_err(|error| error.to_string())?;
+    Ok(report)
 }
 
 #[tauri::command]
@@ -1071,6 +1100,7 @@ pub fn run() {
             let metadata_store = RawMetadataStore::open(&database)?;
             let culling_reviews = CullingReviewStore::open(&database)?;
             let reference_store = ReferenceStore::open(&database)?;
+            let companion_snapshots = CompanionSnapshotStore::open(&database)?;
             let recipe_reviews = RecipeReviewStore::open(&database)?;
             let classification_store = ClassificationStore::open(&database)?;
             let analyze_executor = LocalAnalyzeExecutor::new(
@@ -1106,6 +1136,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_batches,
             build_companion_snapshot,
+            apply_companion_decision_patch,
             batch_photo_context,
             refine_batch_groups,
             batch_culling,

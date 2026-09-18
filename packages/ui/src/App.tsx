@@ -19,6 +19,8 @@ import {
   type BackendRecipeReviewBatchResult,
   type BackendRecipeReviewGroupBatchResult,
   type BackendRecipeReviewOverride,
+  type BackendRecipeReviewSyncFields,
+  type BackendRecipeReviewSyncResult,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
   type BackendWorkflowStatus,
@@ -51,6 +53,8 @@ export type {
   BackendRecipeReviewBatchResult,
   BackendRecipeReviewGroupBatchResult,
   BackendRecipeReviewOverride,
+  BackendRecipeReviewSyncFields,
+  BackendRecipeReviewSyncResult,
   BackendReviewRenderResult,
   BackendSemanticRefinementReport,
   BackendWorkflowStatus,
@@ -300,6 +304,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [reviewUpdating, setReviewUpdating] = useState<string | null>(null);
   const [reviewBatchUpdating, setReviewBatchUpdating] = useState(false);
   const [reviewBatchNote, setReviewBatchNote] = useState<string | null>(null);
+  const [reviewSyncSource, setReviewSyncSource] = useState<{ groupId: string; assetId: string } | null>(null);
+  const [reviewSyncTargets, setReviewSyncTargets] = useState<string[]>([]);
+  const [reviewSyncFields, setReviewSyncFields] = useState<BackendRecipeReviewSyncFields>({
+    exposure: true,
+    contrast: true,
+    saturation: true,
+  });
+  const [reviewSyncUpdating, setReviewSyncUpdating] = useState(false);
+  const [reviewSyncNote, setReviewSyncNote] = useState<string | null>(null);
   const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
   const [handoffPreflightErrors, setHandoffPreflightErrors] = useState<Record<string, string>>({});
   const [handoffPreflightLoading, setHandoffPreflightLoading] = useState(false);
@@ -371,6 +384,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setReferenceBatchTargets([]);
     setReferenceBatchNote(null);
     setReviewBatchNote(null);
+    setReviewSyncSource(null);
+    setReviewSyncTargets([]);
+    setReviewSyncFields({ exposure: true, contrast: true, saturation: true });
+    setReviewSyncNote(null);
     setHandoffPreflightErrors({});
     setHandoffBatchTargets([]);
     setHandoffBatchNote(null);
@@ -1329,16 +1346,21 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         contrastDelta,
         saturationDelta,
       );
+      const neutral =
+        Math.abs(review.exposure_delta_ev) <= 0.0001 &&
+        Math.abs(review.contrast_delta) <= 0.0001 &&
+        Math.abs(review.saturation_delta) <= 0.0001;
       setRecipeReviews((current) => {
         const next = { ...current };
-        const neutral =
-          Math.abs(review.exposure_delta_ev) <= 0.0001 &&
-          Math.abs(review.contrast_delta) <= 0.0001 &&
-          Math.abs(review.saturation_delta) <= 0.0001;
         if (neutral) delete next[assetId];
         else next[assetId] = review;
         return next;
       });
+      if (neutral && reviewSyncSource?.assetId === assetId) {
+        setReviewSyncSource(null);
+        setReviewSyncTargets([]);
+        setReviewSyncNote(null);
+      }
       setEditedPreviews((current) => {
         const next = { ...current };
         delete next[assetId];
@@ -1369,6 +1391,71 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     void saveRecipeReview(assetId, exposure, contrast, saturation);
   };
 
+  const syncRecipeReviewException = async () => {
+    if (
+      !bridge?.syncRecipeReviewException ||
+      !reviewSyncSource ||
+      reviewSyncTargets.length === 0 ||
+      !Object.values(reviewSyncFields).some(Boolean)
+    ) {
+      return;
+    }
+
+    setReviewSyncUpdating(true);
+    setReviewSyncNote(null);
+    try {
+      const result: BackendRecipeReviewSyncResult = await bridge.syncRecipeReviewException(
+        reviewSyncSource.groupId,
+        reviewSyncSource.assetId,
+        reviewSyncTargets,
+        reviewSyncFields,
+      );
+      const changedAssetIds = new Set(result.overrides.map((review) => review.asset_id));
+      setRecipeReviews((current) => {
+        const next = { ...current };
+        for (const review of result.overrides) {
+          const neutral =
+            Math.abs(review.exposure_delta_ev) <= 0.0001 &&
+            Math.abs(review.contrast_delta) <= 0.0001 &&
+            Math.abs(review.saturation_delta) <= 0.0001;
+          if (neutral) delete next[review.asset_id];
+          else next[review.asset_id] = review;
+        }
+        return next;
+      });
+      setReferencePreviews((current) => {
+        const preview = current[result.group_id];
+        if (!preview || changedAssetIds.size === 0) return current;
+        return {
+          ...current,
+          [result.group_id]: {
+            ...preview,
+            reviewed_asset_ids: (preview.reviewed_asset_ids ?? []).filter(
+              (assetId) => !changedAssetIds.has(assetId),
+            ),
+          },
+        };
+      });
+      setEditedPreviews((current) => {
+        if (changedAssetIds.size === 0) return current;
+        const next = { ...current };
+        for (const assetId of changedAssetIds) delete next[assetId];
+        return next;
+      });
+      setReviewSyncTargets([]);
+      setReviewSyncNote(
+        result.overrides.length > 0
+          ? `Synced selected exception fields to ${result.overrides.length} photos; changed Recipes returned to Review.`
+          : "Selected photos already had the same exception values.",
+      );
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setReviewSyncUpdating(false);
+    }
+  };
+
   const resetRecipeReview = async (assetId: string) => {
     if (!bridge?.clearRecipeReview) {
       void saveRecipeReview(assetId, 0, 0, 0);
@@ -1387,6 +1474,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         delete next[assetId];
         return next;
       });
+      if (reviewSyncSource?.assetId === assetId) {
+        setReviewSyncSource(null);
+        setReviewSyncTargets([]);
+        setReviewSyncNote(null);
+      }
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -2613,6 +2705,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             className="cull-batch-action"
             disabled={
               reviewBatchUpdating ||
+              reviewSyncSource != null ||
               reviewUpdating != null ||
               !bridge?.confirmRecipeReviewGroups ||
               clearRecipeReviewGroups.length === 0
@@ -2631,6 +2724,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             className="cull-batch-action"
             disabled={
               reviewBatchUpdating ||
+              reviewSyncSource != null ||
               reviewUpdating != null ||
               !bridge?.confirmRecipeReviews ||
               visibleRecipeReviewItems.length === 0
@@ -2683,8 +2777,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           const recipesWithTargets = preview.recipes.filter(
             (recipe) => recipe.target_asset_id != null,
           );
+          const syncingThisGroup = reviewSyncSource?.groupId === group.id;
           const reviewRecipes =
-            reviewViewMode === "ALL"
+            reviewViewMode === "ALL" || syncingThisGroup
               ? recipesWithTargets
               : recipesWithTargets
                   .filter((recipe) => recipeReviewPriority(recipe.target_asset_id!) < 10)
@@ -2750,7 +2845,89 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   )}
                 </div>
               </div>
-              {reviewViewMode === "TRIAGE" && reviewRecipes.length === 0 && (
+              {syncingThisGroup && reviewSyncSource && (
+                <div className="recipe-sync-panel">
+                  <div>
+                    <strong>
+                      Exception source: {assetNames.get(reviewSyncSource.assetId) ?? reviewSyncSource.assetId.slice(0, 8)}
+                    </strong>
+                    <small>
+                      Copy only the selected per-photo delta fields. Adaptive Recipe baselines and group style stay untouched.
+                    </small>
+                  </div>
+                  <div className="recipe-sync-fields" role="group" aria-label="Exception fields to sync">
+                    {([
+                      ["exposure", "Exposure"],
+                      ["contrast", "Contrast"],
+                      ["saturation", "Saturation"],
+                    ] as const).map(([field, label]) => (
+                      <label key={field}>
+                        <input
+                          type="checkbox"
+                          checked={reviewSyncFields[field]}
+                          disabled={reviewSyncUpdating}
+                          onChange={() =>
+                            setReviewSyncFields((current) => ({
+                              ...current,
+                              [field]: !current[field],
+                            }))
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="recipe-sync-actions">
+                    <button
+                      className="cull-batch-action"
+                      disabled={reviewSyncUpdating || recipesWithTargets.length <= 1}
+                      onClick={() =>
+                        setReviewSyncTargets(
+                          recipesWithTargets
+                            .map((recipe) => recipe.target_asset_id!)
+                            .filter((assetId) => assetId !== reviewSyncSource.assetId),
+                        )
+                      }
+                    >
+                      Select group peers ({Math.max(0, recipesWithTargets.length - 1)})
+                    </button>
+                    <button
+                      className="cull-batch-action"
+                      disabled={reviewSyncUpdating || reviewSyncTargets.length === 0}
+                      onClick={() => setReviewSyncTargets([])}
+                    >
+                      Clear targets
+                    </button>
+                    <button
+                      className="button primary"
+                      disabled={
+                        reviewSyncUpdating ||
+                        reviewSyncTargets.length === 0 ||
+                        !Object.values(reviewSyncFields).some(Boolean) ||
+                        !bridge?.syncRecipeReviewException
+                      }
+                      onClick={() => void syncRecipeReviewException()}
+                    >
+                      {reviewSyncUpdating
+                        ? "Syncing exception…"
+                        : `Apply to selected (${reviewSyncTargets.length})`}
+                    </button>
+                    <button
+                      className="cull-batch-action"
+                      disabled={reviewSyncUpdating}
+                      onClick={() => {
+                        setReviewSyncSource(null);
+                        setReviewSyncTargets([]);
+                        setReviewSyncNote(null);
+                      }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                  {reviewSyncNote && <small className="success-text">{reviewSyncNote}</small>}
+                </div>
+              )}
+              {reviewViewMode === "TRIAGE" && !syncingThisGroup && reviewRecipes.length === 0 && (
                 <div className="panel-note">
                   Recipe triage is clear for this group. Switch to All for a full visual pass.
                 </div>
@@ -2762,8 +2939,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   const review = recipeReviews[assetId];
                   const reviewed = reviewedRecipeAssetIds.has(assetId);
                   const updating = reviewUpdating === assetId;
+                  const isSyncSource =
+                    syncingThisGroup && reviewSyncSource?.assetId === assetId;
+                  const isSyncTarget =
+                    syncingThisGroup && reviewSyncTargets.includes(assetId);
                   return (
-                    <article className="recipe-review-card" key={recipe.id}>
+                    <article
+                      className={`recipe-review-card ${isSyncSource ? "sync-source" : ""} ${isSyncTarget ? "sync-target" : ""}`}
+                      key={recipe.id}
+                    >
                       <div className="recipe-compare">
                         <div className="recipe-compare-pane">
                           <small>Before</small>
@@ -2790,7 +2974,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           ) : (
                             <button
                               className="recipe-preview-button"
-                              disabled={updating || reviewBatchUpdating || !bridge?.renderRecipePreview}
+                              disabled={updating || reviewBatchUpdating || reviewSyncUpdating || !bridge?.renderRecipePreview}
                               onClick={() => void renderEditedPreview(group.id, assetId)}
                             >
                               {updating ? "Rendering…" : "Render edited preview"}
@@ -2812,39 +2996,70 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       <div className="recipe-review-controls">
                         <div className="mini-adjust">
                           <span>Exposure</span>
-                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "exposure", -0.1)}>−</button>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "exposure", -0.1)}>−</button>
                           <strong>{signed(review?.exposure_delta_ev ?? 0)} EV</strong>
-                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "exposure", 0.1)}>+</button>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "exposure", 0.1)}>+</button>
                         </div>
                         <div className="mini-adjust">
                           <span>Contrast</span>
-                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "contrast", -5)}>−</button>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "contrast", -5)}>−</button>
                           <strong>{signed(review?.contrast_delta ?? 0, 0)}</strong>
-                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "contrast", 5)}>+</button>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "contrast", 5)}>+</button>
                         </div>
                         <div className="mini-adjust">
                           <span>Saturation</span>
-                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "saturation", -5)}>−</button>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "saturation", -5)}>−</button>
                           <strong>{signed(review?.saturation_delta ?? 0, 0)}</strong>
-                          <button disabled={updating || reviewBatchUpdating} onClick={() => adjustRecipeReview(assetId, "saturation", 5)}>+</button>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "saturation", 5)}>+</button>
                         </div>
                       </div>
                       <div className="recipe-review-actions">
+                        {syncingThisGroup && !isSyncSource && (
+                          <label className="recipe-sync-target">
+                            <input
+                              type="checkbox"
+                              checked={isSyncTarget}
+                              disabled={reviewSyncUpdating}
+                              onChange={() =>
+                                setReviewSyncTargets((current) =>
+                                  current.includes(assetId)
+                                    ? current.filter((value) => value !== assetId)
+                                    : [...current, assetId],
+                                )
+                              }
+                            />
+                            <span>Sync target</span>
+                          </label>
+                        )}
                         <button
                           className={`review-choice ${reviewed ? "clear" : "keep"}`}
-                          disabled={updating || reviewBatchUpdating}
+                          disabled={updating || reviewBatchUpdating || reviewSyncUpdating}
                           onClick={() => void setRecipeReviewed(group.id, assetId, !reviewed)}
                         >
                           {reviewed ? "Reopen review" : "Looks good"}
                         </button>
                         {review && (
-                          <button
-                            className="review-choice clear recipe-reset"
-                            disabled={updating || reviewBatchUpdating}
-                            onClick={() => void resetRecipeReview(assetId)}
-                          >
-                            Clear exception
-                          </button>
+                          <>
+                            <button
+                              className={`review-choice clear ${isSyncSource ? "active-sync-source" : ""}`}
+                              disabled={updating || reviewBatchUpdating || reviewSyncUpdating}
+                              onClick={() => {
+                                setReviewSyncSource({ groupId: group.id, assetId });
+                                setReviewSyncTargets([]);
+                                setReviewSyncFields({ exposure: true, contrast: true, saturation: true });
+                                setReviewSyncNote(null);
+                              }}
+                            >
+                              {isSyncSource ? "Exception source" : "Sync this exception"}
+                            </button>
+                            <button
+                              className="review-choice clear recipe-reset"
+                              disabled={updating || reviewBatchUpdating || reviewSyncUpdating}
+                              onClick={() => void resetRecipeReview(assetId)}
+                            >
+                              Clear exception
+                            </button>
+                          </>
                         )}
                       </div>
                     </article>

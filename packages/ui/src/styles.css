@@ -674,6 +674,27 @@ h2 { font-size: 19px; }
   border-radius: 8px;
   background: #171b1d;
 }
+.recipe-review-card.sync-source { border-color: #536b5a; box-shadow: inset 0 0 0 1px #263a2c; }
+.recipe-review-card.sync-target { border-color: #57533e; box-shadow: inset 0 0 0 1px #36321f; }
+.recipe-sync-panel {
+  display: grid;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #2b3033;
+  background: #14191b;
+}
+.recipe-sync-panel > div:first-child { display: grid; gap: 4px; }
+.recipe-sync-panel small { color: #7d868b; font-size: 10px; line-height: 1.4; }
+.recipe-sync-fields, .recipe-sync-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.recipe-sync-fields label, .recipe-sync-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #929b9f;
+  font-size: 9px;
+}
+.recipe-sync-fields input, .recipe-sync-target input { margin: 0; }
+.active-sync-source { border-color: #536b5a !important; color: #bfd4c3 !important; }
 .recipe-review-image,
 .recipe-review-placeholder {
   width: 100%;

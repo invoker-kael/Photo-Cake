@@ -354,3 +354,17 @@ XMP preflight is resilient per group. One unreadable or otherwise failing group 
 Preflight now reports missing sidecars explicitly instead of inferring them only from total-current-conflict arithmetic. Core XMP target classification defines current, missing and conflict states once and is reused by the Windows bridge, keeping UI delivery counts tied to the same non-destructive sidecar truth used by write-time validation.
 
 This mirrors the useful batch-production principle of processing normal, homogeneous work together while isolating exceptional cases for focused review. Photo-Cake still does not overwrite existing conflicting XMP and does not auto-deliver attention groups.
+
+### Selective per-photo exception synchronization
+
+Repeated exceptions inside one honest photography group should not require re-entering the same small correction photo by photo. Recipe Review can therefore use a saved per-photo exception as a source and explicitly synchronize selected exception fields to selected peer photos in the same group.
+
+Synchronization is deliberately narrower than copying a final Recipe. Only the existing per-photo delta layer can move, currently Exposure, Contrast and Saturation. The target photo keeps its own adaptive Recipe baseline, Reference lineage, group StyleProfile, measured evidence and any unselected exception fields. This preserves Photo-Cake's adaptive model while still making burst sequences, repeated backlight frames and similar family/travel shots efficient to correct.
+
+The photographer chooses the source photo, chooses which delta fields may synchronize, and chooses target photos. While synchronization is active the group temporarily exposes all deliverable Recipes so clear peers can be selected without abandoning exception-first Triage. A convenience action may select all deliverable peers, but the final write remains explicit.
+
+The workstation re-resolves the current editable group before any write. The source must still have a persisted exception, every target must still be a non-Reject target-bound Recipe in the same group, duplicate targets and source-as-target are rejected, and all changed target overrides commit in one SQLite transaction. Existing target exception fields that were not selected are preserved.
+
+Any changed target Recipe loses its current review state through the existing fingerprint contract and returns to Review. Edited previews are invalidated and Lightroom delivery is recalculated from the changed canonical Recipes. This makes synchronization a fast way to create a small exception cohort, not a shortcut around quality review.
+
+The interaction borrows the useful standard-photo/selective-sync pattern of mature batch editors, but does not introduce a preset-copy engine or allow exception deltas to cross group boundaries.

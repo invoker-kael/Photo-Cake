@@ -22,6 +22,8 @@ import App, {
   type BackendRecipeReviewBatchResult,
   type BackendRecipeReviewGroupBatchResult,
   type BackendRecipeReviewOverride,
+  type BackendRecipeReviewSyncFields,
+  type BackendRecipeReviewSyncResult,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
   type BackendWorkflowStatus,
@@ -108,6 +110,18 @@ const bridge: PhotoCakeBridge = {
       exposureDeltaEv,
       contrastDelta,
       saturationDelta,
+    }),
+  syncRecipeReviewException: (
+    groupId,
+    sourceAssetId,
+    targetAssetIds,
+    fields: BackendRecipeReviewSyncFields,
+  ) =>
+    invoke<BackendRecipeReviewSyncResult>("sync_recipe_review_exception", {
+      groupId,
+      sourceAssetId,
+      targetAssetIds,
+      fields,
     }),
   clearRecipeReview: (assetId) =>
     invoke<void>("clear_recipe_review", { assetId }),

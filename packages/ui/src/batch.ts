@@ -281,6 +281,18 @@ export interface BackendRecipeReviewBatchResult {
   asset_ids: string[];
 }
 
+export interface BackendRecipeReviewSyncFields {
+  exposure: boolean;
+  contrast: boolean;
+  saturation: boolean;
+}
+
+export interface BackendRecipeReviewSyncResult {
+  group_id: string;
+  source_asset_id: string;
+  overrides: BackendRecipeReviewOverride[];
+}
+
 export interface BackendRecipeReviewGroupBatchResult {
   group_ids: string[];
   asset_ids: string[];
@@ -335,6 +347,12 @@ export interface PhotoCakeBridge {
     contrastDelta: number,
     saturationDelta: number,
   ): Promise<BackendRecipeReviewOverride>;
+  syncRecipeReviewException?(
+    groupId: string,
+    sourceAssetId: string,
+    targetAssetIds: string[],
+    fields: BackendRecipeReviewSyncFields,
+  ): Promise<BackendRecipeReviewSyncResult>;
   clearRecipeReview?(assetId: string): Promise<void>;
   setRecipeReviewed?(groupId: string, assetId: string): Promise<void>;
   confirmRecipeReviews?(items: BackendRecipeReviewBatchItem[]): Promise<BackendRecipeReviewBatchResult>;

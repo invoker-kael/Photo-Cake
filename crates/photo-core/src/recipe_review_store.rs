@@ -50,6 +50,19 @@ pub fn recipe_review_fingerprint(
     Ok(stable_fingerprint(&serde_json::to_vec(&payload)?))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecipeReviewSyncFields {
+    pub exposure: bool,
+    pub contrast: bool,
+    pub saturation: bool,
+}
+
+impl RecipeReviewSyncFields {
+    pub fn any(self) -> bool {
+        self.exposure || self.contrast || self.saturation
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecipeReviewOverride {
     pub asset_id: Uuid,
@@ -72,6 +85,31 @@ impl RecipeReviewOverride {
         self.exposure_delta_ev.abs() <= NEUTRAL_EPSILON
             && self.contrast_delta.abs() <= NEUTRAL_EPSILON
             && self.saturation_delta.abs() <= NEUTRAL_EPSILON
+    }
+
+    pub fn copy_selected_to(
+        &self,
+        target: &RecipeReviewOverride,
+        fields: RecipeReviewSyncFields,
+    ) -> RecipeReviewOverride {
+        RecipeReviewOverride {
+            asset_id: target.asset_id,
+            exposure_delta_ev: if fields.exposure {
+                self.exposure_delta_ev
+            } else {
+                target.exposure_delta_ev
+            },
+            contrast_delta: if fields.contrast {
+                self.contrast_delta
+            } else {
+                target.contrast_delta
+            },
+            saturation_delta: if fields.saturation {
+                self.saturation_delta
+            } else {
+                target.saturation_delta
+            },
+        }
     }
 
     pub fn apply_to_recipe(&self, recipe: &mut Recipe) -> Result<(), RecipeReviewStoreError> {
@@ -120,6 +158,8 @@ pub enum RecipeReviewStoreError {
     Uuid(#[from] uuid::Error),
     #[error("recipe {0} is not bound to a target asset")]
     RecipeMissingTarget(Uuid),
+    #[error("duplicate recipe review override for asset {0}")]
+    DuplicateOverride(Uuid),
     #[error("duplicate recipe review confirmation for asset {0}")]
     DuplicateConfirmation(Uuid),
     #[error(
@@ -156,31 +196,63 @@ impl RecipeReviewStore {
 
     pub fn set(
         &self,
-        mut review: RecipeReviewOverride,
+        review: RecipeReviewOverride,
     ) -> Result<RecipeReviewOverride, RecipeReviewStoreError> {
-        review.exposure_delta_ev = review.exposure_delta_ev.clamp(-3.0, 3.0);
-        review.contrast_delta = review.contrast_delta.clamp(-100.0, 100.0);
-        review.saturation_delta = review.saturation_delta.clamp(-100.0, 100.0);
+        Ok(self
+            .set_many(std::slice::from_ref(&review))?
+            .pop()
+            .expect("single review override must produce one result"))
+    }
 
-        if review.is_neutral() {
-            self.clear(review.asset_id)?;
-            return Ok(review);
+    pub fn set_many(
+        &self,
+        reviews: &[RecipeReviewOverride],
+    ) -> Result<Vec<RecipeReviewOverride>, RecipeReviewStoreError> {
+        if reviews.is_empty() {
+            return Ok(Vec::new());
         }
 
-        let conn = self.connect()?;
-        conn.execute(
-            "INSERT INTO recipe_review_overrides (asset_id, override_json, updated_at_unix_ms)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(asset_id) DO UPDATE SET
-                 override_json = excluded.override_json,
-                 updated_at_unix_ms = excluded.updated_at_unix_ms",
-            params![
-                review.asset_id.to_string(),
-                serde_json::to_string(&review)?,
-                unix_time_ms()
-            ],
-        )?;
-        Ok(review)
+        let mut seen = HashSet::with_capacity(reviews.len());
+        let mut prepared = Vec::with_capacity(reviews.len());
+        for review in reviews {
+            if !seen.insert(review.asset_id) {
+                return Err(RecipeReviewStoreError::DuplicateOverride(review.asset_id));
+            }
+            let mut normalized = review.clone();
+            normalized.exposure_delta_ev = normalized.exposure_delta_ev.clamp(-3.0, 3.0);
+            normalized.contrast_delta = normalized.contrast_delta.clamp(-100.0, 100.0);
+            normalized.saturation_delta = normalized.saturation_delta.clamp(-100.0, 100.0);
+            let json = if normalized.is_neutral() {
+                None
+            } else {
+                Some(serde_json::to_string(&normalized)?)
+            };
+            prepared.push((normalized, json));
+        }
+
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        let updated_at = unix_time_ms();
+        for (review, json) in &prepared {
+            if let Some(json) = json {
+                tx.execute(
+                    "INSERT INTO recipe_review_overrides (asset_id, override_json, updated_at_unix_ms)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(asset_id) DO UPDATE SET
+                         override_json = excluded.override_json,
+                         updated_at_unix_ms = excluded.updated_at_unix_ms",
+                    params![review.asset_id.to_string(), json, updated_at],
+                )?;
+            } else {
+                tx.execute(
+                    "DELETE FROM recipe_review_overrides WHERE asset_id = ?1",
+                    [review.asset_id.to_string()],
+                )?;
+            }
+        }
+        tx.commit()?;
+
+        Ok(prepared.into_iter().map(|(review, _)| review).collect())
     }
 
     pub fn get(
@@ -412,6 +484,89 @@ mod tests {
             .set(RecipeReviewOverride::neutral(asset_id))
             .unwrap();
 
+        assert!(store.get(asset_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn selected_exception_fields_copy_without_replacing_target_baseline_delta() {
+        let source = RecipeReviewOverride {
+            asset_id: Uuid::new_v4(),
+            exposure_delta_ev: 0.35,
+            contrast_delta: 10.0,
+            saturation_delta: -4.0,
+        };
+        let target_id = Uuid::new_v4();
+        let target = RecipeReviewOverride {
+            asset_id: target_id,
+            exposure_delta_ev: -0.1,
+            contrast_delta: 3.0,
+            saturation_delta: 7.0,
+        };
+
+        let copied = source.copy_selected_to(
+            &target,
+            RecipeReviewSyncFields {
+                exposure: true,
+                contrast: false,
+                saturation: true,
+            },
+        );
+
+        assert_eq!(copied.asset_id, target_id);
+        assert_eq!(copied.exposure_delta_ev, 0.35);
+        assert_eq!(copied.contrast_delta, 3.0);
+        assert_eq!(copied.saturation_delta, -4.0);
+    }
+
+    #[test]
+    fn batch_overrides_commit_and_neutral_targets_clear_transactionally() {
+        let dir = tempdir().unwrap();
+        let store = RecipeReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+
+        store
+            .set(RecipeReviewOverride {
+                asset_id: second_id,
+                exposure_delta_ev: 0.2,
+                contrast_delta: 0.0,
+                saturation_delta: 0.0,
+            })
+            .unwrap();
+
+        let result = store
+            .set_many(&[
+                RecipeReviewOverride {
+                    asset_id: first_id,
+                    exposure_delta_ev: 0.3,
+                    contrast_delta: 5.0,
+                    saturation_delta: 0.0,
+                },
+                RecipeReviewOverride::neutral(second_id),
+            ])
+            .unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(store.get(first_id).unwrap().is_some());
+        assert!(store.get(second_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn duplicate_batch_override_is_rejected_before_any_write() {
+        let dir = tempdir().unwrap();
+        let store = RecipeReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let asset_id = Uuid::new_v4();
+        let review = RecipeReviewOverride {
+            asset_id,
+            exposure_delta_ev: 0.25,
+            contrast_delta: 0.0,
+            saturation_delta: 0.0,
+        };
+
+        assert!(matches!(
+            store.set_many(&[review.clone(), review]).unwrap_err(),
+            RecipeReviewStoreError::DuplicateOverride(id) if id == asset_id
+        ));
         assert!(store.get(asset_id).unwrap().is_none());
     }
 

@@ -10,7 +10,7 @@ use photo_core::{
     GroupCullingResult, GroupReferenceBinding, JobStatus, ModelBundleManifest, ModelPlatform,
     PhotoGroup, PreviewArtifact, PreviewStore, RawAsset, RawCatalog, RawImportResult, RawImporter,
     RawMetadataStore, Recipe, RecipeReviewOverride, RecipeReviewSignal, RecipeReviewStore,
-    ReferenceStore,
+    RecipeReviewSyncFields, ReferenceStore,
     ReferenceWorkflowError, RunStep, SemanticGroupingConfig, SemanticRefinementReport,
     StyleProfile, WorkflowFacts, WorkflowStatus,
 };
@@ -120,6 +120,13 @@ struct RecipeReviewBatchResult {
 struct RecipeReviewGroupBatchResult {
     group_ids: Vec<Uuid>,
     asset_ids: Vec<Uuid>,
+}
+
+#[derive(Clone, Serialize)]
+struct RecipeReviewSyncResult {
+    group_id: Uuid,
+    source_asset_id: Uuid,
+    overrides: Vec<RecipeReviewOverride>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -1158,6 +1165,82 @@ fn set_recipe_review(
 }
 
 #[tauri::command]
+fn sync_recipe_review_exception(
+    group_id: String,
+    source_asset_id: String,
+    target_asset_ids: Vec<String>,
+    fields: RecipeReviewSyncFields,
+    state: State<'_, AppState>,
+) -> Result<RecipeReviewSyncResult, String> {
+    if !fields.any() {
+        return Err("select at least one Recipe exception field to sync".to_string());
+    }
+    if target_asset_ids.is_empty() {
+        return Err("no target photos selected for Recipe exception sync".to_string());
+    }
+
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let source_asset_id = Uuid::parse_str(&source_asset_id)
+        .map_err(|error| format!("invalid source asset id: {error}"))?;
+
+    let (editable, recipes) = resolve_reviewed_group_recipes(group_id, &state)?;
+    let recipe_asset_ids = recipes
+        .iter()
+        .filter_map(|recipe| recipe.target_asset_id)
+        .collect::<HashSet<_>>();
+    if !editable.asset_ids.contains(&source_asset_id) || !recipe_asset_ids.contains(&source_asset_id) {
+        return Err("exception source is not an editable Recipe in this group".to_string());
+    }
+    let source = state
+        .recipe_reviews
+        .get(source_asset_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "save a per-photo exception before using it as a sync source".to_string())?;
+
+    let mut seen = HashSet::with_capacity(target_asset_ids.len());
+    let mut updates = Vec::with_capacity(target_asset_ids.len());
+    for value in target_asset_ids {
+        let target_asset_id = Uuid::parse_str(&value)
+            .map_err(|error| format!("invalid target asset id: {error}"))?;
+        if target_asset_id == source_asset_id {
+            return Err("exception source cannot also be a sync target".to_string());
+        }
+        if !seen.insert(target_asset_id) {
+            return Err(format!("duplicate Recipe exception sync target: {target_asset_id}"));
+        }
+        if !editable.asset_ids.contains(&target_asset_id) || !recipe_asset_ids.contains(&target_asset_id) {
+            return Err(format!(
+                "photo {target_asset_id} is not an editable Recipe in group {group_id}"
+            ));
+        }
+
+        let existing = state
+            .recipe_reviews
+            .get(target_asset_id)
+            .map_err(|error| error.to_string())?;
+        let target = existing
+            .clone()
+            .unwrap_or_else(|| RecipeReviewOverride::neutral(target_asset_id));
+        let synced = source.copy_selected_to(&target, fields);
+        if existing.as_ref() != Some(&synced) && !(existing.is_none() && synced.is_neutral()) {
+            updates.push(synced);
+        }
+    }
+
+    let overrides = state
+        .recipe_reviews
+        .set_many(&updates)
+        .map_err(|error| error.to_string())?;
+
+    Ok(RecipeReviewSyncResult {
+        group_id,
+        source_asset_id,
+        overrides,
+    })
+}
+
+#[tauri::command]
 fn clear_recipe_review(
     asset_id: String,
     state: State<'_, AppState>,
@@ -1996,6 +2079,7 @@ pub fn run() {
             clear_group_reference,
             batch_recipe_reviews,
             set_recipe_review,
+            sync_recipe_review_exception,
             clear_recipe_review,
             batch_reference_styles,
             update_group_reference_style,

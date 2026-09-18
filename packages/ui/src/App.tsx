@@ -633,9 +633,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       setRecipeReviews((current) => {
         const next = { ...current };
         const neutral =
-          Math.abs(review.exposure_delta_ev) <= Number.EPSILON &&
-          Math.abs(review.contrast_delta) <= Number.EPSILON &&
-          Math.abs(review.saturation_delta) <= Number.EPSILON;
+          Math.abs(review.exposure_delta_ev) <= 0.0001 &&
+          Math.abs(review.contrast_delta) <= 0.0001 &&
+          Math.abs(review.saturation_delta) <= 0.0001;
         if (neutral) delete next[assetId];
         else next[assetId] = review;
         return next;

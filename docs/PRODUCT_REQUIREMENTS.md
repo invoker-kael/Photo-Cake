@@ -134,3 +134,8 @@ On Windows, the user can choose an existing RAW folder with the native folder pi
 ## Culling Evidence Behavior
 
 Technical culling starts from locally measured preview evidence: sharpness/blur and severe exposure quality. Existing embeddings are reused for near-duplicate/burst ranking inside the same photo group. Expression, composition and other semantic quality dimensions are only added when dedicated evidence exists; Photo-Cake must not fabricate those scores. The workstation shows pending items while analysis is incomplete.
+
+
+## Photographer Culling Decisions
+
+AI culling remains advisory. The workstation separates the suggested decision from the photographer's saved decision. The photographer can mark Keep, Review or Reject, clear that override to return to the suggestion, and re-import the same RAW without losing the decision because it is stored against the stable asset ID. Reject is workflow state only; it never deletes the RAW.

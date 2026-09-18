@@ -403,7 +403,7 @@ fn companion_source_path(batch_id: Uuid, asset: &CompanionAsset) -> String {
     format!(
         "companion://{batch_id}/{}/{}",
         asset.id,
-        asset.filename.replace(['/', '\\'], "_")
+        asset.filename.replace('/', "_").replace('\\', "_")
     )
 }
 

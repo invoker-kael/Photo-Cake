@@ -6,30 +6,33 @@ This document is the execution authority for Luna.
 
 Photo-Cake is a local-first semi-automatic photography workflow assistant.
 
-The goal is not to replace Lightroom or create a generic image editor. The goal is to reduce repetitive photographer work while preserving RAW, Lightroom compatibility, and user control.
+The target workflow is:
 
-Existing code must be reused whenever it matches the workflow. Do not rebuild working modules without technical necessity.
+```text
+RAW Collection
+    |
+Catalog
+    |
+Preview + Metadata
+    |
+Smart Culling
+    |
+Photo Group
+    |
+Reference Style
+    |
+Recipe
+    |
+XMP / Export
+```
 
----
-
-## Execution Order
-
-1. Read this document
-2. Read product requirements
-3. Read architecture
-4. Inspect existing code and reusable modules
-5. Implement the smallest complete photography workflow increment
-6. Test
-7. Build verification
-8. Continue current phase
+The goal is not to replace Lightroom. The goal is to reduce repetitive photographer work while preserving RAW files, Lightroom compatibility, and user control.
 
 ---
 
 ## Existing Code First
 
-The current repository already contains reusable foundations.
-
-Primary reuse targets:
+Reuse current implementation before creating new systems.
 
 ```text
 photo-core
@@ -38,150 +41,95 @@ photo-core
  +-- importer
  +-- raw
  +-- metadata
- +-- grouping
- +-- analysis
  +-- preview
+ +-- grouping
+ +-- culling
  +-- recipe/edit model
  +-- export
 
 photo-inference
  |
- +-- local models
- +-- embedding
+ +-- analysis
+ +-- similarity
  +-- segmentation
- +-- image analysis
+ +-- future style/culling models
 ```
 
 Rules:
 
-- Extend existing modules first.
-- Avoid parallel implementations.
-- Keep shared logic platform independent.
+- Extend existing modules.
+- Keep workflow logic platform independent.
+- Do not rebuild working capabilities.
+- Do not make export the source of truth.
 
 ---
 
 ## Platform Strategy
 
-### Windows
+Windows:
 
-Primary photography workstation:
-
-- Large RAW collections
+- Main RAW workstation
+- Large photo libraries
 - Batch processing
-- Lightroom workflow
-- XMP generation
+- Lightroom XMP workflow
 - GPU acceleration
 
-### Android
+Android:
 
-Photography companion:
-
+- Companion workflow
 - Photo selection
 - Reference photo selection
 - Preview
-- Lightweight analysis
 
-Android must reuse shared workflow models instead of duplicating processing logic.
+Shared models and workflow logic must remain in core layers.
 
 ---
 
-## Photography Workflow Priority
-
-The product follows this order:
+## Development Priority
 
 ```text
-RAW Import
- |
-Catalog
- |
-Metadata / Preview
- |
-Smart Culling
- |
-Photo Grouping
- |
-Reference Style Analysis
- |
-Recipe Generation
- |
-Review
- |
-+-------------+
-|             |
-XMP           Export
-|
-Lightroom     JPEG/TIFF
-```
-
----
-
-## Core Rules
-
-- RAW files are immutable.
-- RAW + XMP is the primary workflow.
-- Recipe is the unified editing decision model.
-- XMP and export must use the same Recipe.
-- Do not create unnecessary large intermediate files.
-- Local-first operation is preferred.
-- AI provides editing decisions, not destructive replacement.
-
----
-
-## Current Development Focus
-
-Priority order:
-
-```text
-1. Catalog foundation
-2. RAW asset management
-3. Preview foundation
-4. Photo Group model
-5. Smart Culling foundation
-6. Recipe model
-7. XMP output
+1. Catalog and asset foundation
+2. Preview and metadata
+3. Photo Group model
+4. Smart Culling foundation
+5. Reference Style model
+6. Recipe/Edit Graph
+7. XMP generation
 8. Direct export
 ```
 
 ---
 
-## Phase 1 Acceptance
+## Non Destructive Rules
 
-A complete minimal photographer workflow must exist:
+- RAW files are immutable.
+- XMP is the primary Lightroom bridge.
+- Recipe is the unified editing decision format.
+- Export and Lightroom use the same Recipe.
+- Never delete photos automatically.
+- AI only suggests decisions unless explicitly approved.
+
+---
+
+## Phase 1 Acceptance
 
 Input:
 
 ```text
-IMG.CR3
-```
-
-Process:
-
-```text
-Import
-Metadata
-Preview
-Group
-Recipe
+RAW photo collection
 ```
 
 Output:
 
 ```text
-IMG.XMP
+Catalog
+Preview
+Grouping foundation
+Recipe
+XMP
 ```
 
-Lightroom can open the RAW file and apply the generated adjustments.
-
----
-
-## Do Not Prioritize Early
-
-- Full RAW replacement engine
-- Lightroom database modification
-- Lightroom plugin
-- Cloud AI service
-- Social/account features
-- Rewriting reusable code
+The user can continue editing in Lightroom.
 
 ---
 
@@ -189,8 +137,8 @@ Lightroom can open the RAW file and apply the generated adjustments.
 
 A task is complete when:
 
-- It improves the photographer workflow.
-- Existing architecture is respected.
+- It improves photographer workflow.
+- Existing architecture is reused.
 - Implementation exists.
 - Tests pass.
 - Build succeeds.

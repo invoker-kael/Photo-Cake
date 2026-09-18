@@ -3,16 +3,19 @@ import {
   demoJobs,
   type BackendBatch,
   type BackendBatchItem,
+  type BackendCullingReview,
   type BackendGroupCullingResult,
   type BackendPhotoContext,
   type BatchJob,
   type BatchStage,
   type CullingDecision,
+  type CullingUserDecision,
   type PhotoCakeBridge,
 } from "./batch";
 
 export type {
   BackendBatch,
+  BackendCullingReview,
   BackendGroupCullingResult,
   BackendPhotoContext,
   BackendRawImportResult,
@@ -70,6 +73,11 @@ function cullingLabel(decision: CullingDecision) {
   return decision === "KEEP" ? "Keep" : "Review";
 }
 
+function userDecisionLabel(decision: CullingUserDecision) {
+  if (decision === "REJECT") return "Reject";
+  return decision === "KEEP" ? "Keep" : "Review";
+}
+
 function JobRow({ job }: { job: BatchJob }) {
   return (
     <div className="job-row">
@@ -114,6 +122,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [importing, setImporting] = useState(false);
   const [photoContext, setPhotoContext] = useState<BackendPhotoContext | null>(null);
   const [culling, setCulling] = useState<BackendGroupCullingResult[]>([]);
+  const [cullingReviews, setCullingReviews] = useState<Record<string, CullingUserDecision>>({});
   const [cullingLoading, setCullingLoading] = useState(false);
 
   useEffect(() => {
@@ -217,6 +226,30 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     };
   }, [activeBatchId, analysisRevision, bridge]);
 
+  useEffect(() => {
+    if (!bridge?.loadCullingReviews || !activeBatchId) {
+      setCullingReviews({});
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadCullingReviews(activeBatchId)
+      .then((reviews) => {
+        if (disposed) return;
+        setCullingReviews(
+          Object.fromEntries(reviews.map((review) => [review.asset_id, review.decision])),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeBatchId, bridge]);
+
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
     [activeBatch, bridge, demoState],
@@ -233,13 +266,19 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   const cullingSummary = useMemo(() => {
     const recommendations = culling.flatMap((group) => group.recommendations);
+    const effective = recommendations.map((item) => {
+      const user = cullingReviews[item.asset_id];
+      if (user) return user;
+      return item.decision === "REJECT_SUGGESTION" ? "REJECT" : item.decision;
+    });
     return {
-      keep: recommendations.filter((item) => item.decision === "KEEP").length,
-      review: recommendations.filter((item) => item.decision === "REVIEW").length,
-      reject: recommendations.filter((item) => item.decision === "REJECT_SUGGESTION").length,
+      keep: effective.filter((decision) => decision === "KEEP").length,
+      review: effective.filter((decision) => decision === "REVIEW").length,
+      reject: effective.filter((decision) => decision === "REJECT").length,
       pending: culling.reduce((total, group) => total + group.pending_asset_ids.length, 0),
+      confirmed: Object.keys(cullingReviews).length,
     };
-  }, [culling]);
+  }, [culling, cullingReviews]);
 
   const assetNames = useMemo(
     () => new Map(photoContext?.assets.map((asset) => [asset.id, asset.filename]) ?? []),
@@ -321,6 +360,25 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     }
   };
 
+  const setPhotoDecision = async (
+    assetId: string,
+    decision: CullingUserDecision | null,
+  ) => {
+    if (!bridge?.setCullingReview) return;
+    try {
+      await bridge.setCullingReview(assetId, decision);
+      setCullingReviews((current) => {
+        const next = { ...current };
+        if (decision) next[assetId] = decision;
+        else delete next[assetId];
+        return next;
+      });
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    }
+  };
+
   const renderLibrary = () => (
     <>
       {photoContext && (
@@ -381,8 +439,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       <section className="photo-overview">
         <div className="overview-card"><span>Keep</span><strong>{cullingSummary.keep}</strong></div>
         <div className="overview-card"><span>Review</span><strong>{cullingSummary.review}</strong></div>
-        <div className="overview-card"><span>Reject suggestion</span><strong>{cullingSummary.reject}</strong></div>
-        <div className="overview-card"><span>Pending evidence</span><strong>{cullingSummary.pending}</strong></div>
+        <div className="overview-card"><span>Reject</span><strong>{cullingSummary.reject}</strong></div>
+        <div className="overview-card"><span>Confirmed / pending</span><strong>{cullingSummary.confirmed} / {cullingSummary.pending}</strong></div>
       </section>
 
       <section className="queue-card">
@@ -404,28 +462,73 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 </span>
               </div>
               <div className="cull-list">
-                {group.recommendations.map((item) => (
-                  <div className="cull-row" key={item.asset_id}>
-                    <span className="cull-rank">#{item.group_rank}</span>
-                    <div className="cull-name">
-                      <strong>{assetNames.get(item.asset_id) ?? item.asset_id.slice(0, 8)}</strong>
-                      <small>Quality {Math.round(item.quality_score * 100)}%</small>
+                {group.recommendations.map((item) => {
+                  const userDecision = cullingReviews[item.asset_id];
+                  return (
+                    <div className="cull-row" key={item.asset_id}>
+                      <span className="cull-rank">#{item.group_rank}</span>
+                      <div className="cull-name">
+                        <strong>{assetNames.get(item.asset_id) ?? item.asset_id.slice(0, 8)}</strong>
+                        <small>
+                          Quality {Math.round(item.quality_score * 100)}% · Suggested {cullingLabel(item.decision)}
+                        </small>
+                      </div>
+                      <div className="cull-review-controls">
+                        {(["KEEP", "REVIEW", "REJECT"] as CullingUserDecision[]).map((decision) => (
+                          <button
+                            className={`review-choice ${userDecision === decision ? "active" : ""}`}
+                            key={decision}
+                            onClick={() => void setPhotoDecision(item.asset_id, decision)}
+                          >
+                            {decision === "REJECT" ? "Reject" : decision === "KEEP" ? "Keep" : "Review"}
+                          </button>
+                        ))}
+                        {userDecision && (
+                          <button
+                            className="review-choice clear"
+                            onClick={() => void setPhotoDecision(item.asset_id, null)}
+                          >
+                            Use suggestion
+                          </button>
+                        )}
+                      </div>
+                      <span className={`cull-decision ${userDecision ? "decision-user" : ""}`}>
+                        {userDecision ? `Your: ${userDecisionLabel(userDecision)}` : `AI: ${cullingLabel(item.decision)}`}
+                      </span>
                     </div>
-                    <span className={`cull-decision decision-${item.decision.toLowerCase().replace("_", "-")}`}>
-                      {cullingLabel(item.decision)}
-                    </span>
-                  </div>
-                ))}
-                {group.pending_asset_ids.map((assetId) => (
-                  <div className="cull-row pending" key={assetId}>
-                    <span className="cull-rank">—</span>
-                    <div className="cull-name">
-                      <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
-                      <small>Waiting for local analysis evidence</small>
+                  );
+                })}
+                {group.pending_asset_ids.map((assetId) => {
+                  const userDecision = cullingReviews[assetId];
+                  return (
+                    <div className="cull-row pending" key={assetId}>
+                      <span className="cull-rank">—</span>
+                      <div className="cull-name">
+                        <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
+                        <small>Waiting for local analysis evidence</small>
+                      </div>
+                      <div className="cull-review-controls">
+                        {(["KEEP", "REVIEW", "REJECT"] as CullingUserDecision[]).map((decision) => (
+                          <button
+                            className={`review-choice ${userDecision === decision ? "active" : ""}`}
+                            key={decision}
+                            onClick={() => void setPhotoDecision(assetId, decision)}
+                          >
+                            {decision === "REJECT" ? "Reject" : decision === "KEEP" ? "Keep" : "Review"}
+                          </button>
+                        ))}
+                        {userDecision && (
+                          <button className="review-choice clear" onClick={() => void setPhotoDecision(assetId, null)}>
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <span className="cull-decision">
+                        {userDecision ? `Your: ${userDecisionLabel(userDecision)}` : "Pending"}
+                      </span>
                     </div>
-                    <span className="cull-decision">Pending</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}

@@ -90,7 +90,7 @@ Current/basic controls include:
 
 The model should expand without changing the workflow to support HSL, curves, skin/color preferences, masks and other non-destructive controls.
 
-Every applied target photo has its own Recipe with reference lineage.
+Every applied target photo has its own Recipe with reference lineage. Photographer exceptions are stored as small per-asset additive Recipe review overrides (currently exposure, contrast and saturation) rather than frozen full-Recipe copies, so changing the reference or group StyleProfile can regenerate the base Recipe without losing intentional single-photo corrections.
 
 ## Lightroom Workflow
 
@@ -124,7 +124,7 @@ For a large personal shoot, the user can:
 3. reduce manual review with culling suggestions;
 4. select a preferred look/reference;
 5. have Photo-Cake adapt it across similar photos;
-6. review exceptions rather than every repetitive adjustment;
+6. review exceptions rather than every repetitive adjustment, with persistent per-photo corrections only where needed;
 7. create tiny XMP sidecars for Lightroom or explicitly export final images.
 
 

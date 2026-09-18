@@ -56,6 +56,22 @@ impl RawMetadataStore {
         asset_id: Uuid,
         evidence: &RawMetadataEvidence,
     ) -> Result<(), RawMetadataStoreError> {
+        let merged = match self.get(asset_id)? {
+            Some(existing) => RawMetadataEvidence {
+                camera_id: evidence
+                    .camera_id
+                    .clone()
+                    .or(existing.evidence.camera_id),
+                capture_time_ms: evidence
+                    .capture_time_ms
+                    .or(existing.evidence.capture_time_ms),
+                white_balance: evidence
+                    .white_balance
+                    .clone()
+                    .or(existing.evidence.white_balance),
+            },
+            None => evidence.clone(),
+        };
         let conn = self.connect()?;
         conn.execute(
             "INSERT INTO raw_metadata_evidence (asset_id, evidence_json, updated_at_unix_ms)
@@ -65,7 +81,7 @@ impl RawMetadataStore {
                  updated_at_unix_ms = excluded.updated_at_unix_ms",
             params![
                 asset_id.to_string(),
-                serde_json::to_string(evidence)?,
+                serde_json::to_string(&merged)?,
                 unix_time_ms()
             ],
         )?;
@@ -122,6 +138,38 @@ mod tests {
     use super::*;
     use crate::{RawRational, RawWhiteBalanceEvidence};
     use tempfile::tempdir;
+
+    #[test]
+    fn rescan_does_not_erase_existing_white_balance_evidence() {
+        let dir = tempdir().unwrap();
+        let store = RawMetadataStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let asset_id = Uuid::new_v4();
+        let original = RawMetadataEvidence {
+            camera_id: Some("SONY ILCE-7M4".into()),
+            capture_time_ms: Some(1_800_000_000_000),
+            white_balance: Some(RawWhiteBalanceEvidence {
+                as_shot_neutral: Some([
+                    RawRational { num: 2, denom: 5 },
+                    RawRational { num: 1, denom: 1 },
+                    RawRational { num: 3, denom: 5 },
+                ]),
+                as_shot_white_xy: None,
+            }),
+        };
+        store.save(asset_id, &original).unwrap();
+        store
+            .save(
+                asset_id,
+                &RawMetadataEvidence {
+                    camera_id: None,
+                    capture_time_ms: None,
+                    white_balance: None,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(store.get(asset_id).unwrap().unwrap().evidence, original);
+    }
 
     #[test]
     fn exact_white_balance_evidence_round_trips_by_asset() {

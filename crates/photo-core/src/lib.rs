@@ -22,6 +22,7 @@ pub mod preview;
 pub mod raw;
 pub mod recipe;
 pub mod reference;
+pub mod reference_store;
 pub mod renderer;
 pub mod runner;
 pub mod semantic_grouping;
@@ -86,6 +87,7 @@ pub use raw::{
 };
 pub use recipe::{EditAdjustments, Recipe};
 pub use reference::{ReferenceGroupResult, ReferenceSet, ReferenceWorkflowError, StyleProfile};
+pub use reference_store::{GroupReferenceBinding, ReferenceStore, ReferenceStoreError};
 pub use renderer::ImageExportRenderer;
 pub use runner::{AutomationRunner, NoopStageExecutor, RunStep, RunnerError, StageExecutor};
 pub use semantic_grouping::{

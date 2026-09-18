@@ -118,6 +118,51 @@ impl BatchStore {
         Ok(())
     }
 
+    pub fn replace_batch(&self, batch: &Batch) -> Result<(), StoreError> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO batches (id, name, auto_qa, stop_on_error)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+                 name = excluded.name,
+                 auto_qa = excluded.auto_qa,
+                 stop_on_error = excluded.stop_on_error",
+            params![
+                batch.id.to_string(),
+                batch.name,
+                bool_to_int(batch.auto_qa),
+                bool_to_int(batch.stop_on_error)
+            ],
+        )?;
+        tx.execute(
+            "DELETE FROM batch_items WHERE batch_id = ?1",
+            [batch.id.to_string()],
+        )?;
+
+        for (position, item) in batch.items.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO batch_items
+                 (id, batch_id, position, asset_id, source_path, stage, status, attempts, last_error)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    item.id.to_string(),
+                    batch.id.to_string(),
+                    position as i64,
+                    item.asset_id.map(|id| id.to_string()),
+                    item.source_path,
+                    stage_to_db(item.stage),
+                    status_to_db(item.status),
+                    item.attempts as i64,
+                    item.last_error
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn save_batch_metadata(&self, batch: &Batch) -> Result<(), StoreError> {
         let conn = self.connect()?;
         let changed = conn.execute(
@@ -339,6 +384,37 @@ mod tests {
 
         assert_eq!(loaded.items[0].stage, BatchStage::Analyze);
         assert_eq!(loaded.items[0].status, JobStatus::Pending);
+    }
+
+    #[test]
+    fn replace_batch_is_transactional_upsert_for_companion_hydration() {
+        let dir = tempdir().unwrap();
+        let store = BatchStore::open(dir.path().join("replace.sqlite3")).unwrap();
+        let first_asset = Uuid::new_v4();
+        let second_asset = Uuid::new_v4();
+        let mut batch = Batch::from_imported_assets(
+            "first",
+            vec![(first_asset, "companion://first".to_string())],
+        );
+        store.replace_batch(&batch).unwrap();
+
+        batch.name = "updated".into();
+        batch.items = vec![BatchItem {
+            id: Uuid::new_v4(),
+            asset_id: Some(second_asset),
+            source_path: "companion://second".into(),
+            stage: BatchStage::Done,
+            status: JobStatus::Done,
+            attempts: 0,
+            last_error: None,
+        }];
+        store.replace_batch(&batch).unwrap();
+
+        let loaded = store.load_batch(batch.id).unwrap();
+        assert_eq!(loaded.name, "updated");
+        assert_eq!(loaded.items.len(), 1);
+        assert_eq!(loaded.items[0].asset_id, Some(second_asset));
+        assert_eq!(loaded.items[0].status, JobStatus::Done);
     }
 
     #[test]

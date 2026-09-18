@@ -2,52 +2,86 @@
 
 ## Product Goal
 
-Photo-Cake is a local-first semi-automatic AI photography workflow assistant.
+Photo-Cake is a local-first semi-automatic photography workflow assistant.
 
-It reduces repetitive Lightroom editing work while preserving a professional RAW workflow.
+It reduces repetitive editing work for photographers while preserving RAW files, Lightroom workflow, and user decisions.
 
-Primary workflow:
+The product direction is:
 
+```text
+Large RAW Collection
+        |
+        v
+Selection
+        |
+        v
+Organization
+        |
+        v
+Reference-based Editing
+        |
+        v
+Recipe
+        |
+        v
+XMP / Export
 ```
-RAW Import
-  ↓
-Smart Culling
-  ↓
-Photo Grouping
-  ↓
-Reference Style Learning
-  ↓
-Recipe Generation
-  ↓
-Review
-  ↓
-XMP / Direct Export
-```
-
-## Development Order
-
-### Phase 1 - Photography Workflow Foundation
-
-Goal: establish a complete non-destructive workflow.
-
-- RAW indexing
-- metadata extraction
-- project/catalog foundation
-- preview foundation
-- asset identity
-- Recipe schema
-- XMP sidecar generation
-- direct export framework
-
-Acceptance:
-
-A RAW file can generate an XMP sidecar that Lightroom can read.
 
 ---
 
-### Phase 2 - Smart Photo Organization
+# Development Strategy
 
-Goal: reduce manual photo management.
+Existing code is the foundation.
+
+Development should improve the current workflow instead of rebuilding the application around new frameworks.
+
+Main reusable layers:
+
+```text
+photo-core
+ - catalog
+ - assets
+ - metadata
+ - grouping
+ - recipe
+ - export
+
+photo-inference
+ - analysis
+ - similarity
+ - segmentation
+ - future AI models
+```
+
+---
+
+# Phase 1 - Photography Workflow Foundation
+
+Goal: create a complete non-destructive workflow foundation.
+
+Priority:
+
+- RAW indexing
+- catalog management
+- metadata extraction
+- preview foundation
+- asset identity
+- Photo Group foundation
+- Recipe schema
+- XMP generation
+- export framework
+
+Acceptance:
+
+A RAW photo can generate an XMP sidecar readable by Lightroom.
+
+---
+
+# Phase 2 - Photo Organization
+
+Goal: reduce manual management of large photo collections.
+
+Features:
 
 - similarity detection
 - duplicate detection
@@ -58,66 +92,95 @@ Goal: reduce manual photo management.
 
 ---
 
-### Phase 3 - Intelligent Selection
+# Phase 3 - Smart Culling
 
-Goal: reduce the number of photos requiring review.
+Goal: reduce the number of photos requiring manual review.
 
-- blur detection
+Features:
+
+- sharpness analysis
 - focus quality
+- blur detection
 - closed eyes
 - expression quality
-- exposure issues
+- exposure problems
 - best photo recommendation
 
-AI assists selection; original files are never removed automatically.
+AI only recommends. Original photos are never deleted automatically.
 
 ---
 
-### Phase 4 - Reference Driven Editing
+# Phase 4 - Reference Style Workflow
 
-Goal: reproduce user's preferred photography style.
+Goal: learn the photographer's preferred editing style.
+
+Features:
 
 - reference photo selection
 - style analysis
-- color characteristics
+- color preference
 - exposure preference
 - skin tone preference
-- group-based Recipe generation
+- group Recipe generation
 
 ---
 
-### Phase 5 - Semi-automatic AI Processing
+# Phase 5 - Semi Automatic Editing
 
-Goal: prepare editable professional adjustments.
+Goal: generate editable professional adjustments.
 
-- exposure adjustment planning
+Features:
+
+- exposure suggestions
 - white balance suggestions
 - portrait enhancement planning
-- lighting balance
-- background adjustment
+- lighting adjustment planning
 - batch Recipe application
 
 ---
 
-### Phase 6 - Advanced Review and Export
+# Phase 6 - Advanced Workflow
 
-- batch approval
+Features:
+
+- batch review
 - before/after comparison
 - exception handling
-- JPEG/TIFF export
-- Lightroom workflow integration improvements
+- improved export
+- deeper Lightroom workflow support
 
 ---
 
-## Non-goals for early development
+# Long Term Direction
+
+Possible future improvements:
+
+- advanced RAW processing
+- GPU acceleration
+- personal style learning
+- more AI-assisted editing
+
+These must not block the core workflow:
+
+```text
+RAW
+ ->
+Recipe
+ ->
+XMP
+ ->
+Lightroom
+```
+
+---
+
+# Early Non-goals
+
+Do not prioritize:
 
 - cloud dependency
 - multi-user platform
 - enterprise workflow
-- Lightroom database modification
-- full RAW replacement engine
-- automatic destructive editing
-
-Priority:
-
-A fast local workflow that transforms large RAW collections into consistent, reviewable Lightroom-compatible edits.
+- destructive automatic editing
+- Lightroom database replacement
+- full RAW converter replacement

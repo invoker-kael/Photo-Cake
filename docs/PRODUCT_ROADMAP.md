@@ -31,7 +31,7 @@ Current code already contains substantial reusable groundwork:
 - cached technical culling evidence, group-relative duplicate ranking and persisted photographer decisions;
 - ReferenceSet and StyleProfile, plus persistent per-group reference selection and editable exposure/contrast/saturation preferences;
 - adaptive `color_sync`;
-- target-bound per-photo Recipe materialization;
+- target-bound per-photo Recipe materialization plus persisted additive per-photo review overrides;
 - Lightroom XMP document and same-basename sidecar writing;
 - optional direct export path;
 - Windows and Android application shells.
@@ -46,7 +46,7 @@ Close remaining gaps around:
 
 - preview-relative exposure analysis is implemented and can drive adaptive exposure Recipes; reliable RAW/metadata white-balance evidence remains a later enrichment, not a blocker;
 - end-to-end orchestration from the persisted group/reference selection to Recipes/XMP;
-- persistence of semantic groups, references, recipes and review state;
+- persistence/refinement of semantic groups and additional review provenance where needed; Reference selection, group StyleProfile and per-photo review overrides are already persisted;
 - Lightroom/Camera Raw compatibility tests for emitted XMP;
 - safe overwrite/update behavior for an existing sidecar;
 - clear Windows workflow for apply/review/handoff.
@@ -120,7 +120,7 @@ Not early priorities:
 - destructive generative replacement as the default workflow.
 
 
-Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view, evidence-backed Cull view, persisted photographer Cull decisions, and persisted per-group Reference selection are connected to the Rust core. ReferenceSet now previews adaptive exposure-only Recipes from cached exposure evidence and the Windows workstation has an explicit reviewed XMP handoff that leaves white balance untouched when unknown, excludes photographer-confirmed Reject photos, and refuses partial/overwrite writes. Cull and Reference now show real cached RAW previews, and StyleProfile edits persist across reference changes. The next gaps are per-photo Recipe review overrides, stronger Lightroom round-trip validation, richer reliable color evidence and Android review/reference parity.
+Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view, evidence-backed Cull view, persisted photographer Cull decisions, and persisted per-group Reference selection are connected to the Rust core. ReferenceSet now previews adaptive exposure-only Recipes from cached exposure evidence and the Windows workstation has an explicit reviewed XMP handoff that leaves white balance untouched when unknown, excludes photographer-confirmed Reject photos, and refuses partial/overwrite writes. Cull, Reference and Review now use real cached RAW previews. StyleProfile edits persist across reference changes, and per-photo Recipe exception overrides persist by stable asset ID and are applied both to preview and explicit XMP handoff. The next gaps are stronger Lightroom round-trip validation, true before/after comparison, richer reliable color evidence, semantic-group persistence/refinement and Android review/reference parity.
 
 
 Implemented since the previous milestone: the workstation Cull view now supports persisted photographer Keep/Review/Reject overrides on top of AI suggestions. Remaining selection work is before/after compare UX and semantic evidence such as eyes/expression when reliable local evidence is available.

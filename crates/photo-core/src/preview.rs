@@ -99,6 +99,19 @@ impl PreviewStore {
         json.map(|json| Ok(serde_json::from_str(&json)?)).transpose()
     }
 
+    pub fn list_for_assets(
+        &self,
+        asset_ids: &[Uuid],
+    ) -> Result<Vec<PreviewArtifact>, PreviewStoreError> {
+        let mut artifacts = Vec::new();
+        for asset_id in asset_ids {
+            if let Some(artifact) = self.get(*asset_id)? {
+                artifacts.push(artifact);
+            }
+        }
+        Ok(artifacts)
+    }
+
     pub fn is_current(
         &self,
         asset_id: Uuid,
@@ -147,6 +160,35 @@ fn unix_time_ms() -> i64 {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn lists_only_available_previews_for_requested_assets() {
+        let dir = tempdir().unwrap();
+        let store = PreviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        let missing = Uuid::new_v4();
+
+        for asset_id in [first, second] {
+            store
+                .save(&PreviewArtifact {
+                    asset_id,
+                    source_fingerprint: "raw-v1".into(),
+                    revision: "preview-v1".into(),
+                    cache_path: format!("{asset_id}.jpg"),
+                    mime_type: "image/jpeg".into(),
+                    width: 320,
+                    height: 240,
+                    source: PreviewSource::EmbeddedRawPreview,
+                })
+                .unwrap();
+        }
+
+        let listed = store.list_for_assets(&[first, missing, second]).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].asset_id, first);
+        assert_eq!(listed[1].asset_id, second);
+    }
 
     #[test]
     fn preview_artifact_round_trips_and_reuses_exact_revision() {

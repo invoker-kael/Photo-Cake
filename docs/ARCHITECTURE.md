@@ -17,7 +17,9 @@ Smart Culling
     |
 Photo Group
     |
-Reference Style
+Reference Set
+    |
+Style Profile
     |
 Recipe / Edit Graph
     |
@@ -61,6 +63,7 @@ Responsibilities:
 - photo grouping
 - culling decisions
 - reference sets
+- style profile storage
 - Recipe/Edit Graph
 - batch jobs
 - XMP/export interfaces
@@ -74,6 +77,8 @@ Photo Group
     |
 Reference Set
     |
+Style Profile
+    |
 Recipe
     |
 XMP / Export
@@ -81,15 +86,18 @@ XMP / Export
 
 ---
 
-# Recipe Driven Editing
+# Reference Driven Editing
 
-Recipe is the unified editing decision model.
+Reference photos are the source of photographer preference.
 
 ```text
-Reference Photos
+Favorite Photos
         |
         v
-Style Analysis
+Reference Set
+        |
+        v
+Style Profile
         |
         v
 Recipe
@@ -98,7 +106,13 @@ Recipe
 XMP / Export
 ```
 
-Recipe stores reusable adjustments instead of modifying RAW files.
+The system should learn from selected photos, not replace photographer decisions.
+
+---
+
+# Recipe Driven Editing
+
+Recipe is the unified editing decision model.
 
 Initial adjustments:
 
@@ -116,6 +130,8 @@ Future extensions:
 - tone curve
 - skin tone preference
 - personal style profile
+
+RAW files remain immutable.
 
 ---
 
@@ -141,32 +157,6 @@ Future:
 
 ---
 
-# Platform Architecture
-
-## Windows
-
-Primary workstation:
-
-- RAW collections
-- batch processing
-- GPU acceleration
-- Lightroom workflow
-- XMP generation
-- direct export
-
-## Android
-
-Mobile companion:
-
-- photo selection
-- reference selection
-- preview
-- lightweight analysis
-
-Business logic remains in shared core modules.
-
----
-
 # Development Priority
 
 ```text
@@ -174,7 +164,8 @@ Catalog
  -> Preview
  -> Photo Group
  -> Culling
- -> Reference Style
+ -> Reference Set
+ -> Style Profile
  -> Recipe
  -> XMP
  -> Export
@@ -184,5 +175,5 @@ Catalog
 Foundation:
 
 ```text
-RAW -> Recipe -> XMP -> Lightroom
+RAW -> Reference -> Recipe -> XMP -> Lightroom
 ```

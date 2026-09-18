@@ -248,3 +248,9 @@ Opening the Lightroom handoff view performs a read-only group preflight against 
 
 A detected conflict disables the write action and shows the conflicting filenames. The final writer still repeats the same whole-group preflight immediately before create-new writes, so an XMP created externally after the UI check cannot cause a silent overwrite or partial group update.
 
+### Reusable group look
+
+A photographer can copy the shared StyleProfile from another referenced group without replacing the target group's selected Reference. The copied values are look preferences, not a blind copy of the source group's resolved per-photo numeric edits.
+
+The target group keeps its own Reference photo and adaptive photographic baseline, then regenerates its own Recipes from that baseline plus the copied look. Any previously confirmed Recipe review whose final adjustments change becomes stale automatically through the existing Recipe fingerprint contract.
+

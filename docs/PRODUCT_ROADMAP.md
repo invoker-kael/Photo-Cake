@@ -142,3 +142,5 @@ Direct Export remains a guarded gap rather than a fake workstation feature. The 
 
 Lightroom handoff now has a visible read-only preflight: the workstation resolves the actual XMP targets when the handoff view opens, surfaces existing-sidecar conflicts before write, and keeps the final core write-time preflight as the authoritative race-safe guard. The handoff summary also counts photographer-confirmed Rejects from group membership rather than from the already-filtered Recipe list, so skipped-photo reporting remains accurate.
 
+Reference workflow now supports reusing a look across groups while keeping each group's own Reference and adaptive baseline. This targets travel/family shoots where several editing contexts should feel consistent without copying fixed exposure edits between different scenes.
+

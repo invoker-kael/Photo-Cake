@@ -190,6 +190,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [recipeReviews, setRecipeReviews] = useState<Record<string, BackendRecipeReviewOverride>>({});
   const [editedPreviews, setEditedPreviews] = useState<Record<string, BackendReviewRenderResult>>({});
   const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
+  const [styleCopySources, setStyleCopySources] = useState<Record<string, string>>({});
   const [reviewUpdating, setReviewUpdating] = useState<string | null>(null);
   const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
   const [handoffPreflightLoading, setHandoffPreflightLoading] = useState(false);
@@ -921,6 +922,24 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     void saveReferenceStyle(groupId, 0, 0, 0);
   };
 
+  const copyReferenceStyle = async (
+    sourceGroupId: string,
+    targetGroupId: string,
+  ) => {
+    if (!bridge?.copyReferenceStyle || !sourceGroupId) return;
+    setStyleUpdating(targetGroupId);
+    try {
+      const style = await bridge.copyReferenceStyle(sourceGroupId, targetGroupId);
+      setReferenceStyles((current) => ({ ...current, [targetGroupId]: style }));
+      setEditedPreviews({});
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setStyleUpdating(null);
+    }
+  };
+
   const saveRecipeReview = async (
     assetId: string,
     exposureDeltaEv: number,
@@ -1404,6 +1423,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             (recipe) =>
               recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
           ) ?? false;
+          const reusableStyleGroups =
+            photoContext.groups.filter(
+              (candidate) =>
+                candidate.id !== group.id &&
+                referenceBindings[candidate.id] != null &&
+                referenceStyles[candidate.id] != null,
+            );
+          const selectedStyleSource =
+            styleCopySources[group.id] ?? reusableStyleGroups[0]?.id ?? "";
           return (
             <div className="reference-group" key={group.id}>
               <div className="reference-group-head">
@@ -1496,8 +1524,40 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   >
                     Reset style
                   </button>
+                  {reusableStyleGroups.length > 0 && bridge?.copyReferenceStyle && (
+                    <div className="style-copy">
+                      <span>Reuse look</span>
+                      <div>
+                        <select
+                          value={selectedStyleSource}
+                          disabled={styleUpdating != null}
+                          onChange={(event) =>
+                            setStyleCopySources((current) => ({
+                              ...current,
+                              [group.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          {reusableStyleGroups.map((sourceGroup) => (
+                            <option key={sourceGroup.id} value={sourceGroup.id}>
+                              Group {photoContext.groups.findIndex((item) => item.id === sourceGroup.id) + 1}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="review-choice keep"
+                          disabled={styleUpdating != null || !selectedStyleSource}
+                          onClick={() =>
+                            void copyReferenceStyle(selectedStyleSource, group.id)
+                          }
+                        >
+                          Copy look
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <small>
-                    White balance controls remain locked until reliable RAW/metadata WB evidence exists.
+                    Copy look transfers shared style preferences only; this group keeps its own Reference and adaptive baseline. White balance controls remain locked until reliable RAW/metadata WB evidence exists.
                   </small>
                 </div>
               )}

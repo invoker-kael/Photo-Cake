@@ -270,6 +270,10 @@ export interface PhotoCakeBridge {
     contrastPreference: number,
     saturationPreference: number,
   ): Promise<BackendGroupReferenceStyle>;
+  copyReferenceStyle?(
+    sourceGroupId: string,
+    targetGroupId: string,
+  ): Promise<BackendGroupReferenceStyle>;
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
   preflightGroupXmp?(groupId: string): Promise<BackendLightroomHandoffPreflight>;
   writeGroupXmp?(groupId: string): Promise<BackendLightroomHandoffResult>;

@@ -249,6 +249,27 @@ impl ReferenceStore {
         Ok(set)
     }
 
+    /// Copy photographer look preferences between groups while preserving each
+    /// group's own reference photo and adaptive photographic baseline.
+    pub fn copy_group_style_profile(
+        &self,
+        source_group_id: Uuid,
+        target_group_id: Uuid,
+    ) -> Result<ReferenceSet, ReferenceStoreError> {
+        let source_binding = self
+            .group_binding(source_group_id)?
+            .ok_or(ReferenceStoreError::GroupBindingNotFound(source_group_id))?;
+        let source = self
+            .get_set(source_binding.reference_set_id)?
+            .ok_or(ReferenceStoreError::ReferenceSetNotFound(
+                source_binding.reference_set_id,
+            ))?;
+
+        self.update_group_style_profile(target_group_id, |profile| {
+            *profile = source.style_profile.clone();
+        })
+    }
+
     /// Persist the simple workstation action "use this photo as this group's reference"
     /// while still representing the choice as a real ReferenceSet.
     pub fn set_single_photo_reference(
@@ -334,6 +355,51 @@ mod tests {
         assert_eq!(
             store.group_binding(group_id).unwrap().unwrap(),
             binding
+        );
+    }
+
+    #[test]
+    fn copying_group_style_keeps_target_reference_independent() {
+        let dir = tempdir().unwrap();
+        let store = ReferenceStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let source_group = Uuid::new_v4();
+        let target_group = Uuid::new_v4();
+        let source_photo = Uuid::new_v4();
+        let target_photo = Uuid::new_v4();
+
+        store
+            .set_single_photo_reference(source_group, source_photo, "Source look")
+            .unwrap();
+        let (_, target_binding) = store
+            .set_single_photo_reference(target_group, target_photo, "Target look")
+            .unwrap();
+
+        store
+            .update_group_style_profile(source_group, |profile| {
+                profile.exposure_bias_ev = Some(0.3);
+                profile.temperature_bias = Some(150.0);
+                profile.tint_bias = Some(-1.0);
+                profile.contrast_preference = Some(9.0);
+                profile.saturation_preference = Some(4.0);
+                profile.notes = Some("travel look".into());
+            })
+            .unwrap();
+
+        let copied = store
+            .copy_group_style_profile(source_group, target_group)
+            .unwrap();
+
+        assert_eq!(copied.id, target_binding.reference_set_id);
+        assert_eq!(copied.photo_ids, vec![target_photo]);
+        assert_eq!(copied.style_profile.exposure_bias_ev, Some(0.3));
+        assert_eq!(copied.style_profile.temperature_bias, Some(150.0));
+        assert_eq!(copied.style_profile.tint_bias, Some(-1.0));
+        assert_eq!(copied.style_profile.contrast_preference, Some(9.0));
+        assert_eq!(copied.style_profile.saturation_preference, Some(4.0));
+        assert_eq!(copied.style_profile.notes.as_deref(), Some("travel look"));
+        assert_eq!(
+            store.group_binding(target_group).unwrap().unwrap().selected_reference_asset_id,
+            target_photo
         );
     }
 

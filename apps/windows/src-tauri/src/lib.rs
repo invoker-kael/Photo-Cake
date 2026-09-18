@@ -811,6 +811,37 @@ fn update_group_reference_style(
 }
 
 #[tauri::command]
+fn copy_group_reference_style(
+    source_group_id: String,
+    target_group_id: String,
+    state: State<'_, AppState>,
+) -> Result<GroupReferenceStyle, String> {
+    let source_group_id = Uuid::parse_str(&source_group_id)
+        .map_err(|error| format!("invalid source group id: {error}"))?;
+    let target_group_id = Uuid::parse_str(&target_group_id)
+        .map_err(|error| format!("invalid target group id: {error}"))?;
+    if source_group_id == target_group_id {
+        return Err("source and target groups must be different".to_string());
+    }
+
+    let target_binding = state
+        .reference_store
+        .group_binding(target_group_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "select a target group reference before copying a look".to_string())?;
+    let set = state
+        .reference_store
+        .copy_group_style_profile(source_group_id, target_group_id)
+        .map_err(|error| error.to_string())?;
+
+    Ok(GroupReferenceStyle {
+        group_id: target_group_id,
+        reference_set_id: target_binding.reference_set_id,
+        style_profile: set.style_profile,
+    })
+}
+
+#[tauri::command]
 fn batch_reference_previews(
     batch_id: String,
     state: State<'_, AppState>,
@@ -1273,6 +1304,7 @@ pub fn run() {
             clear_recipe_review,
             batch_reference_styles,
             update_group_reference_style,
+            copy_group_reference_style,
             batch_reference_previews,
             set_recipe_reviewed,
             clear_recipe_reviewed,

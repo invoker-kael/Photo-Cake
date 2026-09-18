@@ -312,6 +312,27 @@ h2 { font-size: 19px; }
   font-size: 10px;
   line-height: 1.4;
 }
+.style-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+}
+.style-copy > span { color: #70787d; font-size: 10px; }
+.style-copy > div {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.style-copy select {
+  min-height: 30px;
+  flex: 1;
+  border: 1px solid #30363a;
+  border-radius: 5px;
+  background: #171b1d;
+  color: #d7dcdf;
+  padding: 0 8px;
+}
+
 .style-control { display: grid; gap: 6px; }
 .style-control > span { color: #70787d; font-size: 10px; }
 .style-control > div {

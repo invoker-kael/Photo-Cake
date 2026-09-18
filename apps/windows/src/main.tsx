@@ -103,6 +103,11 @@ const bridge: PhotoCakeBridge = {
       contrastPreference,
       saturationPreference,
     }),
+  copyReferenceStyle: (sourceGroupId, targetGroupId) =>
+    invoke<BackendGroupReferenceStyle>("copy_group_reference_style", {
+      sourceGroupId,
+      targetGroupId,
+    }),
   loadReferencePreviews: (batchId) =>
     invoke<BackendGroupReferencePreview[]>("batch_reference_previews", { batchId }),
   preflightGroupXmp: (groupId) =>

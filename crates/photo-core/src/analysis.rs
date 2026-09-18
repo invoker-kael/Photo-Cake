@@ -177,6 +177,65 @@ impl AnalysisCache {
         Ok(())
     }
 
+    /// Read the newest cached result for one asset/task without requiring the
+    /// caller to know the exact model/config cache key.
+    ///
+    /// This is intended for downstream photographer workflows (grouping,
+    /// culling, review) that consume whichever current evidence Analyze has
+    /// already produced. Cache writes remain fully versioned.
+    pub fn latest_for_asset_task(
+        &self,
+        asset_id: Uuid,
+        task: InferenceTask,
+    ) -> Result<Option<AnalysisArtifact>, AnalysisCacheError> {
+        let conn = self.connect()?;
+        let row = conn
+            .query_row(
+                "SELECT source_fingerprint, preview_revision, model_id, model_version, config_hash, payload_json
+                 FROM analysis_cache
+                 WHERE asset_id = ?1 AND task = ?2
+                 ORDER BY updated_at_unix_ms DESC, rowid DESC
+                 LIMIT 1",
+                params![asset_id.to_string(), task_to_db(task)],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        row.map(
+            |(
+                source_fingerprint,
+                preview_revision,
+                model_id,
+                model_version,
+                config_hash,
+                payload_json,
+            )| {
+                Ok(AnalysisArtifact {
+                    key: AnalysisCacheKey {
+                        asset_id,
+                        source_fingerprint,
+                        preview_revision,
+                        task,
+                        model_id,
+                        model_version,
+                        config_hash,
+                    },
+                    payload_json: serde_json::from_str(&payload_json)?,
+                })
+            },
+        )
+        .transpose()
+    }
+
     pub fn invalidate_asset_task(
         &self,
         asset_id: Uuid,
@@ -258,6 +317,50 @@ mod tests {
         let mut new_key = old_key;
         new_key.model_version = "2.0.0".to_string();
         assert!(cache.get(&new_key).unwrap().is_none());
+    }
+
+    #[test]
+    fn latest_task_result_hides_cache_key_details_from_consumers() {
+        let dir = tempdir().unwrap();
+        let cache = AnalysisCache::open(dir.path().join("photo-cake.sqlite3")).unwrap();
+        let mut first = key("1.0.0");
+        first.task = InferenceTask::QualityScoring;
+        let asset_id = first.asset_id;
+        cache
+            .put(&AnalysisArtifact {
+                key: first,
+                payload_json: serde_json::json!({"sharpness": 0.4}),
+            })
+            .unwrap();
+
+        let mut second = AnalysisCacheKey {
+            asset_id,
+            source_fingerprint: "raw-fingerprint-v2".to_string(),
+            preview_revision: "preview-v2".to_string(),
+            task: InferenceTask::QualityScoring,
+            model_id: "quality".to_string(),
+            model_version: "2".to_string(),
+            config_hash: "new".to_string(),
+        };
+        cache
+            .put(&AnalysisArtifact {
+                key: second.clone(),
+                payload_json: serde_json::json!({"sharpness": 0.9}),
+            })
+            .unwrap();
+
+        let latest = cache
+            .latest_for_asset_task(asset_id, InferenceTask::QualityScoring)
+            .unwrap()
+            .unwrap();
+        assert_eq!(latest.key.model_version, "2");
+        assert_eq!(latest.payload_json["sharpness"], 0.9);
+
+        second.asset_id = Uuid::new_v4();
+        assert!(cache
+            .latest_for_asset_task(second.asset_id, InferenceTask::QualityScoring)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

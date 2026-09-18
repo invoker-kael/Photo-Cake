@@ -881,13 +881,23 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
       <section className="queue-card">
         <div className="queue-title">
-          <strong>RAW preparation queue</strong>
-          <span>Import and local analysis only · editing starts after photos are ready</span>
+          <strong>{mode === "workstation" ? "RAW preparation queue" : "Project preparation state"}</strong>
+          <span>
+            {mode === "workstation"
+              ? "Import and local analysis only · editing starts after photos are ready"
+              : "Read-only preparation status from the workstation project"}
+          </span>
         </div>
         <div className="job-list">
           {jobs.length > 0
             ? jobs.map((job) => <JobRow job={job} key={job.id} />)
-            : <div className="panel-note">Import an existing RAW folder. Source RAW files stay in place.</div>}
+            : (
+                <div className="panel-note">
+                  {mode === "workstation"
+                    ? "Import an existing RAW folder. Source RAW files stay in place."
+                    : "Transfer or synchronize a workstation project to this device before mobile culling/reference work."}
+                </div>
+              )}
         </div>
       </section>
     </>
@@ -1483,7 +1493,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <section className="batch-head">
           <div>
             <p className="eyebrow">{activeView === "library" ? "RAW PREPARATION" : activeView.toUpperCase()}</p>
-            <h1>{activeBatch?.name ?? (bridge ? "Import a RAW folder" : "Photography workflow")}</h1>
+            <h1>
+              {activeBatch?.name ??
+                (bridge
+                  ? mode === "workstation"
+                    ? "Import a RAW folder"
+                    : "No companion project yet"
+                  : "Photography workflow")}
+            </h1>
             <p>{summary.done}/{summary.total} ready · {summary.running} analyzing · {summary.failed} failed</p>
             {importNote && <p className="success-text">{importNote}</p>}
             {backendError && <p className="error-text">{backendError}</p>}

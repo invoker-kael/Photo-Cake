@@ -14,6 +14,7 @@ import App, {
   type BackendRawImportResult,
   type BackendReferenceBinding,
   type BackendRecipeReviewOverride,
+  type BackendReviewRenderResult,
   type BatchWorkerEvent,
   type PhotoCakeBridge,
 } from "@photo-cake/ui";
@@ -68,6 +69,16 @@ const bridge: PhotoCakeBridge = {
     }),
   clearRecipeReview: (assetId) =>
     invoke<void>("clear_recipe_review", { assetId }),
+  renderRecipePreview: async (groupId, assetId) => {
+    const result = await invoke<BackendReviewRenderResult>("render_group_recipe_preview", {
+      groupId,
+      assetId,
+    });
+    return {
+      ...result,
+      preview_url: `${convertFileSrc(result.cache_path)}?recipe=${result.recipe_id}`,
+    };
+  },
   loadReferenceStyles: (batchId) =>
     invoke<BackendGroupReferenceStyle[]>("batch_reference_styles", { batchId }),
   updateReferenceStyle: (

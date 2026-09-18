@@ -81,6 +81,35 @@ impl CullingReviewStore {
         Ok(CullingReview { asset_id, decision })
     }
 
+    pub fn set_many(
+        &self,
+        reviews: &[CullingReview],
+    ) -> Result<(), CullingReviewStoreError> {
+        if reviews.is_empty() {
+            return Ok(());
+        }
+
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        let updated_at = unix_time_ms();
+        for review in reviews {
+            tx.execute(
+                "INSERT INTO culling_reviews (asset_id, decision, updated_at_unix_ms)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(asset_id) DO UPDATE SET
+                     decision = excluded.decision,
+                     updated_at_unix_ms = excluded.updated_at_unix_ms",
+                params![
+                    review.asset_id.to_string(),
+                    decision_to_db(review.decision),
+                    updated_at
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn clear(&self, asset_id: Uuid) -> Result<(), CullingReviewStoreError> {
         let conn = self.connect()?;
         conn.execute(
@@ -181,6 +210,36 @@ mod tests {
 
         store.clear(asset_id).unwrap();
         assert!(store.get(asset_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn batch_reviews_commit_together() {
+        let dir = tempdir().unwrap();
+        let store = CullingReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let keep = Uuid::new_v4();
+        let reject = Uuid::new_v4();
+
+        store
+            .set_many(&[
+                CullingReview {
+                    asset_id: keep,
+                    decision: CullingUserDecision::Keep,
+                },
+                CullingReview {
+                    asset_id: reject,
+                    decision: CullingUserDecision::Reject,
+                },
+            ])
+            .unwrap();
+
+        assert_eq!(
+            store.get(keep).unwrap().unwrap().decision,
+            CullingUserDecision::Keep
+        );
+        assert_eq!(
+            store.get(reject).unwrap().unwrap().decision,
+            CullingUserDecision::Reject
+        );
     }
 
     #[test]

@@ -173,3 +173,8 @@ Import performs a best-effort, read-only EXIF metadata pass before initial group
 ## Portrait Culling Evidence
 
 Cull may surface cached portrait evidence already produced by local segmentation: detected people/faces, primary-subject ratio and people confidence. These values are advisory context and do not replace technical quality scoring or photographer decisions. Photo-Cake must not label eyes as closed/open or infer expression quality until a dedicated reliable model provides that evidence.
+
+
+## Metadata Transparency
+
+The workstation Library should expose the camera identity and capture time used for grouping so the photographer can see whether a shoot is using embedded RAW/EXIF evidence or a fallback. Missing metadata remains visible as unavailable/fallback rather than being silently invented.

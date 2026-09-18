@@ -44,7 +44,7 @@ Goal: make one real shoot usable through the entire non-destructive path.
 
 Close remaining gaps around:
 
-- reliable color/exposure analysis evidence for reference-driven adaptive edits;
+- preview-relative exposure analysis is implemented and can drive adaptive exposure Recipes; reliable RAW/metadata white-balance evidence remains a later enrichment, not a blocker;
 - end-to-end orchestration from the persisted group/reference selection to Recipes/XMP;
 - persistence of semantic groups, references, recipes and review state;
 - Lightroom/Camera Raw compatibility tests for emitted XMP;
@@ -120,7 +120,7 @@ Not early priorities:
 - destructive generative replacement as the default workflow.
 
 
-Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view, evidence-backed Cull view, persisted photographer Cull decisions, and persisted per-group Reference selection are connected to the Rust core. The next correctness gap is reliable color/exposure evidence before ReferenceSet can safely drive adaptive Recipes and explicit Lightroom XMP handoff.
+Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view, evidence-backed Cull view, persisted photographer Cull decisions, and persisted per-group Reference selection are connected to the Rust core. ReferenceSet can now safely preview adaptive exposure-only Recipes from cached exposure evidence while leaving white balance untouched. The next gap is explicit reviewed Lightroom handoff plus richer reliable RAW/metadata color evidence.
 
 
 Implemented since the previous milestone: the workstation Cull view now supports persisted photographer Keep/Review/Reject overrides on top of AI suggestions. Remaining selection work is richer preview/compare UX and semantic evidence such as eyes/expression when reliable local evidence is available.

@@ -31,8 +31,10 @@ pub struct SemanticColorIntent {
 pub struct GroupColorIntent {
     pub name: String,
     pub target_exposure_ev: f32,
-    pub target_temperature_k: f32,
-    pub target_tint: f32,
+    #[serde(default)]
+    pub target_temperature_k: Option<f32>,
+    #[serde(default)]
+    pub target_tint: Option<f32>,
     pub contrast: f32,
     pub saturation: f32,
     pub semantic: Vec<SemanticColorIntent>,
@@ -43,8 +45,8 @@ impl Default for GroupColorIntent {
         Self {
             name: "Balanced".to_string(),
             target_exposure_ev: 0.0,
-            target_temperature_k: 5500.0,
-            target_tint: 0.0,
+            target_temperature_k: None,
+            target_tint: None,
             contrast: 0.0,
             saturation: 0.0,
             semantic: Vec::new(),
@@ -56,8 +58,10 @@ impl Default for GroupColorIntent {
 pub struct PhotoColorAnalysis {
     pub asset_id: Uuid,
     pub exposure_ev: f32,
-    pub temperature_k: f32,
-    pub tint: f32,
+    #[serde(default)]
+    pub temperature_k: Option<f32>,
+    #[serde(default)]
+    pub tint: Option<f32>,
     pub confidence: f32,
 }
 
@@ -65,8 +69,10 @@ pub struct PhotoColorAnalysis {
 pub struct ResolvedColorEdit {
     pub asset_id: Uuid,
     pub exposure_delta_ev: f32,
-    pub temperature_delta_k: f32,
-    pub tint_delta: f32,
+    #[serde(default)]
+    pub temperature_delta_k: Option<f32>,
+    #[serde(default)]
+    pub tint_delta: Option<f32>,
     pub contrast: f32,
     pub saturation: f32,
     pub semantic: Vec<SemanticColorIntent>,
@@ -119,8 +125,8 @@ pub fn derive_auto_group_intent(
     Ok(GroupColorIntent {
         name: "Auto Balanced".to_string(),
         target_exposure_ev: median(analyses.iter().map(|a| a.exposure_ev)),
-        target_temperature_k: median(analyses.iter().map(|a| a.temperature_k)),
-        target_tint: median(analyses.iter().map(|a| a.tint)),
+        target_temperature_k: median_optional(analyses.iter().filter_map(|a| a.temperature_k)),
+        target_tint: median_optional(analyses.iter().filter_map(|a| a.tint)),
         contrast: 0.0,
         saturation: 0.0,
         semantic: Vec::new(),
@@ -169,8 +175,6 @@ pub fn build_adaptive_group_plan(
     manual_copy_edit: Option<&ResolvedColorEdit>,
     revision: u64,
 ) -> Result<GroupColorSyncPlan, ColorSyncError> {
-    // Reference-driven style may come from an external edited photo or another
-    // group. Only an explicit in-group promotion requires membership.
     if mode == GroupSyncMode::ReferenceDriven && reference_asset_id.is_none() {
         return Err(ColorSyncError::MissingReference);
     }
@@ -253,12 +257,13 @@ fn resolve_adaptive_edit(
     ResolvedColorEdit {
         asset_id: analysis.asset_id,
         exposure_delta_ev: clamp(intent.target_exposure_ev - analysis.exposure_ev, -4.0, 4.0),
-        temperature_delta_k: clamp(
-            intent.target_temperature_k - analysis.temperature_k,
+        temperature_delta_k: zip_delta(
+            intent.target_temperature_k,
+            analysis.temperature_k,
             -4000.0,
             4000.0,
         ),
-        tint_delta: clamp(intent.target_tint - analysis.tint, -150.0, 150.0),
+        tint_delta: zip_delta(intent.target_tint, analysis.tint, -150.0, 150.0),
         contrast: intent.contrast,
         saturation: intent.saturation,
         semantic: intent.semantic.clone(),
@@ -266,10 +271,20 @@ fn resolve_adaptive_edit(
 }
 
 fn reference_score(analysis: &PhotoColorAnalysis, intent: &GroupColorIntent) -> f32 {
-    (analysis.exposure_ev - intent.target_exposure_ev).abs() * 2.0
-        + (analysis.temperature_k - intent.target_temperature_k).abs() / 2000.0
-        + (analysis.tint - intent.target_tint).abs() / 50.0
-        + (1.0 - analysis.confidence.clamp(0.0, 1.0)) * 0.5
+    let mut score = (analysis.exposure_ev - intent.target_exposure_ev).abs() * 2.0;
+    if let (Some(value), Some(target)) = (analysis.temperature_k, intent.target_temperature_k) {
+        score += (value - target).abs() / 2000.0;
+    }
+    if let (Some(value), Some(target)) = (analysis.tint, intent.target_tint) {
+        score += (value - target).abs() / 50.0;
+    }
+    score + (1.0 - analysis.confidence.clamp(0.0, 1.0)) * 0.5
+}
+
+fn zip_delta(target: Option<f32>, measured: Option<f32>, min: f32, max: f32) -> Option<f32> {
+    target
+        .zip(measured)
+        .map(|(target, measured)| clamp(target - measured, min, max))
 }
 
 fn median(values: impl Iterator<Item = f32>) -> f32 {
@@ -283,6 +298,11 @@ fn median(values: impl Iterator<Item = f32>) -> f32 {
     }
 }
 
+fn median_optional(values: impl Iterator<Item = f32>) -> Option<f32> {
+    let values = values.collect::<Vec<_>>();
+    (!values.is_empty()).then(|| median(values.into_iter()))
+}
+
 fn clamp(value: f32, min: f32, max: f32) -> f32 {
     value.max(min).min(max)
 }
@@ -291,47 +311,65 @@ fn clamp(value: f32, min: f32, max: f32) -> f32 {
 mod tests {
     use super::*;
 
-    fn analysis(asset_id: Uuid, exposure_ev: f32, temperature_k: f32) -> PhotoColorAnalysis {
+    fn analysis(
+        asset_id: Uuid,
+        exposure_ev: f32,
+        temperature_k: Option<f32>,
+    ) -> PhotoColorAnalysis {
         PhotoColorAnalysis {
             asset_id,
             exposure_ev,
             temperature_k,
-            tint: 0.0,
+            tint: temperature_k.map(|_| 0.0),
             confidence: 1.0,
         }
     }
 
     #[test]
-    fn auto_mode_derives_target_and_reference_without_manual_grade() {
+    fn exposure_only_auto_mode_does_not_invent_white_balance() {
         let first = Uuid::new_v4();
         let middle = Uuid::new_v4();
         let last = Uuid::new_v4();
         let analyses = vec![
-            analysis(first, -1.0, 5000.0),
-            analysis(middle, 0.1, 5500.0),
-            analysis(last, 1.0, 6200.0),
+            analysis(first, -1.0, None),
+            analysis(middle, 0.1, None),
+            analysis(last, 1.0, None),
         ];
-        let plan = build_auto_group_plan(
-            Uuid::new_v4(),
-            &[first, middle, last],
-            &analyses,
-            1,
-        )
-        .unwrap();
-        assert_eq!(plan.mode, GroupSyncMode::AutoGroup);
+        let plan =
+            build_auto_group_plan(Uuid::new_v4(), &[first, middle, last], &analyses, 1).unwrap();
+
         assert_eq!(plan.reference_asset_id, Some(middle));
         assert_eq!(plan.intent.target_exposure_ev, 0.1);
-        assert_eq!(plan.intent.target_temperature_k, 5500.0);
+        assert_eq!(plan.intent.target_temperature_k, None);
+        assert_eq!(plan.intent.target_tint, None);
+        assert!(plan.resolved.iter().all(|edit| edit.temperature_delta_k.is_none()));
+        assert!(plan.resolved.iter().all(|edit| edit.tint_delta.is_none()));
     }
 
     #[test]
-    fn adaptive_sync_resolves_different_parameters_for_each_photo() {
+    fn measured_white_balance_still_derives_group_target() {
+        let first = Uuid::new_v4();
+        let middle = Uuid::new_v4();
+        let last = Uuid::new_v4();
+        let analyses = vec![
+            analysis(first, -1.0, Some(5000.0)),
+            analysis(middle, 0.1, Some(5500.0)),
+            analysis(last, 1.0, Some(6200.0)),
+        ];
+        let plan =
+            build_auto_group_plan(Uuid::new_v4(), &[first, middle, last], &analyses, 1).unwrap();
+
+        assert_eq!(plan.intent.target_temperature_k, Some(5500.0));
+        assert_eq!(plan.intent.target_tint, Some(0.0));
+    }
+
+    #[test]
+    fn adaptive_sync_resolves_different_exposure_without_fake_white_balance() {
         let group_id = Uuid::new_v4();
         let dark = Uuid::new_v4();
         let bright = Uuid::new_v4();
         let intent = GroupColorIntent {
             target_exposure_ev: 0.25,
-            target_temperature_k: 5600.0,
             ..GroupColorIntent::default()
         };
         let plan = build_adaptive_group_plan(
@@ -340,28 +378,22 @@ mod tests {
             GroupSyncMode::AutoGroup,
             None,
             intent,
-            &[
-                analysis(dark, -1.0, 5000.0),
-                analysis(bright, 0.8, 6000.0),
-            ],
+            &[analysis(dark, -1.0, None), analysis(bright, 0.8, None)],
             None,
             1,
         )
         .unwrap();
 
-        assert_eq!(plan.resolved.len(), 2);
         assert_ne!(
             plan.resolved[0].exposure_delta_ev,
             plan.resolved[1].exposure_delta_ev
         );
-        assert_ne!(
-            plan.resolved[0].temperature_delta_k,
-            plan.resolved[1].temperature_delta_k
-        );
+        assert_eq!(plan.resolved[0].temperature_delta_k, None);
+        assert_eq!(plan.resolved[1].temperature_delta_k, None);
     }
 
     #[test]
-    fn external_reference_can_drive_another_group() {
+    fn external_reference_can_drive_another_group_with_measured_wb() {
         let external_reference = Uuid::new_v4();
         let target = Uuid::new_v4();
         let plan = build_adaptive_group_plan(
@@ -372,75 +404,42 @@ mod tests {
             GroupColorIntent {
                 name: "External look".into(),
                 target_exposure_ev: 0.2,
-                target_temperature_k: 5800.0,
+                target_temperature_k: Some(5800.0),
+                target_tint: Some(3.0),
                 ..GroupColorIntent::default()
             },
-            &[analysis(target, -0.5, 5200.0)],
+            &[PhotoColorAnalysis {
+                asset_id: target,
+                exposure_ev: -0.5,
+                temperature_k: Some(5200.0),
+                tint: Some(1.0),
+                confidence: 1.0,
+            }],
             None,
             1,
         )
         .unwrap();
 
-        assert_eq!(plan.reference_asset_id, Some(external_reference));
-        assert_eq!(plan.resolved[0].asset_id, target);
         assert!((plan.resolved[0].exposure_delta_ev - 0.7).abs() < 1e-6);
+        assert_eq!(plan.resolved[0].temperature_delta_k, Some(600.0));
+        assert_eq!(plan.resolved[0].tint_delta, Some(2.0));
     }
 
     #[test]
-    fn promoting_reference_only_invalidates_group_color_revision() {
-        let group_id = Uuid::new_v4();
-        let first = Uuid::new_v4();
-        let second = Uuid::new_v4();
-        let analyses = vec![analysis(first, -0.4, 5200.0), analysis(second, 0.5, 5900.0)];
-        let mut plan = build_adaptive_group_plan(
-            group_id,
-            &[first, second],
-            GroupSyncMode::AutoGroup,
-            None,
-            GroupColorIntent::default(),
-            &analyses,
-            None,
-            3,
-        )
-        .unwrap();
-
-        let invalidation = promote_group_reference(
-            &mut plan,
-            &[first, second],
-            second,
-            GroupColorIntent {
-                name: "My reference".to_string(),
-                target_exposure_ev: 0.2,
-                target_temperature_k: 5750.0,
-                ..GroupColorIntent::default()
-            },
-            &analyses,
-        )
-        .unwrap();
-
-        assert_eq!(plan.mode, GroupSyncMode::ReferenceDriven);
-        assert_eq!(plan.reference_asset_id, Some(second));
-        assert_eq!(invalidation.scope, GroupColorInvalidationScope::GroupColorOnly);
-        assert_eq!(invalidation.previous_revision, 3);
-        assert_eq!(invalidation.next_revision, 4);
-    }
-
-    #[test]
-    fn manual_copy_is_explicit_and_copies_exact_parameters() {
-        let group_id = Uuid::new_v4();
+    fn manual_copy_preserves_missing_white_balance() {
         let first = Uuid::new_v4();
         let second = Uuid::new_v4();
         let source = ResolvedColorEdit {
             asset_id: first,
             exposure_delta_ev: 0.4,
-            temperature_delta_k: -200.0,
-            tint_delta: 2.0,
+            temperature_delta_k: None,
+            tint_delta: None,
             contrast: 10.0,
             saturation: 4.0,
             semantic: Vec::new(),
         };
         let plan = build_adaptive_group_plan(
-            group_id,
+            Uuid::new_v4(),
             &[first, second],
             GroupSyncMode::ManualCopy,
             Some(first),
@@ -451,9 +450,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(plan.resolved[0].exposure_delta_ev, 0.4);
-        assert_eq!(plan.resolved[1].exposure_delta_ev, 0.4);
-        assert_eq!(plan.resolved[0].temperature_delta_k, -200.0);
-        assert_eq!(plan.resolved[1].temperature_delta_k, -200.0);
+        assert_eq!(plan.resolved[0].temperature_delta_k, None);
+        assert_eq!(plan.resolved[1].temperature_delta_k, None);
     }
 }

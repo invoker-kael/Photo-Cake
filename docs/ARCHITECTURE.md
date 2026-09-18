@@ -257,3 +257,35 @@ The remaining platform gap is project transport/synchronization between workstat
 ## Culling Explanation Layer
 
 `CullingRecommendation.reasons` is derived from the same measured `CullingScore` and duplicate evidence that produced the recommendation. It is presentation evidence, not a second scoring engine. Reasons currently cover sharpness, blur, exposure, duplicate relation and overall technical weakness/strength. Unknown semantic factors remain absent.
+
+
+## Companion Snapshot / Patch Boundary
+
+`photo-core::companion` defines a transport-neutral mobile contract:
+
+```text
+Workstation project stores
+        |
+        v
+CompanionSnapshot
+  - no RAW source_path
+  - effective groups
+  - culling recommendations + photographer reviews
+  - ReferenceSet/binding state
+  - metadata provenance
+  - portable preview index
+        |
+        v
+transport (file / LAN / future private mechanism)
+        |
+        v
+Android companion decisions
+        |
+        v
+CompanionDecisionPatch
+        |
+        v
+identity + membership + reject + concurrency validation
+```
+
+A patch cannot silently overwrite workstation decisions made after the snapshot. It also cannot reject the currently selected reference unless the patch clears/replaces that reference in the same validated change set.

@@ -10,11 +10,21 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "security": { "csp": null }
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/**"
+        ]
+      }
+    }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "android": { "minSdkVersion": 31 }
+    "android": {
+      "minSdkVersion": 31
+    }
   }
 }

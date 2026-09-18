@@ -95,6 +95,8 @@ Keep graceful fallback: edits that cannot be represented in Lightroom XMP may be
 ## Milestone E — Review and Personal Style
 
 - fast before/after review;
+- exception-first Recipe review reuses saved per-photo exceptions plus existing Cull decisions to surface uncertain photos first, with a full All view still available;
+- Lightroom handoff counts only deliverable Recipes after photographer-confirmed Reject photos are excluded and surfaces per-photo exception counts before writing;
 - exception-first Cull triage is implemented for unconfirmed Review/RejectSuggestion items and analysis-pending photos; future model-specific confidence can refine ordering when reliable confidence exists;
 - explicit "Confirm visible" batch confirmation is implemented for currently surfaced AI suggestions; it writes photographer decisions transactionally, skips pending items/existing decisions and protects selected References from batch Reject; richer batch-scope controls can follow only if real shoots need them;
 - learn from accepted/rejected Recipes and user corrections;
@@ -131,3 +133,5 @@ Implemented since the previous milestone: the workstation Cull view supports per
 
 
 Current WB status: provenance capture and persistence are implemented; Lightroom Temperature/Tint synthesis is intentionally still gated. Partial WB never reaches Recipe/XMP.
+
+Recipe triage now defaults to an exception-first attention set built from existing photographer/AI Cull evidence plus persisted per-photo overrides; it does not introduce a second scoring model. The Lightroom page now previews the real deliverable XMP count after confirmed Rejects are removed and shows how many deliverable photos carry photo-specific exceptions.

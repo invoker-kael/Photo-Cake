@@ -41,6 +41,7 @@ export type {
 
 type WorkspaceView = "library" | "cull" | "groups" | "reference" | "review" | "lightroom";
 type CullViewMode = "TRIAGE" | "ALL";
+type ReviewViewMode = "TRIAGE" | "ALL";
 
 const stageProgress: Record<BatchStage, number> = {
   IMPORT: 5,
@@ -176,6 +177,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [cullingReviews, setCullingReviews] = useState<Record<string, CullingUserDecision>>({});
   const [cullingLoading, setCullingLoading] = useState(false);
   const [cullViewMode, setCullViewMode] = useState<CullViewMode>("TRIAGE");
+  const [reviewViewMode, setReviewViewMode] = useState<ReviewViewMode>("TRIAGE");
   const [cullBatchUpdating, setCullBatchUpdating] = useState(false);
   const [groupRevision, setGroupRevision] = useState(0);
   const [groupRefining, setGroupRefining] = useState(false);
@@ -490,6 +492,34 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     const values = culling.flatMap((group) => group.recommendations);
     return new Map(values.map((item) => [item.asset_id, item]));
   }, [culling]);
+
+  const recipeReviewPriority = (assetId: string) => {
+    const userDecision = cullingReviews[assetId];
+    if (userDecision === "REJECT") return 99;
+    if (recipeReviews[assetId]) return 0;
+    if (userDecision === "REVIEW") return 1;
+
+    const recommendation = cullingRecommendations.get(assetId);
+    if (!userDecision && recommendation?.decision === "REJECT_SUGGESTION") return 2;
+    if (!userDecision && recommendation?.decision === "REVIEW") return 3;
+    return 10;
+  };
+
+  const recipeReviewLabel = (assetId: string) => {
+    const userDecision = cullingReviews[assetId];
+    if (userDecision === "REJECT") return "Photographer Reject · excluded from Lightroom";
+    if (recipeReviews[assetId]) return "Saved per-photo exception";
+    if (userDecision === "REVIEW") return "Photographer marked Review";
+
+    const recommendation = cullingRecommendations.get(assetId);
+    if (!userDecision && recommendation?.decision === "REJECT_SUGGESTION") {
+      return "AI cull: Reject suggestion";
+    }
+    if (!userDecision && recommendation?.decision === "REVIEW") {
+      return "AI cull: Review";
+    }
+    return "Adaptive Recipe";
+  };
 
   const cullingGroupNumbers = useMemo(
     () => new Map(culling.map((group, index) => [group.group_id, index + 1])),
@@ -1448,6 +1478,24 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <strong>Recipe review</strong>
         <span>Group style stays shared · only photo-specific exceptions are stored here</span>
       </div>
+      <div className="cull-toolbar">
+        <span>
+          {reviewViewMode === "TRIAGE"
+            ? "Triage reuses Cull decisions and saved per-photo exceptions so attention goes to uncertain photos first."
+            : "All shows every adaptive Recipe, including photos already considered straightforward."}
+        </span>
+        <div className="cull-view-switch" role="group" aria-label="Recipe review view mode">
+          {(["TRIAGE", "ALL"] as ReviewViewMode[]).map((viewMode) => (
+            <button
+              className={reviewViewMode === viewMode ? "active" : ""}
+              key={viewMode}
+              onClick={() => setReviewViewMode(viewMode)}
+            >
+              {viewMode === "TRIAGE" ? "Triage" : "All"}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="recipe-review-groups">
         {photoContext?.groups.map((group, groupIndex) => {
           const preview = referencePreviews[group.id];
@@ -1472,14 +1520,52 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             );
           }
 
+          const recipesWithTargets = preview.recipes.filter(
+            (recipe) => recipe.target_asset_id != null,
+          );
+          const reviewRecipes =
+            reviewViewMode === "ALL"
+              ? recipesWithTargets
+              : recipesWithTargets
+                  .filter((recipe) => recipeReviewPriority(recipe.target_asset_id!) < 10)
+                  .slice()
+                  .sort((left, right) => {
+                    const leftId = left.target_asset_id!;
+                    const rightId = right.target_asset_id!;
+                    const byPriority =
+                      recipeReviewPriority(leftId) - recipeReviewPriority(rightId);
+                    if (byPriority !== 0) return byPriority;
+
+                    const byQuality =
+                      (cullingRecommendations.get(leftId)?.quality_score ?? 1) -
+                      (cullingRecommendations.get(rightId)?.quality_score ?? 1);
+                    if (Math.abs(byQuality) > 0.0001) return byQuality;
+
+                    return (
+                      (cullingRecommendations.get(leftId)?.group_rank ??
+                        Number.MAX_SAFE_INTEGER) -
+                      (cullingRecommendations.get(rightId)?.group_rank ??
+                        Number.MAX_SAFE_INTEGER)
+                    );
+                  });
+
           return (
             <div className="recipe-review-group" key={group.id}>
               <div className="recipe-review-head">
                 <strong>Group {groupIndex + 1}</strong>
-                <span>{preview.recipes.length} adaptive Recipes</span>
+                <span>
+                  {reviewViewMode === "TRIAGE"
+                    ? `${reviewRecipes.length} attention · ${recipesWithTargets.length} total Recipes`
+                    : `${recipesWithTargets.length} adaptive Recipes`}
+                </span>
               </div>
+              {reviewViewMode === "TRIAGE" && reviewRecipes.length === 0 && (
+                <div className="panel-note">
+                  Recipe triage is clear for this group. Switch to All for a full visual pass.
+                </div>
+              )}
               <div className="recipe-review-grid">
-                {preview.recipes.map((recipe) => {
+                {reviewRecipes.map((recipe) => {
                   const assetId = recipe.target_asset_id;
                   if (!assetId) return null;
                   const review = recipeReviews[assetId];
@@ -1522,6 +1608,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       </div>
                       <div className="recipe-review-info">
                         <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
+                        <small>{recipeReviewLabel(assetId)}</small>
                         <small>
                           Final exposure {signed(recipe.adjustments.exposure ?? 0)} EV
                           {review ? ` · override ${signed(review.exposure_delta_ev)} EV` : ""}
@@ -1584,16 +1671,27 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           const binding = referenceBindings[group.id];
           const preview = referencePreviews[group.id];
           const result = handoffResults[group.id];
+          const targetedRecipes =
+            preview?.recipes.filter((recipe) => recipe.target_asset_id != null) ?? [];
+          const deliverableRecipes = targetedRecipes.filter(
+            (recipe) =>
+              recipe.target_asset_id != null &&
+              cullingReviews[recipe.target_asset_id] !== "REJECT",
+          );
+          const rejectedCount = targetedRecipes.length - deliverableRecipes.length;
+          const exceptionCount = deliverableRecipes.filter(
+            (recipe) =>
+              recipe.target_asset_id != null && recipeReviews[recipe.target_asset_id] != null,
+          ).length;
           const ready =
             binding != null &&
             preview != null &&
             preview.pending_asset_id == null &&
-            preview.recipes.length > 0;
-          const writesWhiteBalance =
-            preview?.recipes.some(
-              (recipe) =>
-                recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
-            ) ?? false;
+            deliverableRecipes.length > 0;
+          const writesWhiteBalance = deliverableRecipes.some(
+            (recipe) =>
+              recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
+          );
 
           return (
             <div className="handoff-card" key={group.id}>
@@ -1608,11 +1706,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <small>
                   {preview?.pending_asset_id
                     ? "Waiting for exposure evidence"
-                    : preview?.recipes.length
-                      ? `${preview.recipes.length} XMP targets · WB ${writesWhiteBalance ? "measured" : "untouched"}`
-                      : "No adaptive Recipe preview yet"}
+                    : preview
+                      ? [
+                          `${deliverableRecipes.length} XMP targets`,
+                          rejectedCount ? `${rejectedCount} confirmed Reject skipped` : null,
+                          exceptionCount ? `${exceptionCount} photo exceptions` : null,
+                          `WB ${writesWhiteBalance ? "measured" : "untouched"}`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
+                      : "Resolve adaptive Recipes first"}
                 </small>
-                <small>Explicit Reject photos are excluded; AI suggestions alone never delete or exclude files.</small>
               </div>
 
               <div className="handoff-actions">
@@ -1631,7 +1735,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       {handoffRunning === group.id
                         ? "Writing XMP…"
                         : ready
-                          ? `Write ${preview.recipes.length} XMP`
+                          ? `Write ${deliverableRecipes.length} XMP`
                           : "Not ready"}
                     </button>
                     <small>No overwrite: any existing same-basename XMP stops the group before writing.</small>

@@ -223,3 +223,12 @@ Android culling must use the snapshot's precomputed recommendations instead of r
 Cull defaults to an exception-first Triage view for large shoots. Triage shows unresolved AI Review / RejectSuggestion items and analysis-pending photos, while hiding AI Keep items and photos that already have an explicit photographer decision. Within unresolved scored items, RejectSuggestion comes first and lower technical quality is surfaced before stronger candidates. This is presentation ordering only: it does not create a new score, change AI evidence, override photographer decisions or delete/exclude source files. The photographer can switch to All at any time to inspect the complete culling set.
 
 "Confirm visible" is an explicit photographer action that transactionally persists only currently visible, scored and previously unconfirmed AI suggestions. Pending photos and existing photographer decisions are untouched. A currently selected group Reference is protected from batch conversion of RejectSuggestion into Reject; the photographer must first choose another Reference or make that decision individually. In Triage this confirms unresolved Review/RejectSuggestion items; in All it can also confirm visible AI Keep suggestions.
+
+## Exception-first Recipe Review
+
+Recipe Review defaults to a Triage view instead of asking the photographer to inspect every adaptive Recipe. Triage reuses existing decision evidence only: saved per-photo Recipe exceptions, explicit photographer `Review` culling decisions, and unresolved AI `Review` / `RejectSuggestion` recommendations. Photographer-confirmed `Reject` photos are not part of Recipe triage because they are excluded from Lightroom delivery. Switching to All restores the complete Recipe set for a full visual pass.
+
+This ordering is presentation logic, not a new quality model. Within the attention set, persisted per-photo exceptions come first, then explicit photographer Review decisions, then unresolved AI culling warnings; measured culling quality and group rank only break ties. Photo-Cake does not invent a new review score or silently modify a Recipe.
+
+Lightroom handoff must report the actual deliverable target count after photographer-confirmed Reject photos are excluded. The handoff summary also exposes how many confirmed Rejects are skipped and how many deliverable photos contain persisted per-photo Recipe exceptions, so the number shown before writing matches the intended XMP batch.
+

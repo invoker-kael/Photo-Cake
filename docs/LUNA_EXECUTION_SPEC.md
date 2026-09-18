@@ -2,314 +2,117 @@
 
 ## Purpose
 
-This is the primary execution document for Luna.
-
-Luna must read this document before implementation.
+This is the execution authority for Luna.
 
 Goal:
 
-Build a personal semi-automatic photography workflow product.
+Build a local-first semi-automatic photography workflow product.
 
-Photo-Cake is not a Lightroom replacement. It prepares intelligent edits, keeps original RAW files, and provides Lightroom-compatible workflows plus optional direct export.
+Photo-Cake assists photographers by reducing repetitive editing while keeping RAW files, Lightroom compatibility, and user control.
 
----
-
-# Execution Order
+## Execution Order
 
 1. Read this document
 2. Read product requirements
-3. Read architecture documents
-4. Inspect current implementation
-5. Implement the smallest complete working increment
-6. Add tests
-7. Verify build
+3. Read architecture
+4. Inspect current code
+5. Implement the smallest complete increment
+6. Test
+7. Build verification
 8. Continue current phase
 
----
+## Product Workflow
 
-# Product Workflow
-
-```
+```text
 RAW Import
-    |
-Metadata Extraction
-    |
-AI Culling
-    |
+ |
+Metadata
+ |
+Smart Culling
+ |
 Photo Grouping
-    |
-Reference Photo Selection
-    |
-Style Analysis
-    |
+ |
+Reference Style Analysis
+ |
 Recipe Generation
-    |
-Edit Graph
-    |
-Preview / Human Approval
-    |
-+----------------+
-|                |
-XMP Output       Direct Export
-|                |
-Lightroom        JPEG/TIFF
-```
-
----
-
-# Core Product Rules
-
-- Original RAW files are immutable.
-- RAW + XMP is the default workflow.
-- Do not create large intermediate files automatically.
-- Direct export remains available on demand.
-- XMP and export must use the same Recipe model.
-- Prefer working product features over architecture expansion.
-- Keep the application local-first.
-- Do not add unnecessary cloud, account, multi-user, or plugin features.
-
----
-
-# Intelligent Culling Workflow
-
-Photo-Cake should reduce manual photo selection work before editing.
-
-Analyze:
-
-- Blur and focus quality
-- Exposure problems
-- Closed eyes
-- Facial expression quality
-- Duplicate and burst photos
-- Obvious failed compositions
-
-Output:
-
-```
-Photo
  |
-Quality Score
+Preview Review
  |
-Keep / Review / Reject suggestion
++-------------+
+|             |
+XMP           Export
+|
+Lightroom     JPEG/TIFF
 ```
 
-Culling assists the user and must not destroy original files.
+## Execution Rules
 
----
+- Preserve original RAW files.
+- Use RAW + XMP as the default workflow.
+- Do not create unnecessary large files.
+- Keep direct export available.
+- Use one Recipe model for XMP and export.
+- Prefer working user features over architecture expansion.
+- Keep local-first operation.
+- Do not add cloud/account/plugin features unless required.
 
-# Photo Group Model
+## Current Product Model
 
-Groups are first-class objects.
+Priority order:
 
-Workflow:
-
-```
-Photo
- |
- v
-Photo Group
- |
- v
-Recipe
-```
-
-Examples:
-
-- Travel day
-- Landscape
-- Portrait
-- Indoor lighting
-- Night scene
-
-Different groups can receive different Recipes.
-
----
-
-# Reference Photo Workflow
-
-Photo-Cake must support a reference-based workflow.
-
-Purpose:
-
-Allow the user to select preferred edited photos and apply visual intent to similar photos.
-
-Flow:
-
-```
-Reference Photos
-      |
-      v
-Style Analysis
-      |
-      v
-Generate Recipe
-      |
-      v
-Apply to Similar Photo Group
+```text
+Culling
+  -> Grouping
+  -> Reference Style
+  -> Recipe
+  -> Review
+  -> Output
 ```
 
-Analyze:
+## Phase 1 Completion Target
 
-- Exposure style
-- White balance
-- Contrast
-- Color characteristics
-- Skin tone preference
-- Lighting style
+Build the foundation required for a real photography workflow:
 
-The goal is consistent batch editing, not copying pixels.
-
----
-
-# Non-destructive Editing Model
-
-Editing must be represented as editable data.
-
-Architecture:
-
-```
-RAW
- |
- v
-Edit Graph
- |
- v
-Recipe
- |
- +------------+
- |            |
- v            v
-XMP        Render Export
-```
-
-Do not directly modify original files.
-
-Future AI features must generate editable intent instead of destructive image replacement.
-
----
-
-# Human Approval Workflow
-
-Photo-Cake is semi-automatic, not fully automatic.
-
-Required workflow:
-
-```
-AI Processing
- |
-Preview Comparison
- |
-User Approval
- |
-Apply XMP / Export
-```
-
-The user must be able to review results before final output.
-
----
-
-# Personal Style Learning
-
-Future versions may learn user preferences from:
-
-- Accepted Recipes
-- User modifications
-- Common adjustment patterns
-- Reference selections
-
-The goal is improving personal workflow efficiency, not replacing user decisions.
-
----
-
-# Phase 1 - Foundation
-
-Deliver:
-
-- RAW file indexing
+- RAW indexing
 - Metadata extraction
-- Asset database
+- Asset management
+- Preview foundation
 - Recipe schema
-- XMP sidecar generation
-- Direct export framework
-- Validation tests
+- XMP generation
+- Export framework
 
-User acceptance:
+Acceptance:
 
-Given:
+Input:
 
-```
+```text
 IMG.CR3
 ```
 
-Photo-Cake can generate:
+Output:
 
-```
+```text
 IMG.XMP
 ```
 
-and Lightroom can open the RAW with adjustments available.
+Lightroom must read the RAW and show adjustments.
 
----
+## Development Restrictions
 
-# Phase 2 - Smart Analysis
+Do not prioritize:
 
-Deliver:
+- Full RAW replacement engine
+- Lightroom plugin
+- Cloud AI service
+- Complex social/account features
 
-- Blur detection
-- Exposure analysis
-- Face quality analysis
-- Similar photo grouping
-- Best photo selection
-- Scene-based grouping
-- Intelligent culling
+These belong to later roadmap phases.
 
----
+## Completion Criteria
 
-# Phase 3 - AI Processing
+A feature is complete when:
 
-Deliver:
-
-- Reference look analysis
-- AI Retouch Plan
-- Batch recipe application
-- Portrait enhancement planning
-- Lighting adjustment planning
-
----
-
-# Phase 4 - Advanced RAW Pipeline
-
-Only after previous phases are stable:
-
-- RAW decoder
-- GPU acceleration
-- Full render engine
-
----
-
-# Output Requirements
-
-Primary:
-
-```
-RAW + XMP
-```
-
-Secondary:
-
-```
-JPEG/TIFF export on demand
-```
-
-Never generate large exports automatically.
-
----
-
-# Completion Criteria
-
-A feature is complete only when:
-
-- Code implemented
-- Tests added or updated
-- Build passes
-- User workflow works
+- Implementation exists
+- Tests pass
+- Build succeeds
+- User photography workflow is improved

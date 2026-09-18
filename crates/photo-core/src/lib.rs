@@ -7,6 +7,7 @@ pub mod color_sync;
 pub mod color_sync_store;
 pub mod export;
 pub mod export_store;
+pub mod export_worker;
 pub mod grouping;
 pub mod handoff;
 pub mod handoff_store;
@@ -44,6 +45,7 @@ pub use export::{
     ExportRecipe, ResizeRecipe,
 };
 pub use export_store::{ExportCheckpoint, ExportStatus, ExportStore, ExportStoreError};
+pub use export_worker::{ExportJob, ExportRenderer, ExportWorker, ExportWorkerError, recover_interrupted_export};
 pub use grouping::{
     initial_group_raw_assets, GroupingBasis, InitialGroupingConfig, PhotoGroup, PhotoGroupKind,
 };

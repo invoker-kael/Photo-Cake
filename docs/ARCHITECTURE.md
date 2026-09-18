@@ -2,9 +2,9 @@
 
 ## Scope
 
-Photo-Cake is a local-first semi-automatic photography workflow application.
+Photo-Cake is a local-first semi-automatic photography workflow assistant.
 
-The architecture follows the photographer workflow:
+The architecture follows the real photographer workflow:
 
 ```text
 RAW Collection
@@ -28,13 +28,13 @@ Recipe / Edit Graph
 XMP     Direct Export
 ```
 
-The goal is reducing repetitive editing while keeping photographer control.
+The goal is reducing repetitive editing while keeping RAW files, Lightroom compatibility and photographer control.
 
 ---
 
 # Existing Code Reuse
 
-Current repository structure remains the foundation:
+The existing workspace remains the foundation.
 
 ```text
 apps/
@@ -46,29 +46,11 @@ crates/
  └── photo-inference
 ```
 
-Extend existing modules before creating new systems.
+Extend existing modules before creating parallel systems.
 
 ---
 
-# photo-core
-
-Shared photography workflow engine.
-
-Responsibilities:
-
-- catalog
-- RAW asset identity
-- metadata
-- preview
-- photo grouping
-- culling decisions
-- reference sets
-- style profile storage
-- Recipe/Edit Graph
-- batch jobs
-- XMP/export interfaces
-
-Current workflow objects:
+# Core Workflow Objects
 
 ```text
 Photo Asset
@@ -84,11 +66,11 @@ Recipe
 XMP / Export
 ```
 
+A group of photos is the main editing unit, not an isolated image.
+
 ---
 
 # Reference Driven Editing
-
-Reference photos are the source of photographer preference.
 
 ```text
 Favorite Photos
@@ -106,15 +88,31 @@ Recipe
 XMP / Export
 ```
 
-The system should learn from selected photos, not replace photographer decisions.
+The system learns photographer preference from selected references instead of replacing decisions.
 
 ---
 
-# Recipe Driven Editing
+# Recipe and Lightroom Bridge
 
-Recipe is the unified editing decision model.
+Recipe is the source of editing decisions.
 
-Initial adjustments:
+RAW files remain immutable.
+
+Flow:
+
+```text
+Recipe
+  |
+  v
+XMP Mapping
+  |
+  v
+Lightroom
+```
+
+Direct export uses the same Recipe model.
+
+Initial supported adjustments:
 
 - exposure
 - contrast
@@ -124,36 +122,12 @@ Initial adjustments:
 - tint
 - saturation
 
-Future extensions:
+Future:
 
 - HSL
 - tone curve
 - skin tone preference
 - personal style profile
-
-RAW files remain immutable.
-
----
-
-# AI Layer
-
-## photo-inference
-
-Responsible for:
-
-Current:
-
-- image analysis
-- similarity detection
-- segmentation
-- local model execution
-
-Future:
-
-- quality scoring
-- smart culling
-- style extraction
-- editing suggestions
 
 ---
 
@@ -167,7 +141,7 @@ Catalog
  -> Reference Set
  -> Style Profile
  -> Recipe
- -> XMP
+ -> XMP Mapping
  -> Export
  -> Advanced AI
 ```

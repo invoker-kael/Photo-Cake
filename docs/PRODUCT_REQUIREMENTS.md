@@ -37,7 +37,10 @@ Photo Grouping
 Reference Style Learning
     |
     v
-Recipe Generation
+Adaptive Group Sync
+    |
+    v
+Per-photo Recipe Generation
     |
     v
 Review
@@ -182,3 +185,8 @@ A photographer can process hundreds of RAW files by:
 4. Generating editing decisions
 5. Reviewing results
 6. Continuing in Lightroom or exporting directly
+
+
+## Adaptive Batch Editing
+
+A group must not receive a blind copy of one photo's values. The reference defines the desired look; Photo-Cake resolves that intent against each photo's measured exposure/white-balance state, then creates a target-bound Recipe and XMP sidecar for that photo.

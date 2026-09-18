@@ -203,6 +203,24 @@ h2 { font-size: 19px; }
 .reference-candidate span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
 .reference-candidate small { color: #747c81; font-size: 10px; }
 
+
+.handoff-groups { display: grid; gap: 12px; padding: 14px; }
+.handoff-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 18px;
+  padding: 14px;
+  border: 1px solid #22272a;
+  border-radius: 10px;
+  background: #101315;
+}
+.handoff-card-main, .handoff-actions { display: grid; align-content: start; gap: 6px; }
+.handoff-card-main > span { color: #70787d; font-size: 10px; }
+.handoff-card-main > strong { font-size: 15px; }
+.handoff-card small, .handoff-actions small { color: #737b80; font-size: 10px; line-height: 1.45; }
+.handoff-actions { justify-items: end; text-align: right; }
+.handoff-actions strong { font-size: 13px; color: #bfd4c3; }
+
 .automation-panel {
   grid-area: auto;
   padding: 26px 22px;
@@ -249,6 +267,8 @@ h2 { font-size: 19px; }
   .photo-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-card.wide { grid-column: 1 / -1; }
   .group-grid, .group-detail-grid, .reference-candidates { grid-template-columns: 1fr; }
+  .reference-group-head, .handoff-card { grid-template-columns: 1fr; }
+  .handoff-actions { justify-items: start; text-align: left; }
   .reference-group-head { flex-direction: column; }
   .reference-current { min-width: 0; justify-items: start; }
   .cull-row { grid-template-columns: 30px minmax(0, 1fr); }

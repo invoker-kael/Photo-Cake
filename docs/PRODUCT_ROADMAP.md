@@ -62,7 +62,8 @@ Improve culling from a data model into a practical selection assistant:
 - people/face/subject evidence from existing segmentation is surfaced now; eye-state/expression must wait for a dedicated reliable local model;
 - exposure-failure detection;
 - group-relative best-candidate ranking;
-- user override persistence.
+- user override persistence;
+- concise measurable reason labels for each recommendation so the photographer can see whether blur, exposure or near-duplicate evidence drove the suggestion.
 
 Acceptance: a large burst or event reduces to sensible Keep/Review/RejectSuggestion candidates without deleting anything.
 

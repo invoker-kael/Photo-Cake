@@ -177,3 +177,8 @@ Every newly written Photo-Cake XMP must parse back into the supported edit state
 ## RAW Metadata Rule
 
 Initial Moment grouping should use reliable embedded metadata before filesystem timestamps. `metadata` reads standard EXIF Make/Model and DateTimeOriginal/DateTime without modifying the RAW; failure is a normal fallback, not an import error. Do not interpret EXIF Auto/Manual white-balance mode or rendered JPEG colors as numeric Kelvin/tint evidence.
+
+
+## Metadata Persistence Rule
+
+RAW/EXIF extraction is best-effort. When rescanning a known asset, newly available camera/capture metadata may enrich the catalog, but a transient metadata-read failure must not erase previously persisted `camera_id` or `capture_time_ms`. Filesystem modification time may refresh independently as fallback evidence.

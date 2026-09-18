@@ -500,6 +500,7 @@ h2 { font-size: 19px; }
   .top-actions .secondary { display: none; }
   .sidebar { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; height: 62px; padding: 5px 8px; border: 0; border-top: 1px solid #24282b; }
   .sidebar nav { grid-template-columns: repeat(6, 1fr); }
+  .mode-companion .sidebar nav { grid-template-columns: repeat(4, 1fr); }
   .nav-item { min-height: 50px; }
   .workspace { padding: 18px 12px; }
   .batch-head { align-items: stretch; flex-direction: column; }

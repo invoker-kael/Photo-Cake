@@ -150,3 +150,20 @@ Full RAW-engine replacement, cloud editing, accounts and a Lightroom database/pl
 The persistent batch runner is preparation infrastructure, not the whole photographer workflow. New RAW items run `IMPORT -> ANALYZE -> DONE`, where DONE means reusable local evidence is ready. Grouping, culling review, reference selection, adaptive Recipes and XMP handoff operate above that per-photo preparation queue. Legacy preset/retouch/QA/export stage values remain loadable for old project data and explicit adapters, but new RAW imports do not automatically traverse no-op editing/export stages.
 
 The Windows workstation now exposes the existing `RawImporter::import_directory` through a native directory picker. Android keeps the companion role and shares UI/core contracts without duplicating Windows filesystem behavior.
+
+
+## Smart Culling Evidence Flow
+
+The implemented culling path reuses Analyze output instead of running a second inference pass:
+
+```text
+RAW preview
+  -> deterministic technical quality (sharpness/blur/exposure)
+  -> cached QualityScoring artifact
+  + cached image embedding
+  -> PhotoGroup-scoped duplicate similarity
+  -> Keep / Review / RejectSuggestion ranking
+  -> workstation Cull view
+```
+
+Unknown semantic evidence such as expression or composition remains absent rather than being given invented neutral scores. If an asset has no cached quality evidence yet, the Cull view reports it as pending. Near-duplicate comparison stays inside the current Photo Group and only demotes lower-ranked alternatives to Review; originals are never deleted.

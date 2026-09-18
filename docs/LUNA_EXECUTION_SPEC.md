@@ -211,3 +211,8 @@ Do not depend on a specific XML namespace prefix when reading supported XMP attr
 Android reuses shared `photo-core` persistence and may read/write photographer selection/reference decisions. Treat platform bridge methods as capabilities: do not add fake no-op or always-error workstation methods merely to satisfy an interface. Keep RAW import/analyze control, StyleProfile/Recipe editing, direct export and Lightroom XMP writes workstation-only.
 
 The next Android gap is transport of project DB/state and preview artifacts between workstation and device. Solve transport separately from photography business logic; do not introduce cloud accounts or duplicate stores just to synchronize.
+
+
+## Explainable Cull Rule
+
+Cull must explain suggestions from measured evidence without creating a parallel score. Reuse `CullingRecommendation.reasons`; do not infer subjective composition quality, eye state or expression when those signals were not measured. Explanation changes must not alter photographer authority or delete/exclude files automatically.

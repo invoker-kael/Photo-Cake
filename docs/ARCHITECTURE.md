@@ -212,3 +212,30 @@ Per-photo Recipe -> XMP
 ```
 
 This keeps the look consistent while allowing each photo to receive different numeric corrections.
+
+
+---
+
+# Two-stage Photo Grouping
+
+Reuse both existing grouping layers instead of replacing either one:
+
+```text
+RAW metadata / capture time / sequence
+        |
+        v
+Moment PhotoGroup
+        |
+classification + embedding
+        |
+        v
+SemanticPhotoGroup refinement
+        |
+        v
+Shared PhotoGroup (SIMILAR / SEMANTIC_SIMILARITY)
+        |
+        v
+Reference -> adaptive Recipe
+```
+
+The metadata pass is cheap and immediate. Semantic refinement is local-AI assisted and stays scoped to the parent moment group, preventing unrelated trips or events from being merged globally.

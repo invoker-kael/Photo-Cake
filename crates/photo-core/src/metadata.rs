@@ -83,11 +83,10 @@ fn rational_array<const N: usize>(field: Option<&exif::Field>) -> Option<[RawRat
     if values.len() != N || values.iter().any(|value| value.denom == 0) {
         return None;
     }
-    std::array::from_fn(|index| RawRational {
+    Some(std::array::from_fn(|index| RawRational {
         num: values[index].num,
         denom: values[index].denom,
-    })
-    .into()
+    }))
 }
 
 fn ascii_field(field: &exif::Field) -> Option<String> {

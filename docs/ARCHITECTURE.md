@@ -386,3 +386,14 @@ Automatic grouping remains the default, but the photographer can correct the sma
 Merge preserves the earliest group ID and chronological member order. Split preserves the original group ID for the left side and creates one new ID for the right side. Semantic children are removed when their parent is manually corrected.
 
 All grouping mutations are blocked after any Reference selection in the current batch. This prevents a grouping correction from silently orphaning Reference bindings, Recipe lineage, review fingerprints or Lightroom delivery state. The photographer must clear References first if they intentionally want to regroup.
+
+
+## Batch Reference Setup
+
+Reference selection now has an explicit batch path for large shoots, but it still reuses the same per-group shortlist and ReferenceStore model. The UI may preselect the current best starting candidate for a group only when that candidate is already supported by photographer Keep/Review or completed culling evidence that is not an AI Reject suggestion.
+
+The batch request sends explicit `group_id + asset_id` pairs. The Windows backend revalidates every pair against the current effective batch groups, current culling reviews and current cached culling recommendations. Existing Reference bindings are never overwritten by this batch path; changing an already referenced group remains an individual deliberate action.
+
+After all requests validate, ReferenceStore creates the missing single-photo ReferenceSets and group bindings in one SQLite transaction. Duplicate groups, stale group membership, photographer Reject, missing culling evidence, AI RejectSuggestion, or an already-bound group aborts the complete request before any selected group is written.
+
+This is a batch confirmation surface, not automatic Reference selection. It follows the same scalable pattern as Cull `Confirm visible`, Recipe `Confirm visible`, batch look sync and Lightroom batch handoff: derive useful defaults, let the photographer choose the scope, then commit that scope transactionally.

@@ -15,6 +15,8 @@ import App, {
   type BackendLightroomHandoffResult,
   type BackendPhotoContext,
   type BackendRawImportResult,
+  type BackendReferenceBatchItem,
+  type BackendReferenceBatchResult,
   type BackendReferenceBinding,
   type BackendRecipeReviewBatchItem,
   type BackendRecipeReviewBatchResult,
@@ -85,6 +87,11 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendReferenceBinding[]>("batch_reference_bindings", { batchId }),
   setGroupReference: (groupId, assetId) =>
     invoke<BackendReferenceBinding>("set_group_reference", { groupId, assetId }),
+  setGroupReferences: (batchId, items: BackendReferenceBatchItem[]) =>
+    invoke<BackendReferenceBatchResult>("set_group_references", {
+      batchId,
+      items,
+    }),
   clearGroupReference: (groupId) =>
     invoke<void>("clear_group_reference", { groupId }),
   loadRecipeReviews: (batchId) =>

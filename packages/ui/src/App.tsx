@@ -12,6 +12,8 @@ import {
   type BackendLightroomHandoffResult,
   type BackendPhotoContext,
   type BackendRawMetadataEvidence,
+  type BackendReferenceBatchItem,
+  type BackendReferenceBatchResult,
   type BackendReferenceBinding,
   type BackendRecipeReviewBatchItem,
   type BackendRecipeReviewBatchResult,
@@ -41,6 +43,8 @@ export type {
   BackendLightroomHandoffResult,
   BackendPhotoContext,
   BackendRawImportResult,
+  BackendReferenceBatchItem,
+  BackendReferenceBatchResult,
   BackendReferenceBinding,
   BackendRecipeReviewBatchItem,
   BackendRecipeReviewBatchResult,
@@ -279,6 +283,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [groupMergeSelection, setGroupMergeSelection] = useState<string[]>([]);
   const [groupSplitPoints, setGroupSplitPoints] = useState<Record<string, string>>({});
   const [referenceBindings, setReferenceBindings] = useState<Record<string, BackendReferenceBinding>>({});
+  const [referenceBatchTargets, setReferenceBatchTargets] = useState<string[]>([]);
+  const [referenceBatchUpdating, setReferenceBatchUpdating] = useState(false);
+  const [referenceBatchNote, setReferenceBatchNote] = useState<string | null>(null);
   const [referenceStyles, setReferenceStyles] = useState<Record<string, BackendGroupReferenceStyle>>({});
   const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
   const [recipeReviews, setRecipeReviews] = useState<Record<string, BackendRecipeReviewOverride>>({});
@@ -354,6 +361,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setGroupMergeSelection([]);
     setGroupSplitPoints({});
     setGroupRefinementNote(null);
+    setReferenceBatchTargets([]);
+    setReferenceBatchNote(null);
   }, [activeBatchId]);
 
   useEffect(() => {
@@ -872,6 +881,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         );
       });
 
+  const batchReferenceCandidateForGroup = (assetIds: string[]) =>
+    referenceCandidatesForGroup(assetIds).find((assetId) => {
+      const user = cullingReviews[assetId];
+      if (user === "KEEP" || user === "REVIEW") return true;
+      if (user === "REJECT") return false;
+      const recommendation = cullingRecommendations.get(assetId);
+      return (
+        recommendation != null &&
+        recommendation.decision !== "REJECT_SUGGESTION"
+      );
+    });
+
   const isPaused = bridge
     ? summary.paused > 0 && summary.running === 0 && summary.pending === 0
     : demoPaused;
@@ -1095,11 +1116,45 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     }
   };
 
+  const setSuggestedReferences = async (
+    items: BackendReferenceBatchItem[],
+  ) => {
+    if (!bridge?.setGroupReferences || !activeBatch || items.length === 0) return;
+    setReferenceBatchUpdating(true);
+    setReferenceBatchNote(null);
+    try {
+      const result: BackendReferenceBatchResult = await bridge.setGroupReferences(
+        activeBatch.id,
+        items,
+      );
+      setReferenceBindings((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          result.bindings.map((binding) => [binding.group_id, binding]),
+        ),
+      }));
+      setReferenceBatchTargets([]);
+      setReferenceBatchNote(
+        `Set ${result.bindings.length} suggested References. Review or replace any group individually below.`,
+      );
+      setEditedPreviews({});
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setReferenceBatchUpdating(false);
+    }
+  };
+
   const setReferencePhoto = async (groupId: string, assetId: string) => {
     if (!bridge?.setGroupReference) return;
     try {
       const binding = await bridge.setGroupReference(groupId, assetId);
       setReferenceBindings((current) => ({ ...current, [groupId]: binding }));
+      setReferenceBatchTargets((current) =>
+        current.filter((value) => value !== groupId),
+      );
+      setReferenceBatchNote(null);
       setEditedPreviews({});
       setBackendError(null);
     } catch (error) {
@@ -1116,6 +1171,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         delete next[groupId];
         return next;
       });
+      setReferenceBatchNote(null);
       setEditedPreviews({});
       setBackendError(null);
     } catch (error) {
@@ -1987,6 +2043,32 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const renderReference = () => {
+    const groups = photoContext?.groups ?? [];
+    const missingReferenceGroups = groups.filter(
+      (group) => referenceBindings[group.id] == null,
+    );
+    const eligibleReferenceItems: BackendReferenceBatchItem[] =
+      missingReferenceGroups.flatMap((group) => {
+        const assetId = batchReferenceCandidateForGroup(group.asset_ids);
+        return assetId ? [{ group_id: group.id, asset_id: assetId }] : [];
+      });
+    const eligibleReferenceGroupIds = new Set(
+      eligibleReferenceItems.map((item) => item.group_id),
+    );
+    const selectedReferenceItems = eligibleReferenceItems.filter((item) =>
+      referenceBatchTargets.includes(item.group_id),
+    );
+    const blockedReferenceGroupCount =
+      missingReferenceGroups.length - eligibleReferenceItems.length;
+
+    const toggleReferenceBatchTarget = (groupId: string) => {
+      setReferenceBatchTargets((current) =>
+        current.includes(groupId)
+          ? current.filter((value) => value !== groupId)
+          : [...current, groupId],
+      );
+    };
+
     const lookGroups = (photoContext?.groups ?? []).filter(
       (group) =>
         referenceBindings[group.id] != null &&
@@ -2037,6 +2119,62 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <strong>Reference look</strong>
         <span>Cull decisions lead the shortlist; measured technical quality and group rank break ties. Selection stays explicit and saved.</span>
       </div>
+
+      {mode === "workstation" &&
+        bridge?.setGroupReferences &&
+        missingReferenceGroups.length > 0 && (
+          <div className="reference-batch-setup">
+            <div className="reference-batch-setup-head">
+              <div>
+                <span>Batch Reference setup</span>
+                <strong>Suggested candidate → selected groups</strong>
+              </div>
+              <small>
+                Uses the existing per-group shortlist only. AI Reject suggestions and evidence-pending candidates are not batch-eligible unless you already marked the photo Keep/Review.
+              </small>
+            </div>
+            <div className="reference-batch-setup-status">
+              <span>{missingReferenceGroups.length} missing</span>
+              <span>{eligibleReferenceItems.length} eligible</span>
+              <span>{blockedReferenceGroupCount} need Cull review</span>
+            </div>
+            <div className="batch-look-actions reference-batch-actions">
+              <button
+                className="review-choice clear"
+                disabled={referenceBatchUpdating || eligibleReferenceItems.length === 0}
+                onClick={() =>
+                  setReferenceBatchTargets(
+                    eligibleReferenceItems.map((item) => item.group_id),
+                  )
+                }
+              >
+                Select eligible
+              </button>
+              <button
+                className="review-choice clear"
+                disabled={referenceBatchUpdating || selectedReferenceItems.length === 0}
+                onClick={() => setReferenceBatchTargets([])}
+              >
+                Clear
+              </button>
+              <button
+                className="button primary"
+                disabled={
+                  referenceBatchUpdating ||
+                  selectedReferenceItems.length === 0
+                }
+                onClick={() => void setSuggestedReferences(selectedReferenceItems)}
+              >
+                {referenceBatchUpdating
+                  ? "Setting References…"
+                  : `Set suggested References (${selectedReferenceItems.length})`}
+              </button>
+            </div>
+            {referenceBatchNote && (
+              <small className="success-text">{referenceBatchNote}</small>
+            )}
+          </div>
+        )}
 
       {mode === "workstation" &&
         lookGroups.length > 1 &&
@@ -2172,6 +2310,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <div>
                   <span>Group {index + 1}</span>
                   <strong>{group.asset_ids.length} photos</strong>
+                  {!binding && eligibleReferenceGroupIds.has(group.id) && (
+                    <label className="reference-batch-check">
+                      <input
+                        type="checkbox"
+                        checked={referenceBatchTargets.includes(group.id)}
+                        disabled={referenceBatchUpdating}
+                        onChange={() => toggleReferenceBatchTarget(group.id)}
+                      />
+                      <span>Batch suggested Reference</span>
+                    </label>
+                  )}
                 </div>
                 <div className="reference-current">
                   <small>Selected reference</small>
@@ -2184,6 +2333,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   {binding && bridge?.clearGroupReference && (
                     <button
                       className="review-choice clear"
+                      disabled={referenceBatchUpdating}
                       onClick={() => void clearReferencePhoto(group.id)}
                     >
                       Clear
@@ -2292,7 +2442,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     <button
                       className={`reference-candidate ${selected ? "selected" : ""} ${recommended ? "recommended" : ""}`}
                       key={assetId}
-                      disabled={!bridge?.setGroupReference}
+                      disabled={!bridge?.setGroupReference || referenceBatchUpdating}
                       onClick={() => void setReferencePhoto(group.id, assetId)}
                     >
                       {previewUrls.get(assetId) ? (
@@ -2307,6 +2457,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       )}
                       <div className="reference-candidate-badges">
                         {recommended && <em>Best starting point</em>}
+                        {!binding &&
+                          batchReferenceCandidateForGroup(group.asset_ids) === assetId && (
+                            <em>Batch eligible</em>
+                          )}
                         {selected && <em>Selected</em>}
                       </div>
                       <span>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</span>

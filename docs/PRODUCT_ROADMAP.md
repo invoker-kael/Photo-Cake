@@ -162,3 +162,6 @@ The workstation now has a workflow cockpit instead of a static process legend: c
 
 
 Grouping correction now closes the main real-shoot gap in Milestone C: semantic splits can be reverted to their original Moment, automatically locked Moments can be reopened, adjacent parent groups can be merged, and a group can be split at a chosen photo. Manual merge/split persists an explicit MANUAL basis and is locked before Reference lineage begins, so automatic grouping handles the common case while photographer corrections remain authoritative.
+
+
+Reference setup now scales across large shoots without weakening photographer authority: unreferenced groups can multi-select their existing best-supported shortlist candidate and create all chosen References transactionally. Batch eligibility excludes evidence-pending and unresolved RejectSuggestion candidates, existing References are never overwritten, and every group remains individually adjustable afterward.

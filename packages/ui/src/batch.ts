@@ -193,6 +193,15 @@ export interface BackendReferenceBinding {
   selected_reference_asset_id: string;
 }
 
+export interface BackendReferenceBatchItem {
+  group_id: string;
+  asset_id: string;
+}
+
+export interface BackendReferenceBatchResult {
+  bindings: BackendReferenceBinding[];
+}
+
 export interface BackendStyleProfile {
   exposure_bias_ev: number | null;
   temperature_bias: number | null;
@@ -308,6 +317,10 @@ export interface PhotoCakeBridge {
   setCullingReviews?(reviews: BackendCullingReview[]): Promise<void>;
   loadReferenceBindings?(batchId: string): Promise<BackendReferenceBinding[]>;
   setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
+  setGroupReferences?(
+    batchId: string,
+    items: BackendReferenceBatchItem[],
+  ): Promise<BackendReferenceBatchResult>;
   clearGroupReference?(groupId: string): Promise<void>;
   loadRecipeReviews?(batchId: string): Promise<BackendRecipeReviewOverride[]>;
   setRecipeReview?(

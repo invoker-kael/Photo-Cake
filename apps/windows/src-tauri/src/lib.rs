@@ -114,6 +114,17 @@ struct RecipeReviewBatchResult {
     asset_ids: Vec<Uuid>,
 }
 
+#[derive(Clone, Deserialize)]
+struct ReferenceBatchItem {
+    group_id: String,
+    asset_id: String,
+}
+
+#[derive(Clone, Serialize)]
+struct ReferenceBatchResult {
+    bindings: Vec<GroupReferenceBinding>,
+}
+
 #[derive(Clone, Serialize)]
 struct GroupReferenceStyle {
     group_id: Uuid,
@@ -931,6 +942,105 @@ fn set_culling_reviews(
         .culling_reviews
         .set_many(&reviews)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_group_references(
+    batch_id: String,
+    items: Vec<ReferenceBatchItem>,
+    state: State<'_, AppState>,
+) -> Result<ReferenceBatchResult, String> {
+    if items.is_empty() {
+        return Err("no groups selected for batch Reference setup".to_string());
+    }
+
+    let batch_id = parse_batch_id(&batch_id)?;
+    let groups = state
+        .catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let groups_by_id = groups
+        .into_iter()
+        .map(|group| (group.id, group))
+        .collect::<HashMap<_, _>>();
+
+    let mut requests = Vec::with_capacity(items.len());
+    let mut seen_groups = HashSet::with_capacity(items.len());
+    for item in items {
+        let group_id = Uuid::parse_str(&item.group_id)
+            .map_err(|error| format!("invalid group id: {error}"))?;
+        let asset_id = Uuid::parse_str(&item.asset_id)
+            .map_err(|error| format!("invalid asset id: {error}"))?;
+        if !seen_groups.insert(group_id) {
+            return Err(format!("duplicate Reference group: {group_id}"));
+        }
+
+        let group = groups_by_id
+            .get(&group_id)
+            .ok_or_else(|| format!("photo group is not part of batch {batch_id}: {group_id}"))?;
+        if !group.asset_ids.contains(&asset_id) {
+            return Err(format!("asset {asset_id} is not part of group {group_id}"));
+        }
+        if state
+            .reference_store
+            .group_binding(group_id)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Err(format!(
+                "group {group_id} already has a Reference; change it individually instead"
+            ));
+        }
+
+        match state
+            .culling_reviews
+            .get(asset_id)
+            .map_err(|error| error.to_string())?
+        {
+            Some(review) if review.decision == CullingUserDecision::Reject => {
+                return Err(format!(
+                    "asset {asset_id} is explicitly rejected and cannot become a Reference"
+                ));
+            }
+            Some(_) => {}
+            None => {
+                let culling = build_group_culling_result(&state.analysis_cache, group, 0.98)
+                    .map_err(|error| error.to_string())?;
+                let recommendation = culling
+                    .recommendations
+                    .iter()
+                    .find(|candidate| candidate.asset_id == asset_id)
+                    .ok_or_else(|| {
+                        format!(
+                            "asset {asset_id} lacks completed culling evidence; choose it individually after review"
+                        )
+                    })?;
+                if recommendation.decision == CullingDecision::RejectSuggestion {
+                    return Err(format!(
+                        "asset {asset_id} is an AI Reject suggestion; review it individually before using it as Reference"
+                    ));
+                }
+            }
+        }
+
+        requests.push((
+            group_id,
+            asset_id,
+            format!("Group {group_id} reference"),
+        ));
+    }
+
+    let created = state
+        .reference_store
+        .set_single_photo_references_many(&requests)
+        .map_err(|error| error.to_string())?;
+
+    Ok(ReferenceBatchResult {
+        bindings: created
+            .into_iter()
+            .map(|(_, binding)| binding)
+            .collect(),
+    })
 }
 
 #[tauri::command]
@@ -1781,6 +1891,7 @@ pub fn run() {
             set_culling_review,
             set_culling_reviews,
             batch_reference_bindings,
+            set_group_references,
             set_group_reference,
             clear_group_reference,
             batch_recipe_reviews,

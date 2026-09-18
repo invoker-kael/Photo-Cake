@@ -56,6 +56,10 @@ pub enum ReferenceStoreError {
     SourceGroupInTargets(Uuid),
     #[error("duplicate batch look target group: {0}")]
     DuplicateTargetGroup(Uuid),
+    #[error("duplicate batch reference target group: {0}")]
+    DuplicateReferenceGroup(Uuid),
+    #[error("photo group already has a Reference binding: {0}")]
+    GroupBindingAlreadyExists(Uuid),
     #[error("selected reference asset {asset_id} is not part of reference set {reference_set_id}")]
     SelectedAssetOutsideSet {
         reference_set_id: Uuid,
@@ -379,6 +383,80 @@ impl ReferenceStore {
             .collect()
     }
 
+    /// Create missing single-photo References for several groups in one transaction.
+    /// Existing group bindings are never overwritten by this batch path.
+    pub fn set_single_photo_references_many(
+        &self,
+        requests: &[(Uuid, Uuid, String)],
+    ) -> Result<Vec<(ReferenceSet, GroupReferenceBinding)>, ReferenceStoreError> {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut seen = HashSet::with_capacity(requests.len());
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+
+        for (group_id, _, _) in requests {
+            if !seen.insert(*group_id) {
+                return Err(ReferenceStoreError::DuplicateReferenceGroup(*group_id));
+            }
+            let existing = tx
+                .query_row(
+                    "SELECT 1 FROM group_reference_bindings WHERE group_id = ?1",
+                    [group_id.to_string()],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if existing.is_some() {
+                return Err(ReferenceStoreError::GroupBindingAlreadyExists(*group_id));
+            }
+        }
+
+        let updated_at = unix_time_ms();
+        let mut created = Vec::with_capacity(requests.len());
+        for (group_id, asset_id, name) in requests {
+            let set = ReferenceSet::from_photos(name.clone(), vec![*asset_id]);
+            tx.execute(
+                "INSERT INTO reference_sets (id, name, style_profile_json, updated_at_unix_ms)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    set.id.to_string(),
+                    set.name,
+                    serde_json::to_string(&set.style_profile)?,
+                    updated_at
+                ],
+            )?;
+            tx.execute(
+                "INSERT INTO reference_set_photos (reference_set_id, asset_id, position)
+                 VALUES (?1, ?2, 0)",
+                params![set.id.to_string(), asset_id.to_string()],
+            )?;
+            tx.execute(
+                "INSERT INTO group_reference_bindings
+                 (group_id, reference_set_id, selected_reference_asset_id, updated_at_unix_ms)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    group_id.to_string(),
+                    set.id.to_string(),
+                    asset_id.to_string(),
+                    updated_at
+                ],
+            )?;
+            created.push((
+                set.clone(),
+                GroupReferenceBinding {
+                    group_id: *group_id,
+                    reference_set_id: set.id,
+                    selected_reference_asset_id: *asset_id,
+                },
+            ));
+        }
+
+        tx.commit()?;
+        Ok(created)
+    }
+
     /// Persist the simple workstation action "use this photo as this group's reference"
     /// while still representing the choice as a real ReferenceSet.
     pub fn set_single_photo_reference(
@@ -627,6 +705,80 @@ mod tests {
                 .unwrap_err(),
             ReferenceStoreError::DuplicateTargetGroup(id) if id == target_group
         ));
+    }
+
+    #[test]
+    fn batch_reference_creation_commits_all_missing_groups_together() {
+        let dir = tempdir().unwrap();
+        let store = ReferenceStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let first_group = Uuid::new_v4();
+        let second_group = Uuid::new_v4();
+        let first_asset = Uuid::new_v4();
+        let second_asset = Uuid::new_v4();
+
+        let created = store
+            .set_single_photo_references_many(&[
+                (first_group, first_asset, "First reference".into()),
+                (second_group, second_asset, "Second reference".into()),
+            ])
+            .unwrap();
+
+        assert_eq!(created.len(), 2);
+        assert_eq!(
+            store.group_binding(first_group).unwrap().unwrap().selected_reference_asset_id,
+            first_asset
+        );
+        assert_eq!(
+            store.group_binding(second_group).unwrap().unwrap().selected_reference_asset_id,
+            second_asset
+        );
+    }
+
+    #[test]
+    fn batch_reference_creation_does_not_overwrite_existing_group_or_partially_write() {
+        let dir = tempdir().unwrap();
+        let store = ReferenceStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let existing_group = Uuid::new_v4();
+        let existing_asset = Uuid::new_v4();
+        let new_group = Uuid::new_v4();
+        let new_asset = Uuid::new_v4();
+        store
+            .set_single_photo_reference(existing_group, existing_asset, "Existing")
+            .unwrap();
+
+        assert!(matches!(
+            store
+                .set_single_photo_references_many(&[
+                    (new_group, new_asset, "New".into()),
+                    (existing_group, Uuid::new_v4(), "Overwrite".into()),
+                ])
+                .unwrap_err(),
+            ReferenceStoreError::GroupBindingAlreadyExists(id) if id == existing_group
+        ));
+
+        assert!(store.group_binding(new_group).unwrap().is_none());
+        assert_eq!(
+            store.group_binding(existing_group).unwrap().unwrap().selected_reference_asset_id,
+            existing_asset
+        );
+    }
+
+    #[test]
+    fn batch_reference_creation_rejects_duplicate_groups_before_write() {
+        let dir = tempdir().unwrap();
+        let store = ReferenceStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let group = Uuid::new_v4();
+
+        assert!(matches!(
+            store
+                .set_single_photo_references_many(&[
+                    (group, Uuid::new_v4(), "First".into()),
+                    (group, Uuid::new_v4(), "Second".into()),
+                ])
+                .unwrap_err(),
+            ReferenceStoreError::DuplicateReferenceGroup(id) if id == group
+        ));
+        assert!(store.group_binding(group).unwrap().is_none());
     }
 
     #[test]

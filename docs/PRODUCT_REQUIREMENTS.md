@@ -321,3 +321,14 @@ Semantic grouping is advisory and must be cheap to correct on real travel/family
 Merge and split are transactional catalog operations and produce manual-locked groups with an explicit `MANUAL` grouping basis. Invalid/non-adjacent selections fail without partial catalog changes. Automatic refinement never rewrites a manual correction.
 
 Once any Reference is selected, all merge/split/regroup actions are disabled in both UI and backend. Grouping changes must happen before the Reference → Recipe → Review → Lightroom lineage is established.
+
+
+### Batch Reference setup
+
+For a large shoot, Reference should not require opening every group just to accept an obvious starting candidate. The workstation therefore exposes a batch setup surface for groups that do not yet have a Reference.
+
+Eligibility is intentionally stricter than the ordinary per-group candidate list. A batch candidate must belong to the group, must not be photographer-Rejected, and must either have an explicit photographer Keep/Review decision or completed Cull evidence whose suggestion is not RejectSuggestion. Evidence-pending photos and unresolved AI Reject suggestions stay individual-review work.
+
+The photographer selects the target groups explicitly. `Select eligible` is only a convenience for that visible eligible set; the actual write still occurs only after the explicit `Set suggested References` action. Groups with an existing Reference are excluded and are never silently replaced.
+
+The backend revalidates every selected group/candidate pair and then creates all missing ReferenceSets/bindings in one transaction. Any stale group, duplicate group, invalid membership, existing binding or newly-invalid Cull state aborts the whole batch without partial Reference creation. After the batch, each group remains fully editable through the normal individual candidate surface.

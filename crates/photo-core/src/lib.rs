@@ -32,7 +32,7 @@ pub use batch_export::{BatchExportExecutor, BatchExportItem};
 pub use culling::{suggest_decision, CullingDecision, CullingScore};
 pub use recipe::{EditAdjustments, Recipe};
 pub use reference::{ReferenceSet, StyleProfile};
-pub use xmp::XmpEditState;
+pub use xmp::{sidecar_path_for_raw, write_recipe_sidecar, XmpEditState};
 pub use export_stage::{ExportStageError, ExportStageExecutor};
 pub use pipeline::BatchPipelineExecutor;
 pub use runner::{AutomationRunner, NoopStageExecutor, RunStep, StageExecutor, RunnerError};

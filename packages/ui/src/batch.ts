@@ -123,6 +123,13 @@ export interface BackendRawImportResult extends BackendPhotoContext {
 
 export type CullingDecision = "KEEP" | "REVIEW" | "REJECT_SUGGESTION";
 export type CullingUserDecision = "KEEP" | "REVIEW" | "REJECT";
+export type CullingReason =
+  | "STRONG_TECHNICAL_CANDIDATE"
+  | "LOW_SHARPNESS"
+  | "BLUR_RISK"
+  | "EXPOSURE_RISK"
+  | "NEAR_DUPLICATE"
+  | "LOW_TECHNICAL_QUALITY";
 
 export interface BackendCullingPortraitEvidence {
   person_count: number;
@@ -136,6 +143,7 @@ export interface BackendCullingRecommendation {
   quality_score: number;
   decision: CullingDecision;
   group_rank: number;
+  reasons?: CullingReason[];
   portrait_evidence?: BackendCullingPortraitEvidence | null;
 }
 

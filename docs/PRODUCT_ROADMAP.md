@@ -144,3 +144,5 @@ Lightroom handoff now has a visible read-only preflight: the workstation resolve
 
 Reference workflow now supports reusing a look across groups while keeping each group's own Reference and adaptive baseline. This targets travel/family shoots where several editing contexts should feel consistent without copying fixed exposure edits between different scenes.
 
+Lightroom handoff is now idempotent for Photo-Cake-owned edit state: matching existing sidecars are preserved and counted as already current, missing peers can still be created, and any different or unverifiable XMP remains a hard whole-group conflict. This keeps reruns safe without introducing overwrite behavior.
+

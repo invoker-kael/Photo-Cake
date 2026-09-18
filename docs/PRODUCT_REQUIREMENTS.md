@@ -254,3 +254,9 @@ A photographer can copy the shared StyleProfile from another referenced group wi
 
 The target group keeps its own Reference photo and adaptive photographic baseline, then regenerates its own Recipes from that baseline plus the copied look. Any previously confirmed Recipe review whose final adjustments change becomes stale automatically through the existing Recipe fingerprint contract.
 
+### Idempotent Lightroom handoff
+
+An existing same-basename XMP is not automatically a conflict when it is a Photo-Cake sidecar whose target asset and currently supported edit fields already match the current Recipe. Recipe IDs are intentionally ignored for this equivalence check because adaptive Recipes are regenerated and receive new runtime IDs even when their effective edit state is unchanged.
+
+Matching sidecars are preserved byte-for-byte and skipped. Missing sidecars may be created in the same group. Any existing XMP that cannot be parsed as Photo-Cake state or whose supported fields differ remains a hard conflict and aborts the group before new files are created. Extra Lightroom fields that Photo-Cake does not manage are never overwritten.
+

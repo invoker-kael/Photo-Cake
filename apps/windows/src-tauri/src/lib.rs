@@ -87,7 +87,8 @@ struct GroupReferencePreview {
 struct LightroomHandoffPreflight {
     group_id: Uuid,
     target_sidecars: Vec<String>,
-    existing_sidecars: Vec<String>,
+    current_sidecars: Vec<String>,
+    conflicting_sidecars: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -1067,8 +1068,21 @@ fn preflight_group_reference_xmp(
             .iter()
             .map(|target| target.sidecar_path.to_string_lossy().into_owned())
             .collect(),
-        existing_sidecars: targets
+        current_sidecars: targets
+            .iter()
+            .filter(|target| target.existing_matches_recipe)
+            .filter_map(|target| {
+                target
+                    .existing_sidecar
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned())
+            })
+            .collect(),
+        conflicting_sidecars: targets
             .into_iter()
+            .filter(|target| {
+                target.existing_sidecar.is_some() && !target.existing_matches_recipe
+            })
             .filter_map(|target| {
                 target
                     .existing_sidecar

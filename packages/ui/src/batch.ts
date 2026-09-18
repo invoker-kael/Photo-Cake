@@ -208,7 +208,8 @@ export interface BackendGroupReferencePreview {
 export interface BackendLightroomHandoffPreflight {
   group_id: string;
   target_sidecars: string[];
-  existing_sidecars: string[];
+  current_sidecars: string[];
+  conflicting_sidecars: string[];
 }
 
 export interface BackendLightroomHandoffResult {

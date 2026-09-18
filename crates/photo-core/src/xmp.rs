@@ -39,6 +39,7 @@ pub struct XmpSidecarPreflight {
     pub raw_path: PathBuf,
     pub sidecar_path: PathBuf,
     pub existing_sidecar: Option<PathBuf>,
+    pub existing_matches_recipe: bool,
 }
 
 #[derive(Debug, Error)]
@@ -211,6 +212,29 @@ pub fn validate_recipe_xmp(recipe: &Recipe, document: &str) -> Result<(), XmpPar
     Ok(())
 }
 
+pub fn xmp_document_matches_recipe_state(recipe: &Recipe, document: &str) -> bool {
+    let expected = XmpEditState::from_recipe(recipe);
+    let Ok(actual) = XmpEditState::from_xmp_document(document) else {
+        return false;
+    };
+
+    if expected.target_asset_id != actual.target_asset_id {
+        return false;
+    }
+
+    [
+        (expected.exposure, actual.exposure),
+        (expected.contrast, actual.contrast),
+        (expected.highlights, actual.highlights),
+        (expected.shadows, actual.shadows),
+        (expected.temperature, actual.temperature),
+        (expected.tint, actual.tint),
+        (expected.saturation, actual.saturation),
+    ]
+    .into_iter()
+    .all(|(left, right)| same_xmp_number(left, right))
+}
+
 fn same_xmp_number(left: Option<f32>, right: Option<f32>) -> bool {
     match (left, right) {
         (None, None) => true,
@@ -304,10 +328,16 @@ pub fn preflight_group_sidecars(
             .find(|asset| asset.id == target_id)
             .ok_or(XmpWriteError::MissingRawAsset(target_id))?;
         let raw_path = PathBuf::from(&asset.source_path);
+        let existing_sidecar = existing_sidecar_path(&raw_path);
+        let existing_matches_recipe = existing_sidecar
+            .as_ref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .is_some_and(|document| xmp_document_matches_recipe_state(recipe, &document));
         targets.push(XmpSidecarPreflight {
             asset_id: target_id,
             sidecar_path: sidecar_path_for_raw(&raw_path),
-            existing_sidecar: existing_sidecar_path(&raw_path),
+            existing_sidecar,
+            existing_matches_recipe,
             raw_path,
         });
     }
@@ -326,15 +356,21 @@ pub fn write_group_sidecars(
 
     // Repeat the whole-group conflict gate at write time so a sidecar created
     // after the UI preflight still cannot be overwritten.
-    if let Some(existing) = preflight
-        .iter()
-        .find_map(|target| target.existing_sidecar.clone())
-    {
+    if let Some(existing) = preflight.iter().find_map(|target| {
+        if target.existing_sidecar.is_some() && !target.existing_matches_recipe {
+            target.existing_sidecar.clone()
+        } else {
+            None
+        }
+    }) {
         return Err(XmpWriteError::ExistingSidecar(existing));
     }
 
     let mut written = Vec::with_capacity(preflight.len());
     for (target, recipe) in preflight.into_iter().zip(recipes.iter()) {
+        if target.existing_matches_recipe {
+            continue;
+        }
         match write_recipe_sidecar(&target.raw_path, recipe) {
             Ok(path) => written.push(path),
             Err(error) => {
@@ -539,9 +575,96 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].sidecar_path, dir.path().join("IMG_0001.xmp"));
         assert!(result[0].existing_sidecar.is_none());
+        assert!(!result[0].existing_matches_recipe);
         assert_eq!(result[1].existing_sidecar.as_deref(), Some(existing.as_path()));
+        assert!(!result[1].existing_matches_recipe);
         assert!(!dir.path().join("IMG_0001.xmp").exists());
         assert_eq!(std::fs::read(existing).unwrap(), b"lightroom-edit");
+    }
+
+    #[test]
+    fn current_photo_cake_sidecar_is_idempotent_across_regenerated_recipe_id() {
+        let dir = tempdir().unwrap();
+        let raw_path = dir.path().join("IMG_0007.CR3");
+        std::fs::write(&raw_path, b"raw").unwrap();
+        let asset_id = Uuid::new_v4();
+        let asset = RawAsset {
+            id: asset_id,
+            source_path: raw_path.to_string_lossy().into_owned(),
+            filename: "IMG_0007.CR3".into(),
+            extension: "cr3".into(),
+            camera_id: None,
+            capture_time_ms: None,
+            file_time_ms: None,
+            sequence_number: Some(7),
+        };
+
+        let first = recipe(Some(asset_id));
+        write_recipe_sidecar(&raw_path, &first).unwrap();
+        let before = std::fs::read(dir.path().join("IMG_0007.xmp")).unwrap();
+
+        let mut regenerated = first.clone();
+        regenerated.id = Uuid::new_v4();
+        let preflight = preflight_group_sidecars(
+            std::slice::from_ref(&asset),
+            std::slice::from_ref(&regenerated),
+        )
+        .unwrap();
+
+        assert!(preflight[0].existing_matches_recipe);
+        let written = write_group_sidecars(&[asset], &[regenerated]).unwrap();
+        assert!(written.is_empty());
+        assert_eq!(std::fs::read(dir.path().join("IMG_0007.xmp")).unwrap(), before);
+    }
+
+    #[test]
+    fn current_sidecar_is_preserved_while_missing_peer_is_written() {
+        let dir = tempdir().unwrap();
+        let first_path = dir.path().join("IMG_0010.CR3");
+        let second_path = dir.path().join("IMG_0011.CR3");
+        std::fs::write(&first_path, b"raw-one").unwrap();
+        std::fs::write(&second_path, b"raw-two").unwrap();
+
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let assets = vec![
+            RawAsset {
+                id: first_id,
+                source_path: first_path.to_string_lossy().into_owned(),
+                filename: "IMG_0010.CR3".into(),
+                extension: "cr3".into(),
+                camera_id: None,
+                capture_time_ms: None,
+                file_time_ms: None,
+                sequence_number: Some(10),
+            },
+            RawAsset {
+                id: second_id,
+                source_path: second_path.to_string_lossy().into_owned(),
+                filename: "IMG_0011.CR3".into(),
+                extension: "cr3".into(),
+                camera_id: None,
+                capture_time_ms: None,
+                file_time_ms: None,
+                sequence_number: Some(11),
+            },
+        ];
+        let first = recipe(Some(first_id));
+        let second = recipe(Some(second_id));
+        write_recipe_sidecar(&first_path, &first).unwrap();
+        let first_before = std::fs::read(dir.path().join("IMG_0010.xmp")).unwrap();
+
+        let mut regenerated_first = first.clone();
+        regenerated_first.id = Uuid::new_v4();
+        let written = write_group_sidecars(
+            &assets,
+            &[regenerated_first, second],
+        )
+        .unwrap();
+
+        assert_eq!(written, vec![dir.path().join("IMG_0011.xmp")]);
+        assert_eq!(std::fs::read(dir.path().join("IMG_0010.xmp")).unwrap(), first_before);
+        assert!(dir.path().join("IMG_0011.xmp").is_file());
     }
 
     #[test]

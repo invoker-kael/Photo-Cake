@@ -1073,6 +1073,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     try {
       const result = await bridge.writeGroupXmp(groupId);
       setHandoffResults((current) => ({ ...current, [groupId]: result }));
+      setHandoffPreflights((current) => {
+        const previous = current[groupId];
+        if (!previous) return current;
+        return {
+          ...current,
+          [groupId]: {
+            ...previous,
+            current_sidecars: previous.target_sidecars,
+            conflicting_sidecars: [],
+          },
+        };
+      });
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -1863,15 +1875,25 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               recipe.target_asset_id != null &&
               recipeReviewPriority(recipe.target_asset_id) < 10,
           ).length;
-          const conflictCount = preflight?.existing_sidecars.length ?? 0;
+          const conflictCount = preflight?.conflicting_sidecars.length ?? 0;
+          const currentCount = preflight?.current_sidecars.length ?? 0;
           const preflightReady = !bridge?.preflightGroupXmp || preflight != null;
+          const missingCount = preflight
+            ? Math.max(
+                0,
+                preflight.target_sidecars.length -
+                  preflight.current_sidecars.length -
+                  preflight.conflicting_sidecars.length,
+              )
+            : deliverableRecipes.length;
           const ready =
             binding != null &&
             preview != null &&
             preview.pending_asset_id == null &&
             deliverableRecipes.length > 0 &&
             preflightReady &&
-            conflictCount === 0;
+            conflictCount === 0 &&
+            missingCount > 0;
           const writesWhiteBalance = deliverableRecipes.some(
             (recipe) =>
               recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
@@ -1895,6 +1917,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           `${deliverableRecipes.length} XMP targets`,
                           rejectedCount ? `${rejectedCount} confirmed Reject skipped` : null,
                           reviewAttentionCount ? `${reviewAttentionCount} review attention` : "review clear",
+                          currentCount ? `${currentCount} XMP already current` : null,
                           exceptionCount ? `${exceptionCount} photo exceptions` : null,
                           `WB ${writesWhiteBalance ? "measured" : "untouched"}`,
                         ]
@@ -1904,7 +1927,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 </small>
                 {conflictCount > 0 && (
                   <small className="error-text">
-                    Existing XMP: {preflight!.existing_sidecars
+                    Conflicting XMP: {preflight!.conflicting_sidecars
                       .slice(0, 3)
                       .map(filenameFromPath)
                       .join(", ")}
@@ -1916,8 +1939,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               <div className="handoff-actions">
                 {result ? (
                   <>
-                    <strong>{result.written_sidecars.length} XMP written</strong>
-                    <small>Sidecars created beside the original RAW files</small>
+                    <strong>{deliverableRecipes.length} XMP ready</strong>
+                    <small>
+                      {result.written_sidecars.length} newly written · matching existing Photo-Cake sidecars preserved
+                    </small>
                   </>
                 ) : (
                   <>
@@ -1932,9 +1957,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           ? "Existing XMP conflict"
                           : !preflightReady && handoffPreflightLoading
                             ? "Checking XMP…"
-                            : ready
-                              ? `Write ${deliverableRecipes.length} XMP`
-                              : "Not ready"}
+                            : preflightReady && missingCount === 0 && deliverableRecipes.length > 0
+                              ? "XMP already current"
+                              : ready
+                                ? `Write ${missingCount} missing XMP`
+                                : "Not ready"}
                     </button>
                     <small>No overwrite: any existing same-basename XMP stops the group before writing.</small>
                   </>

@@ -1,4 +1,6 @@
-use crate::{GroupingBasis, PhotoGroup, PhotoGroupKind, RawAsset};
+use crate::{
+    GroupingBasis, PhotoGroup, PhotoGroupKind, RawAsset, SemanticGroupKind, SemanticPhotoGroup,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -38,9 +40,29 @@ CREATE TABLE IF NOT EXISTS photo_group_collections (
     FOREIGN KEY(group_id) REFERENCES photo_groups(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS semantic_photo_groups (
+    id TEXT PRIMARY KEY NOT NULL,
+    parent_group_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    reference_candidate_id TEXT,
+    similarity_threshold REAL NOT NULL,
+    FOREIGN KEY(parent_group_id) REFERENCES photo_groups(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS semantic_photo_group_members (
+    group_id TEXT NOT NULL,
+    asset_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    PRIMARY KEY(group_id, asset_id),
+    FOREIGN KEY(group_id) REFERENCES semantic_photo_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY(asset_id) REFERENCES raw_assets(id) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_raw_assets_source_path ON raw_assets(source_path);
 CREATE INDEX IF NOT EXISTS idx_group_members_asset_id ON photo_group_members(asset_id);
 CREATE INDEX IF NOT EXISTS idx_group_collections_collection_id ON photo_group_collections(collection_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_groups_parent ON semantic_photo_groups(parent_group_id);
+CREATE INDEX IF NOT EXISTS idx_semantic_group_members_asset ON semantic_photo_group_members(asset_id);
 "#;
 
 #[derive(Debug, Error)]
@@ -55,6 +77,13 @@ pub enum CatalogError {
     InvalidGroupKind(String),
     #[error("invalid grouping basis: {0}")]
     InvalidGroupingBasis(String),
+    #[error("invalid semantic group kind: {0}")]
+    InvalidSemanticGroupKind(String),
+    #[error("semantic group {group_id} does not belong to parent {parent_group_id}")]
+    SemanticParentMismatch {
+        group_id: Uuid,
+        parent_group_id: Uuid,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +207,180 @@ impl RawCatalog {
 
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn replace_semantic_groups(
+        &self,
+        parent_group_id: Uuid,
+        groups: &[SemanticPhotoGroup],
+    ) -> Result<(), CatalogError> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+
+        for group in groups {
+            if group.parent_group_id != parent_group_id {
+                return Err(CatalogError::SemanticParentMismatch {
+                    group_id: group.id,
+                    parent_group_id,
+                });
+            }
+        }
+
+        tx.execute(
+            "DELETE FROM semantic_photo_groups WHERE parent_group_id = ?1",
+            [parent_group_id.to_string()],
+        )?;
+
+        for group in groups {
+            tx.execute(
+                "INSERT INTO semantic_photo_groups
+                 (id, parent_group_id, kind, reference_candidate_id, similarity_threshold)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    group.id.to_string(),
+                    parent_group_id.to_string(),
+                    semantic_group_kind_to_db(group.kind),
+                    group.reference_candidate_id.map(|value| value.to_string()),
+                    group.similarity_threshold
+                ],
+            )?;
+            for (position, asset_id) in group.asset_ids.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO semantic_photo_group_members (group_id, asset_id, position)
+                     VALUES (?1, ?2, ?3)",
+                    params![group.id.to_string(), asset_id.to_string(), position as i64],
+                )?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_semantic_groups_for_parent(
+        &self,
+        parent_group_id: Uuid,
+    ) -> Result<Vec<SemanticPhotoGroup>, CatalogError> {
+        let conn = self.connect()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, kind, reference_candidate_id, similarity_threshold
+             FROM semantic_photo_groups
+             WHERE parent_group_id = ?1
+             ORDER BY rowid ASC",
+        )?;
+        let rows = stmt
+            .query_map([parent_group_id.to_string()], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, f32>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut groups = Vec::with_capacity(rows.len());
+        for (id, kind, reference_candidate_id, similarity_threshold) in rows {
+            let group_id = Uuid::parse_str(&id)?;
+            let mut members = conn.prepare(
+                "SELECT asset_id FROM semantic_photo_group_members
+                 WHERE group_id = ?1 ORDER BY position ASC",
+            )?;
+            let asset_ids = members
+                .query_map([id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .map(|value| Uuid::parse_str(&value))
+                .collect::<Result<Vec<_>, _>>()?;
+            groups.push(SemanticPhotoGroup {
+                id: group_id,
+                parent_group_id,
+                kind: semantic_group_kind_from_db(&kind)?,
+                asset_ids,
+                reference_candidate_id: reference_candidate_id
+                    .map(|value| Uuid::parse_str(&value))
+                    .transpose()?,
+                similarity_threshold,
+            });
+        }
+        Ok(groups)
+    }
+
+    pub fn list_effective_groups_for_collection(
+        &self,
+        collection_id: Uuid,
+    ) -> Result<Vec<PhotoGroup>, CatalogError> {
+        let parents = self.list_groups_for_collection(collection_id)?;
+        let mut effective = Vec::new();
+        for parent in parents {
+            if parent.manual_locked {
+                effective.push(parent);
+                continue;
+            }
+
+            let refined = self.list_semantic_groups_for_parent(parent.id)?;
+            if refined.is_empty() {
+                effective.push(parent);
+            } else {
+                effective.extend(refined.into_iter().map(|group| group.to_photo_group()));
+            }
+        }
+        Ok(effective)
+    }
+
+    pub fn find_group(&self, group_id: Uuid) -> Result<Option<PhotoGroup>, CatalogError> {
+        if let Some(group) = self
+            .list_groups()?
+            .into_iter()
+            .find(|group| group.id == group_id)
+        {
+            return Ok(Some(group));
+        }
+
+        let conn = self.connect()?;
+        let row = conn
+            .query_row(
+                "SELECT parent_group_id, kind, reference_candidate_id, similarity_threshold
+                 FROM semantic_photo_groups WHERE id = ?1",
+                [group_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, f32>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((parent_group_id, kind, reference_candidate_id, similarity_threshold)) = row else {
+            return Ok(None);
+        };
+
+        let mut members = conn.prepare(
+            "SELECT asset_id FROM semantic_photo_group_members
+             WHERE group_id = ?1 ORDER BY position ASC",
+        )?;
+        let asset_ids = members
+            .query_map([group_id.to_string()], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|value| Uuid::parse_str(&value))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Some(
+            SemanticPhotoGroup {
+                id: group_id,
+                parent_group_id: Uuid::parse_str(&parent_group_id)?,
+                kind: semantic_group_kind_from_db(&kind)?,
+                asset_ids,
+                reference_candidate_id: reference_candidate_id
+                    .map(|value| Uuid::parse_str(&value))
+                    .transpose()?,
+                similarity_threshold,
+            }
+            .to_photo_group(),
+        ))
     }
 
     pub fn list_assets(&self) -> Result<Vec<RawAsset>, CatalogError> {
@@ -323,6 +526,21 @@ fn grouping_basis_to_db(value: GroupingBasis) -> &'static str {
     }
 }
 
+fn semantic_group_kind_to_db(value: SemanticGroupKind) -> &'static str {
+    match value {
+        SemanticGroupKind::PortraitSimilar => "PORTRAIT_SIMILAR",
+        SemanticGroupKind::SceneSimilar => "SCENE_SIMILAR",
+    }
+}
+
+fn semantic_group_kind_from_db(value: &str) -> Result<SemanticGroupKind, CatalogError> {
+    match value {
+        "PORTRAIT_SIMILAR" => Ok(SemanticGroupKind::PortraitSimilar),
+        "SCENE_SIMILAR" => Ok(SemanticGroupKind::SceneSimilar),
+        other => Err(CatalogError::InvalidSemanticGroupKind(other.to_string())),
+    }
+}
+
 fn grouping_basis_from_db(value: &str) -> Result<GroupingBasis, CatalogError> {
     match value {
         "TIME" => Ok(GroupingBasis::Time),
@@ -389,6 +607,97 @@ mod tests {
         catalog.replace_automatic_groups(collection, &[group.clone()]).unwrap();
         let loaded = catalog.list_groups_for_collection(collection).unwrap();
         assert_eq!(loaded, vec![group]);
+    }
+
+    #[test]
+    fn semantic_children_persist_without_destroying_moment_parent() {
+        let dir = tempdir().unwrap();
+        let catalog = RawCatalog::open(dir.path().join("catalog.sqlite3")).unwrap();
+        let assets = catalog
+            .ensure_assets(&[
+                sample_asset("C:/shoot/IMG_4001.CR3", 4001),
+                sample_asset("C:/shoot/IMG_4002.CR3", 4002),
+            ])
+            .unwrap();
+        let collection = Uuid::new_v4();
+        let parent = initial_group_raw_assets(&assets, InitialGroupingConfig::default())
+            .remove(0);
+        catalog
+            .replace_automatic_groups(collection, &[parent.clone()])
+            .unwrap();
+
+        let child = SemanticPhotoGroup {
+            id: Uuid::new_v4(),
+            parent_group_id: parent.id,
+            kind: SemanticGroupKind::SceneSimilar,
+            asset_ids: assets.iter().map(|asset| asset.id).collect(),
+            reference_candidate_id: Some(assets[0].id),
+            similarity_threshold: 0.84,
+        };
+        catalog
+            .replace_semantic_groups(parent.id, &[child.clone()])
+            .unwrap();
+
+        assert_eq!(
+            catalog.list_groups_for_collection(collection).unwrap(),
+            vec![parent]
+        );
+        assert_eq!(
+            catalog.list_semantic_groups_for_parent(child.parent_group_id).unwrap(),
+            vec![child.clone()]
+        );
+        assert_eq!(
+            catalog.list_effective_groups_for_collection(collection).unwrap(),
+            vec![child.to_photo_group()]
+        );
+    }
+
+    #[test]
+    fn replacing_parent_groups_cascades_stale_semantic_children() {
+        let dir = tempdir().unwrap();
+        let catalog = RawCatalog::open(dir.path().join("catalog.sqlite3")).unwrap();
+        let assets = catalog
+            .ensure_assets(&[sample_asset("C:/shoot/IMG_5001.CR3", 5001)])
+            .unwrap();
+        let collection = Uuid::new_v4();
+        let parent = initial_group_raw_assets(&assets, InitialGroupingConfig::default())
+            .remove(0);
+        catalog
+            .replace_automatic_groups(collection, &[parent.clone()])
+            .unwrap();
+        catalog
+            .replace_semantic_groups(
+                parent.id,
+                &[SemanticPhotoGroup {
+                    id: Uuid::new_v4(),
+                    parent_group_id: parent.id,
+                    kind: SemanticGroupKind::SceneSimilar,
+                    asset_ids: vec![assets[0].id],
+                    reference_candidate_id: Some(assets[0].id),
+                    similarity_threshold: 0.84,
+                }],
+            )
+            .unwrap();
+
+        let replacement = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Moment,
+            basis: GroupingBasis::Time,
+            asset_ids: vec![assets[0].id],
+            manual_locked: false,
+        };
+        catalog
+            .replace_automatic_groups(collection, &[replacement.clone()])
+            .unwrap();
+
+        assert!(catalog
+            .list_semantic_groups_for_parent(parent.id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            catalog.list_effective_groups_for_collection(collection).unwrap(),
+            vec![replacement]
+        );
     }
 
     #[test]

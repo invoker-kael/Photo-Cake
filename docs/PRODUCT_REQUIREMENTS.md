@@ -278,3 +278,12 @@ The workstation can hand off every currently ready Lightroom group in one explic
 Before creating the first new XMP, the core preflights every selected group. Any conflicting or unverifiable existing XMP aborts the whole batch before writes begin. Matching Photo-Cake sidecars are treated as already current and are preserved byte-for-byte.
 
 Each group repeats its race-safe preflight immediately before writing. If a later group fails because the filesystem changed after the batch preflight, Photo-Cake removes sidecars newly created by earlier groups in that same batch. Pre-existing matching sidecars and source RAW files are never removed or modified.
+
+
+### Verified Lightroom delivery
+
+A Lightroom handoff is successful only after the complete deliverable group is re-read from disk and every sidecar still matches the current canonical Recipe state. This verification includes both newly-created sidecars and previously-current Photo-Cake sidecars. If any expected sidecar is missing or has changed between preflight/write and final verification, the operation fails and removes sidecars newly created by that operation. Batch handoff keeps its existing cross-group rollback behavior.
+
+The Lightroom page defaults to a `Needs action` delivery view for large shoots. It prioritizes XMP conflicts, unresolved groups, remaining Recipe attention and missing sidecars, while hiding groups that are already current and review-clear. `All` restores the complete group list. The summary exposes action groups, current groups, conflict groups and the number of XMP targets verified in the current session.
+
+A handoff result is invalidated whenever canonical delivery inputs change, including culling deliverability, group/reference state, StyleProfile, per-photo Recipe exceptions, grouping or active project. Review completion alone does not invalidate a verified XMP because it does not change the Recipe.

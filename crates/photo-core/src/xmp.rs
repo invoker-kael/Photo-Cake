@@ -41,6 +41,11 @@ pub struct XmpSidecarPreflight {
     pub existing_sidecar: Option<PathBuf>,
     pub existing_matches_recipe: bool,
 }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XmpHandoffVerification {
+    pub target_count: usize,
+    pub verified_sidecars: Vec<PathBuf>,
+}
 
 #[derive(Debug, Error)]
 pub enum XmpWriteError {
@@ -52,6 +57,10 @@ pub enum XmpWriteError {
     ExistingSidecar(PathBuf),
     #[error("written XMP failed round-trip validation: {0}")]
     RoundTrip(String),
+    #[error("expected XMP sidecar is missing after handoff: {0}")]
+    MissingSidecar(PathBuf),
+    #[error("XMP sidecar no longer matches the current Recipe after handoff: {0}")]
+    VerificationMismatch(PathBuf),
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -344,6 +353,31 @@ pub fn preflight_group_sidecars(
     Ok(targets)
 }
 
+pub fn verify_group_sidecars(
+    assets: &[RawAsset],
+    recipes: &[Recipe],
+) -> Result<XmpHandoffVerification, XmpWriteError> {
+    let preflight = preflight_group_sidecars(assets, recipes)?;
+    let mut verified_sidecars = Vec::with_capacity(preflight.len());
+
+    for target in preflight {
+        match (target.existing_sidecar, target.existing_matches_recipe) {
+            (Some(path), true) => verified_sidecars.push(path),
+            (Some(path), false) => {
+                return Err(XmpWriteError::VerificationMismatch(path));
+            }
+            (None, _) => {
+                return Err(XmpWriteError::MissingSidecar(target.sidecar_path));
+            }
+        }
+    }
+
+    Ok(XmpHandoffVerification {
+        target_count: recipes.len(),
+        verified_sidecars,
+    })
+}
+
 fn first_conflicting_sidecar(preflight: &[XmpSidecarPreflight]) -> Option<PathBuf> {
     preflight.iter().find_map(|target| {
         if target.existing_sidecar.is_some() && !target.existing_matches_recipe {
@@ -385,6 +419,14 @@ pub fn write_group_sidecars(
             }
         }
     }
+
+    if let Err(error) = verify_group_sidecars(assets, recipes) {
+        for path in &written {
+            let _ = std::fs::remove_file(path);
+        }
+        return Err(error);
+    }
+
     Ok(written)
 }
 
@@ -551,6 +593,93 @@ mod tests {
         assert_eq!(parsed.target_asset_id, Some(asset_id.to_string()));
         assert_eq!(parsed.exposure, Some(0.45));
         assert_eq!(parsed.contrast, Some(12.0));
+    }
+
+    #[test]
+    fn parses_representative_adobe_sidecar_fixture() {
+        let document = include_str!("../tests/fixtures/adobe-camera-raw-sidecar.xmp");
+        let parsed = XmpEditState::from_xmp_document(document).unwrap();
+
+        assert_eq!(
+            parsed.recipe_id,
+            "11111111-1111-4111-8111-111111111111"
+        );
+        assert_eq!(
+            parsed.target_asset_id.as_deref(),
+            Some("22222222-2222-4222-8222-222222222222")
+        );
+        assert_eq!(parsed.exposure, Some(0.35));
+        assert_eq!(parsed.contrast, Some(12.0));
+        assert_eq!(parsed.highlights, Some(-40.0));
+        assert_eq!(parsed.shadows, Some(25.0));
+        assert_eq!(parsed.saturation, Some(-7.0));
+    }
+
+    #[test]
+    fn verifies_complete_group_after_handoff() {
+        let dir = tempdir().unwrap();
+        let raw_path = dir.path().join("IMG_0300.CR3");
+        std::fs::write(&raw_path, b"raw").unwrap();
+        let asset_id = Uuid::new_v4();
+        let asset = RawAsset {
+            id: asset_id,
+            source_path: raw_path.to_string_lossy().into_owned(),
+            filename: "IMG_0300.CR3".into(),
+            extension: "cr3".into(),
+            camera_id: None,
+            capture_time_ms: None,
+            file_time_ms: None,
+            sequence_number: Some(300),
+        };
+        let recipe = recipe(Some(asset_id));
+
+        write_group_sidecars(
+            std::slice::from_ref(&asset),
+            std::slice::from_ref(&recipe),
+        )
+        .unwrap();
+        let verification = verify_group_sidecars(&[asset], &[recipe]).unwrap();
+
+        assert_eq!(verification.target_count, 1);
+        assert_eq!(verification.verified_sidecars.len(), 1);
+        assert!(verification.verified_sidecars[0].ends_with("IMG_0300.xmp"));
+    }
+
+    #[test]
+    fn verification_detects_missing_or_changed_sidecar() {
+        let dir = tempdir().unwrap();
+        let raw_path = dir.path().join("IMG_0301.CR3");
+        std::fs::write(&raw_path, b"raw").unwrap();
+        let asset_id = Uuid::new_v4();
+        let asset = RawAsset {
+            id: asset_id,
+            source_path: raw_path.to_string_lossy().into_owned(),
+            filename: "IMG_0301.CR3".into(),
+            extension: "cr3".into(),
+            camera_id: None,
+            capture_time_ms: None,
+            file_time_ms: None,
+            sequence_number: Some(301),
+        };
+        let recipe = recipe(Some(asset_id));
+
+        assert!(matches!(
+            verify_group_sidecars(std::slice::from_ref(&asset), std::slice::from_ref(&recipe))
+                .unwrap_err(),
+            XmpWriteError::MissingSidecar(_)
+        ));
+
+        write_recipe_sidecar(&raw_path, &recipe).unwrap();
+        let sidecar = raw_path.with_extension("xmp");
+        let changed = std::fs::read_to_string(&sidecar)
+            .unwrap()
+            .replace("crs:Exposure2012=\"0.35\"", "crs:Exposure2012=\"1.2\"");
+        std::fs::write(&sidecar, changed).unwrap();
+
+        assert!(matches!(
+            verify_group_sidecars(&[asset], &[recipe]).unwrap_err(),
+            XmpWriteError::VerificationMismatch(_)
+        ));
     }
 
     #[test]

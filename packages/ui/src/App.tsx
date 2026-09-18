@@ -50,6 +50,7 @@ export type {
 type WorkspaceView = "library" | "cull" | "groups" | "reference" | "review" | "lightroom";
 type CullViewMode = "TRIAGE" | "ALL";
 type ReviewViewMode = "TRIAGE" | "ALL";
+type LightroomViewMode = "NEEDS_ACTION" | "ALL";
 
 const stageProgress: Record<BatchStage, number> = {
   IMPORT: 5,
@@ -186,6 +187,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [cullingLoading, setCullingLoading] = useState(false);
   const [cullViewMode, setCullViewMode] = useState<CullViewMode>("TRIAGE");
   const [reviewViewMode, setReviewViewMode] = useState<ReviewViewMode>("TRIAGE");
+  const [lightroomViewMode, setLightroomViewMode] = useState<LightroomViewMode>("NEEDS_ACTION");
   const [cullBatchUpdating, setCullBatchUpdating] = useState(false);
   const [groupRevision, setGroupRevision] = useState(0);
   const [groupRefining, setGroupRefining] = useState(false);
@@ -494,6 +496,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     referenceBindings,
     referencePreviews,
   ]);
+
+  useEffect(() => {
+    setHandoffResults({});
+  }, [activeBatchId, cullingReviews, recipeReviews, referenceBindings, referenceStyles, groupRevision]);
 
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
@@ -1991,219 +1997,309 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   );
 
   const renderLightroom = () => {
-    const readyGroups = (photoContext?.groups ?? []).flatMap((group) => {
+    const allHandoffGroups = (photoContext?.groups ?? []).map((group, index) => {
       const binding = referenceBindings[group.id];
       const preview = referencePreviews[group.id];
       const preflight = handoffPreflights[group.id];
-      const deliverableCount =
-        preview?.recipes.filter((recipe) => recipe.target_asset_id != null).length ?? 0;
-      if (
-        binding == null ||
-        preview == null ||
-        preview.pending_asset_id != null ||
-        deliverableCount === 0 ||
-        preflight == null
-      ) {
-        return [];
-      }
-
-      const conflicts = preflight.conflicting_sidecars.length;
-      const missing = Math.max(
-        0,
-        preflight.target_sidecars.length -
-          preflight.current_sidecars.length -
-          preflight.conflicting_sidecars.length,
-      );
-      const reviewAttention = preview.recipes.filter(
+      const result = handoffResults[group.id];
+      const deliverableRecipes =
+        preview?.recipes.filter((recipe) => recipe.target_asset_id != null) ?? [];
+      const rejectedCount = group.asset_ids.filter(
+        (assetId) => cullingReviews[assetId] === "REJECT",
+      ).length;
+      const exceptionCount = deliverableRecipes.filter(
+        (recipe) =>
+          recipe.target_asset_id != null && recipeReviews[recipe.target_asset_id] != null,
+      ).length;
+      const reviewAttentionCount = deliverableRecipes.filter(
         (recipe) =>
           recipe.target_asset_id != null &&
           recipeReviewPriority(recipe.target_asset_id) < 10,
       ).length;
-      return [{ groupId: group.id, conflicts, missing, reviewAttention }];
+      const conflictCount = preflight?.conflicting_sidecars.length ?? 0;
+      const currentCount = preflight?.current_sidecars.length ?? 0;
+      const preflightReady = !bridge?.preflightGroupXmp || preflight != null;
+      const missingCount = preflight
+        ? Math.max(
+            0,
+            preflight.target_sidecars.length -
+              preflight.current_sidecars.length -
+              preflight.conflicting_sidecars.length,
+          )
+        : deliverableRecipes.length;
+      const unresolved =
+        binding == null ||
+        preview == null ||
+        preview.pending_asset_id != null ||
+        deliverableRecipes.length === 0 ||
+        !preflightReady;
+      const ready =
+        !unresolved &&
+        conflictCount === 0 &&
+        missingCount > 0;
+      const writesWhiteBalance = deliverableRecipes.some(
+        (recipe) =>
+          recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
+      );
+      const priority =
+        conflictCount > 0
+          ? 0
+          : unresolved
+            ? 1
+            : reviewAttentionCount > 0
+              ? 2
+              : missingCount > 0
+                ? 3
+                : 4;
+
+      return {
+        group,
+        index,
+        binding,
+        preview,
+        preflight,
+        result,
+        deliverableRecipes,
+        rejectedCount,
+        exceptionCount,
+        reviewAttentionCount,
+        conflictCount,
+        currentCount,
+        preflightReady,
+        missingCount,
+        unresolved,
+        ready,
+        writesWhiteBalance,
+        priority,
+      };
     });
-    const batchConflictCount = readyGroups.reduce((total, group) => total + group.conflicts, 0);
+
+    const readyGroups = allHandoffGroups.filter((item) => !item.unresolved);
+    const batchConflictCount = readyGroups.reduce(
+      (total, item) => total + item.conflictCount,
+      0,
+    );
     const batchGroupIds = readyGroups
-      .filter((group) => group.conflicts === 0 && group.missing > 0)
-      .map((group) => group.groupId);
+      .filter((item) => item.conflictCount === 0 && item.missingCount > 0)
+      .map((item) => item.group.id);
     const batchMissingCount = readyGroups.reduce(
-      (total, group) => total + (group.conflicts === 0 ? group.missing : 0),
+      (total, item) =>
+        total + (item.conflictCount === 0 ? item.missingCount : 0),
       0,
     );
-    const batchReviewAttentionCount = readyGroups.reduce(
-      (total, group) => total + group.reviewAttention,
+    const batchReviewAttentionCount = allHandoffGroups.reduce(
+      (total, item) => total + item.reviewAttentionCount,
       0,
     );
+    const currentGroupCount = allHandoffGroups.filter(
+      (item) => item.priority === 4,
+    ).length;
+    const conflictGroupCount = allHandoffGroups.filter(
+      (item) => item.conflictCount > 0,
+    ).length;
+    const actionGroupCount = allHandoffGroups.length - currentGroupCount;
+    const verifiedTargetCount = Object.values(handoffResults).reduce(
+      (total, result) => total + result.verified_sidecar_count,
+      0,
+    );
+    const visibleHandoffGroups = allHandoffGroups
+      .filter((item) => lightroomViewMode === "ALL" || item.priority < 4)
+      .slice()
+      .sort((left, right) => left.priority - right.priority || left.index - right.index);
 
     return (
-    <section className="queue-card">
-      <div className="queue-title">
-        <strong>Lightroom XMP handoff</strong>
-        <span>Explicit create-new writes · original RAW stays untouched · conflicting XMP blocks group or batch</span>
-      </div>
-      <div className="handoff-card">
-        <div className="handoff-card-main">
-          <span>Batch handoff</span>
-          <strong>{batchMissingCount} missing XMP across {batchGroupIds.length} ready groups</strong>
-          <small>
-            All selected groups are preflighted before the first new sidecar is created.
-            Matching Photo-Cake XMP stays untouched.
-          </small>
-          <small className={batchReviewAttentionCount > 0 ? "attention-text" : "success-text"}>
-            {batchReviewAttentionCount > 0
-              ? `${batchReviewAttentionCount} Recipe review attention items remain; XMP handoff stays available by design.`
-              : "Recipe review attention is clear for ready groups."}
-          </small>
-          {batchConflictCount > 0 && (
-            <small className="error-text">
-              {batchConflictCount} conflicting XMP must be resolved before batch handoff.
+      <section className="queue-card">
+        <div className="queue-title">
+          <strong>Lightroom XMP handoff</strong>
+          <span>Explicit create-new writes · original RAW stays untouched · full-group Recipe verification after write</span>
+        </div>
+
+        <div className="review-summary">
+          <div><span>Needs action</span><strong>{actionGroupCount}</strong></div>
+          <div><span>Current groups</span><strong>{currentGroupCount}</strong></div>
+          <div><span>XMP conflicts</span><strong>{conflictGroupCount}</strong></div>
+          <div><span>Verified this session</span><strong>{verifiedTargetCount}</strong></div>
+        </div>
+
+        <div className="cull-toolbar">
+          <span>
+            Needs action puts conflicts, unresolved groups, Recipe attention and missing XMP ahead of already-current delivery groups.
+          </span>
+          <div className="cull-toolbar-actions">
+            {batchReviewAttentionCount > 0 && (
+              <button
+                className="cull-batch-action"
+                disabled={handoffBatchRunning || handoffRunning != null}
+                onClick={() => setActiveView("review")}
+              >
+                Review attention ({batchReviewAttentionCount})
+              </button>
+            )}
+            <div className="cull-view-switch" role="group" aria-label="Lightroom handoff view mode">
+              {(["NEEDS_ACTION", "ALL"] as LightroomViewMode[]).map((viewMode) => (
+                <button
+                  className={lightroomViewMode === viewMode ? "active" : ""}
+                  key={viewMode}
+                  disabled={handoffBatchRunning || handoffRunning != null}
+                  onClick={() => setLightroomViewMode(viewMode)}
+                >
+                  {viewMode === "NEEDS_ACTION" ? "Needs action" : "All"}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="handoff-card">
+          <div className="handoff-card-main">
+            <span>Batch handoff</span>
+            <strong>{batchMissingCount} missing XMP across {batchGroupIds.length} ready groups</strong>
+            <small>
+              All selected groups are preflighted before the first new sidecar is created.
+              Matching Photo-Cake XMP stays untouched.
             </small>
+            <small className={batchReviewAttentionCount > 0 ? "attention-text" : "success-text"}>
+              {batchReviewAttentionCount > 0
+                ? `${batchReviewAttentionCount} Recipe review attention items remain; XMP handoff stays available by design.`
+                : "Recipe review attention is clear for delivery groups."}
+            </small>
+            {batchConflictCount > 0 && (
+              <small className="error-text">
+                {batchConflictCount} conflicting XMP must be resolved before batch handoff.
+              </small>
+            )}
+          </div>
+          <div className="handoff-actions">
+            <button
+              className="button primary"
+              disabled={
+                !bridge?.writeBatchXmp ||
+                handoffBatchRunning ||
+                handoffRunning != null ||
+                handoffPreflightLoading ||
+                batchConflictCount > 0 ||
+                batchGroupIds.length === 0
+              }
+              onClick={() => void writeBatchXmp(batchGroupIds)}
+            >
+              {handoffBatchRunning
+                ? "Writing + verifying batch XMP…"
+                : batchConflictCount > 0
+                  ? "Resolve XMP conflicts"
+                  : batchGroupIds.length > 0
+                    ? `Write + verify ${batchMissingCount} missing XMP`
+                    : "Batch already current / not ready"}
+            </button>
+            <small>
+              Each group is re-read against the canonical Recipe after write; later batch failure rolls back newly created XMP.
+            </small>
+          </div>
+        </div>
+
+        <div className="handoff-groups">
+          {visibleHandoffGroups.map((item) => {
+            const {
+              group,
+              index,
+              binding,
+              preview,
+              preflight,
+              result,
+              deliverableRecipes,
+              rejectedCount,
+              exceptionCount,
+              reviewAttentionCount,
+              conflictCount,
+              currentCount,
+              preflightReady,
+              missingCount,
+              ready,
+              writesWhiteBalance,
+            } = item;
+
+            return (
+              <div className="handoff-card" key={group.id}>
+                <div className="handoff-card-main">
+                  <span>Group {index + 1}</span>
+                  <strong>{group.asset_ids.length} source photos</strong>
+                  <small>
+                    {binding
+                      ? `Reference: ${assetNames.get(binding.selected_reference_asset_id) ?? binding.selected_reference_asset_id.slice(0, 8)}`
+                      : "Choose a reference first"}
+                  </small>
+                  <small>
+                    {preview?.pending_asset_id
+                      ? "Waiting for exposure evidence"
+                      : preview
+                        ? [
+                            `${deliverableRecipes.length} XMP targets`,
+                            rejectedCount ? `${rejectedCount} confirmed Reject skipped` : null,
+                            reviewAttentionCount ? `${reviewAttentionCount} review attention` : "review clear",
+                            currentCount ? `${currentCount} XMP already current` : null,
+                            exceptionCount ? `${exceptionCount} photo exceptions` : null,
+                            `WB ${writesWhiteBalance ? "measured" : "untouched"}`,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
+                        : "Resolve adaptive Recipes first"}
+                  </small>
+                  {conflictCount > 0 && (
+                    <small className="error-text">
+                      Conflicting XMP: {preflight!.conflicting_sidecars
+                        .slice(0, 3)
+                        .map(filenameFromPath)
+                        .join(", ")}
+                      {conflictCount > 3 ? ` +${conflictCount - 3} more` : ""}
+                    </small>
+                  )}
+                </div>
+
+                <div className="handoff-actions">
+                  {result ? (
+                    <>
+                      <strong>{result.verified_sidecar_count} XMP verified</strong>
+                      <small>
+                        {result.written_sidecars.length} newly written · every target re-read against the current Recipe
+                      </small>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="button primary"
+                        disabled={!ready || !bridge?.writeGroupXmp || handoffRunning != null || handoffBatchRunning}
+                        onClick={() => void writeGroupXmp(group.id)}
+                      >
+                        {handoffRunning === group.id
+                          ? "Writing + verifying XMP…"
+                          : conflictCount > 0
+                            ? "Existing XMP conflict"
+                            : !preflightReady && handoffPreflightLoading
+                              ? "Checking XMP…"
+                              : preflightReady && missingCount === 0 && deliverableRecipes.length > 0
+                                ? "XMP already current"
+                                : ready
+                                  ? `Write + verify ${missingCount} missing XMP`
+                                  : "Not ready"}
+                      </button>
+                      <small>
+                        No overwrite: existing conflicts stop the group; successful writes pass full-group semantic verification.
+                      </small>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {visibleHandoffGroups.length === 0 && photoContext?.groups.length ? (
+            <div className="panel-note">
+              Delivery is current for every group. Switch to All to inspect completed groups.
+            </div>
+          ) : null}
+          {!photoContext?.groups.length && (
+            <div className="panel-note">Import, analyze and choose a reference before Lightroom handoff.</div>
           )}
         </div>
-        <div className="handoff-actions">
-          <button
-            className="button primary"
-            disabled={
-              !bridge?.writeBatchXmp ||
-              handoffBatchRunning ||
-              handoffRunning != null ||
-              handoffPreflightLoading ||
-              batchConflictCount > 0 ||
-              batchGroupIds.length === 0
-            }
-            onClick={() => void writeBatchXmp(batchGroupIds)}
-          >
-            {handoffBatchRunning
-              ? "Writing batch XMP…"
-              : batchConflictCount > 0
-                ? "Resolve XMP conflicts"
-                : batchGroupIds.length > 0
-                  ? `Write ${batchMissingCount} missing XMP`
-                  : "Batch already current / not ready"}
-          </button>
-          <small>If a later group fails, XMP newly created by this batch is rolled back.</small>
-        </div>
-      </div>
-      <div className="handoff-groups">
-        {photoContext?.groups.map((group, index) => {
-          const binding = referenceBindings[group.id];
-          const preview = referencePreviews[group.id];
-          const preflight = handoffPreflights[group.id];
-          const result = handoffResults[group.id];
-          const targetedRecipes =
-            preview?.recipes.filter((recipe) => recipe.target_asset_id != null) ?? [];
-          const deliverableRecipes = targetedRecipes;
-          const rejectedCount = group.asset_ids.filter(
-            (assetId) => cullingReviews[assetId] === "REJECT",
-          ).length;
-          const exceptionCount = deliverableRecipes.filter(
-            (recipe) =>
-              recipe.target_asset_id != null && recipeReviews[recipe.target_asset_id] != null,
-          ).length;
-          const reviewAttentionCount = deliverableRecipes.filter(
-            (recipe) =>
-              recipe.target_asset_id != null &&
-              recipeReviewPriority(recipe.target_asset_id) < 10,
-          ).length;
-          const conflictCount = preflight?.conflicting_sidecars.length ?? 0;
-          const currentCount = preflight?.current_sidecars.length ?? 0;
-          const preflightReady = !bridge?.preflightGroupXmp || preflight != null;
-          const missingCount = preflight
-            ? Math.max(
-                0,
-                preflight.target_sidecars.length -
-                  preflight.current_sidecars.length -
-                  preflight.conflicting_sidecars.length,
-              )
-            : deliverableRecipes.length;
-          const ready =
-            binding != null &&
-            preview != null &&
-            preview.pending_asset_id == null &&
-            deliverableRecipes.length > 0 &&
-            preflightReady &&
-            conflictCount === 0 &&
-            missingCount > 0;
-          const writesWhiteBalance = deliverableRecipes.some(
-            (recipe) =>
-              recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
-          );
-
-          return (
-            <div className="handoff-card" key={group.id}>
-              <div className="handoff-card-main">
-                <span>Group {index + 1}</span>
-                <strong>{group.asset_ids.length} source photos</strong>
-                <small>
-                  {binding
-                    ? `Reference: ${assetNames.get(binding.selected_reference_asset_id) ?? binding.selected_reference_asset_id.slice(0, 8)}`
-                    : "Choose a reference first"}
-                </small>
-                <small>
-                  {preview?.pending_asset_id
-                    ? "Waiting for exposure evidence"
-                    : preview
-                      ? [
-                          `${deliverableRecipes.length} XMP targets`,
-                          rejectedCount ? `${rejectedCount} confirmed Reject skipped` : null,
-                          reviewAttentionCount ? `${reviewAttentionCount} review attention` : "review clear",
-                          currentCount ? `${currentCount} XMP already current` : null,
-                          exceptionCount ? `${exceptionCount} photo exceptions` : null,
-                          `WB ${writesWhiteBalance ? "measured" : "untouched"}`,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")
-                      : "Resolve adaptive Recipes first"}
-                </small>
-                {conflictCount > 0 && (
-                  <small className="error-text">
-                    Conflicting XMP: {preflight!.conflicting_sidecars
-                      .slice(0, 3)
-                      .map(filenameFromPath)
-                      .join(", ")}
-                    {conflictCount > 3 ? ` +${conflictCount - 3} more` : ""}
-                  </small>
-                )}
-              </div>
-
-              <div className="handoff-actions">
-                {result ? (
-                  <>
-                    <strong>{deliverableRecipes.length} XMP ready</strong>
-                    <small>
-                      {result.written_sidecars.length} newly written · matching existing Photo-Cake sidecars preserved
-                    </small>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      className="button primary"
-                      disabled={!ready || !bridge?.writeGroupXmp || handoffRunning != null || handoffBatchRunning}
-                      onClick={() => void writeGroupXmp(group.id)}
-                    >
-                      {handoffRunning === group.id
-                        ? "Writing XMP…"
-                        : conflictCount > 0
-                          ? "Existing XMP conflict"
-                          : !preflightReady && handoffPreflightLoading
-                            ? "Checking XMP…"
-                            : preflightReady && missingCount === 0 && deliverableRecipes.length > 0
-                              ? "XMP already current"
-                              : ready
-                                ? `Write ${missingCount} missing XMP`
-                                : "Not ready"}
-                    </button>
-                    <small>No overwrite: any existing same-basename XMP stops the group before writing.</small>
-                  </>
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {!photoContext?.groups.length && (
-          <div className="panel-note">Import, analyze and choose a reference before Lightroom handoff.</div>
-        )}
-      </div>
-    </section>
+      </section>
     );
   };
 

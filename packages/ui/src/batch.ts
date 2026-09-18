@@ -215,6 +215,7 @@ export interface BackendLightroomHandoffPreflight {
 export interface BackendLightroomHandoffResult {
   group_id: string;
   written_sidecars: string[];
+  verified_sidecar_count: number;
 }
 
 export interface BackendLightroomBatchHandoffResult {

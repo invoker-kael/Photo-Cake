@@ -95,6 +95,7 @@ struct LightroomHandoffPreflight {
 struct LightroomHandoffResult {
     group_id: Uuid,
     written_sidecars: Vec<String>,
+    verified_sidecar_count: usize,
 }
 
 #[derive(Clone, Serialize)]
@@ -1166,6 +1167,7 @@ fn write_group_reference_xmp(
     let group_id = Uuid::parse_str(&group_id)
         .map_err(|error| format!("invalid group id: {error}"))?;
     let (assets, recipes) = resolve_lightroom_handoff(group_id, &state)?;
+    let verified_sidecar_count = recipes.len();
     let written = write_group_sidecars(&assets, &recipes)
         .map_err(|error| error.to_string())?;
 
@@ -1175,6 +1177,7 @@ fn write_group_reference_xmp(
             .into_iter()
             .map(|path| path.to_string_lossy().into_owned())
             .collect(),
+        verified_sidecar_count,
     })
 }
 
@@ -1202,6 +1205,10 @@ fn write_reference_xmp_batch(
         resolved_groups.push(resolve_lightroom_handoff(group_id, &state)?);
     }
 
+    let verified_counts = resolved_groups
+        .iter()
+        .map(|(_, recipes)| recipes.len())
+        .collect::<Vec<_>>();
     let written = write_sidecar_batch(&resolved_groups)
         .map_err(|error| error.to_string())?;
 
@@ -1209,12 +1216,14 @@ fn write_reference_xmp_batch(
         groups: resolved_ids
             .into_iter()
             .zip(written)
-            .map(|(group_id, paths)| LightroomHandoffResult {
+            .zip(verified_counts)
+            .map(|((group_id, paths), verified_sidecar_count)| LightroomHandoffResult {
                 group_id,
                 written_sidecars: paths
                     .into_iter()
                     .map(|path| path.to_string_lossy().into_owned())
                     .collect(),
+                verified_sidecar_count,
             })
             .collect(),
     })

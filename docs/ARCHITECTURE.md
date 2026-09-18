@@ -116,7 +116,7 @@ Current mapped adjustments:
 - tint
 - saturation
 
-XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. At preview and handoff time, Photo-Cake regenerates the base Recipe from the current ReferenceSet/StyleProfile/evidence and then applies the persisted per-photo review override, so preview and XMP share the same final values. Newly written XMP is parsed back and validated before success; a failed validation removes the new sidecar and group writing rolls back sidecars created by that operation. The workstation writes sidecars only after an explicit user action, excludes only photographer-confirmed Reject photos, and preflights the entire group so an existing XMP prevents any partial write. RAW bytes are never changed.
+XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. At preview and handoff time, Photo-Cake regenerates the base Recipe from the current ReferenceSet/StyleProfile/evidence and then applies the persisted per-photo review override, so preview and XMP share the same final values. Newly written XMP is parsed back and validated before success; a failed validation removes the new sidecar and group writing rolls back sidecars created by that operation. The workstation writes sidecars only after an explicit user action, excludes only photographer-confirmed Reject photos, and preflights the entire group so an existing XMP prevents any partial write. RAW bytes are never changed. After all missing sidecars are created, the core immediately re-preflights the complete target set and requires every existing sidecar to match the current effective Recipe state. A missing or externally changed sidecar fails the handoff and removes sidecars created by that operation; batch handoff propagates the same failure so earlier newly-created groups are rolled back.
 
 Future mappings such as HSL, tone curve, masks and richer skin/color controls extend the Recipe/XMP model rather than creating a second editing model.
 
@@ -318,3 +318,10 @@ Workstation build_companion_snapshot
 ```
 
 Android does not require AnalysisCache parity for imported projects; it reuses the workstation's portable culling results from the snapshot. Preview bytes remain a separate transport artifact and are not embedded into snapshot JSON.
+
+
+## Lightroom Delivery Attention Surface
+
+The Lightroom page is a delivery queue rather than a flat archive of groups. Its default `Needs action` mode orders groups by photographer intervention value: XMP conflicts first, unresolved Reference/evidence next, outstanding Recipe attention next, then missing XMP. Groups whose deliverable sidecars are current and whose review attention is clear are hidden until `All` is selected.
+
+A successful handoff result is session-scoped evidence only. The UI invalidates that result when canonical delivery inputs change (Cull deliverability, Reference binding/style, per-photo Recipe exception, grouping or active project), so an old “verified” badge cannot survive a material Recipe change.

@@ -171,6 +171,13 @@ export interface BackendRecipeReviewOverride {
   saturation_delta: number;
 }
 
+export interface BackendReviewRenderResult {
+  asset_id: string;
+  recipe_id: string;
+  cache_path: string;
+  preview_url?: string;
+}
+
 export interface BatchWorkerEvent {
   batch: BackendBatch;
   step: unknown | null;
@@ -199,6 +206,7 @@ export interface PhotoCakeBridge {
     saturationDelta: number,
   ): Promise<BackendRecipeReviewOverride>;
   clearRecipeReview?(assetId: string): Promise<void>;
+  renderRecipePreview?(groupId: string, assetId: string): Promise<BackendReviewRenderResult>;
   loadReferenceStyles?(batchId: string): Promise<BackendGroupReferenceStyle[]>;
   updateReferenceStyle?(
     groupId: string,

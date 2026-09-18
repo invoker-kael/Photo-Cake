@@ -214,7 +214,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     return () => {
       disposed = true;
     };
-  }, [activeBatchId, bridge]);
+  }, [activeBatchId, analysisRevision, bridge]);
 
   useEffect(() => {
     if (!bridge?.loadCulling || !activeBatchId) {
@@ -383,6 +383,16 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   const assetNames = useMemo(
     () => new Map(photoContext?.assets.map((asset) => [asset.id, asset.filename]) ?? []),
+    [photoContext],
+  );
+
+  const previewUrls = useMemo(
+    () =>
+      new Map(
+        (photoContext?.previews ?? [])
+          .filter((preview) => preview.preview_url)
+          .map((preview) => [preview.asset_id, preview.preview_url as string]),
+      ),
     [photoContext],
   );
 
@@ -681,7 +691,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   const userDecision = cullingReviews[item.asset_id];
                   return (
                     <div className="cull-row" key={item.asset_id}>
-                      <span className="cull-rank">#{item.group_rank}</span>
+                      <div className="cull-preview">
+                        {previewUrls.get(item.asset_id) ? (
+                          <img
+                            src={previewUrls.get(item.asset_id)}
+                            alt={assetNames.get(item.asset_id) ?? "RAW preview"}
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span>RAW</span>
+                        )}
+                        <small>#{item.group_rank}</small>
+                      </div>
                       <div className="cull-name">
                         <strong>{assetNames.get(item.asset_id) ?? item.asset_id.slice(0, 8)}</strong>
                         <small>
@@ -717,7 +738,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   const userDecision = cullingReviews[assetId];
                   return (
                     <div className="cull-row pending" key={assetId}>
-                      <span className="cull-rank">—</span>
+                      <div className="cull-preview">
+                        {previewUrls.get(assetId) ? (
+                          <img
+                            src={previewUrls.get(assetId)}
+                            alt={assetNames.get(assetId) ?? "RAW preview"}
+                            loading="lazy"
+                          />
+                        ) : (
+                          <span>RAW</span>
+                        )}
+                        <small>—</small>
+                      </div>
                       <div className="cull-name">
                         <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
                         <small>Waiting for local analysis evidence</small>
@@ -909,6 +941,16 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       disabled={!bridge?.setGroupReference}
                       onClick={() => void setReferencePhoto(group.id, assetId)}
                     >
+                      {previewUrls.get(assetId) ? (
+                        <img
+                          className="reference-candidate-image"
+                          src={previewUrls.get(assetId)}
+                          alt={assetNames.get(assetId) ?? "RAW preview"}
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="reference-candidate-placeholder">RAW</div>
+                      )}
                       <span>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</span>
                       <small>{evidence}</small>
                     </button>

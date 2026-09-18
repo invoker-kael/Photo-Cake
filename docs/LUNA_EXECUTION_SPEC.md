@@ -182,3 +182,8 @@ Initial Moment grouping should use reliable embedded metadata before filesystem 
 ## Metadata Persistence Rule
 
 RAW/EXIF extraction is best-effort. When rescanning a known asset, newly available camera/capture metadata may enrich the catalog, but a transient metadata-read failure must not erase previously persisted `camera_id` or `capture_time_ms`. Filesystem modification time may refresh independently as fallback evidence.
+
+
+## Effective Group Addressing Rule
+
+After semantic refinement, downstream workstation actions must treat persisted semantic children as first-class effective groups. Reference selection, Recipe review and Lightroom/XMP handoff must resolve group IDs through `RawCatalog::find_group` or equivalent effective-group-aware APIs; do not fall back to parent-only `list_groups()` lookups.

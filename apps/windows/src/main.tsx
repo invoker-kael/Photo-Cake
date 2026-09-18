@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import App, {
@@ -29,8 +29,16 @@ const bridge: PhotoCakeBridge = {
   pauseBatch: (batchId) => invoke<BackendBatch>("pause_batch", { batchId }),
   resumeBatch: (batchId) => invoke<BackendBatch>("resume_batch", { batchId }),
   cancelBatch: (batchId) => invoke<BackendBatch>("cancel_batch", { batchId }),
-  loadPhotoContext: (batchId) =>
-    invoke<BackendPhotoContext>("batch_photo_context", { batchId }),
+  loadPhotoContext: async (batchId) => {
+    const context = await invoke<BackendPhotoContext>("batch_photo_context", { batchId });
+    return {
+      ...context,
+      previews: context.previews?.map((preview) => ({
+        ...preview,
+        preview_url: convertFileSrc(preview.cache_path),
+      })),
+    };
+  },
   loadCulling: (batchId) =>
     invoke<BackendGroupCullingResult[]>("batch_culling", { batchId }),
   loadCullingReviews: (batchId) =>

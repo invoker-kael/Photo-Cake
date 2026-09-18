@@ -302,7 +302,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     return () => {
       disposed = true;
     };
-  }, [activeBatchId, bridge]);
+  }, [activeBatchId, bridge, groupRevision]);
 
   useEffect(() => {
     if (!bridge?.loadReferenceStyles || !activeBatchId) {
@@ -382,6 +382,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     recipeReviews,
     referenceBindings,
     referenceStyles,
+    groupRevision,
   ]);
 
   const jobs = useMemo(

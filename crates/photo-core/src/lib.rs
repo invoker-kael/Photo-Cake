@@ -46,7 +46,7 @@ pub use color_sync::{
     GroupColorInvalidation, GroupColorInvalidationScope, GroupColorSyncPlan, GroupSyncMode,
     PhotoColorAnalysis, ResolvedColorEdit, SemanticColorIntent, SemanticRegion,
 };
-pub use culling::{rank_group_candidates, suggest_decision, CullingCandidate, CullingDecision, CullingRecommendation, CullingScore};
+pub use culling::{rank_group_candidates, rank_group_candidates_with_embeddings, suggest_decision, CullingCandidate, CullingDecision, CullingRecommendation, CullingScore};
 pub use export::{
     collision_safe_output, plan_export, ExportColorSpace, ExportFormat, ExportPlan,
     ExportPlanError, ExportRecipe, ResizeRecipe,
@@ -81,7 +81,7 @@ pub use reference::{ReferenceGroupResult, ReferenceSet, ReferenceWorkflowError, 
 pub use renderer::ImageExportRenderer;
 pub use runner::{AutomationRunner, NoopStageExecutor, RunStep, RunnerError, StageExecutor};
 pub use semantic_grouping::{
-    refine_group_by_similarity, ImageEmbedding, SemanticGroupKind, SemanticGroupingConfig,
+    embedding_similarity, refine_group_by_similarity, ImageEmbedding, SemanticGroupKind, SemanticGroupingConfig,
     SemanticGroupingError, SemanticPhotoGroup,
 };
 pub use store::{BatchStore, StoreError};

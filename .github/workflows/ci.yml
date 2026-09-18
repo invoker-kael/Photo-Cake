@@ -62,8 +62,22 @@ jobs:
         timeout-minutes: 15
         run: cargo test --workspace -- --nocapture
 
+      - name: Setup Android Rust target
+        run: rustup target add aarch64-linux-android
+
       - name: Check Android companion Rust contract
-        run: cargo check --manifest-path apps/android/src-tauri/Cargo.toml
+        shell: pwsh
+        run: |
+          $ndkBin = Join-Path $env:ANDROID_NDK_ROOT "toolchains\llvm\prebuilt\windows-x86_64\bin"
+          $clang = Join-Path $ndkBin "aarch64-linux-android31-clang.cmd"
+          $ar = Join-Path $ndkBin "llvm-ar.exe"
+          if (!(Test-Path $clang)) { throw "Android NDK clang not found: $clang" }
+          if (!(Test-Path $ar)) { throw "Android NDK llvm-ar not found: $ar" }
+          $env:CC_aarch64_linux_android = $clang
+          $env:AR_aarch64_linux_android = $ar
+          $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = $clang
+          $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_AR = $ar
+          cargo check --manifest-path apps/android/src-tauri/Cargo.toml --target aarch64-linux-android --lib
 
       - name: Fetch and verify pinned Windows models
         run: node scripts/fetch-models.mjs windows

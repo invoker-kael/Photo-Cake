@@ -1,10 +1,12 @@
 mod executor;
+mod exposure;
 mod litert_runtime;
 mod local_models;
 mod raw_preview;
 mod quality;
 
 pub use executor::{AnalyzeError, LocalAnalyzeExecutor};
+pub use exposure::analyze_preview_exposure;
 pub use local_models::{
     LoadedModelIdentity, LocalModelError, LocalSemanticModels, SegmentationSummary,
 };

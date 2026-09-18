@@ -196,16 +196,32 @@ export interface BackendCullingRecommendation {
   portrait_evidence?: BackendCullingPortraitEvidence | null;
 }
 
+export interface BackendMomentQuickCullPlan {
+  group_id: string;
+  primary_asset_id: string;
+  keep_asset_ids: string[];
+  review_asset_ids: string[];
+  reject_asset_ids: string[];
+  contains_people: boolean;
+  people_evidence_complete: boolean;
+}
+
 export interface BackendGroupCullingResult {
   group_id: string;
   recommendations: BackendCullingRecommendation[];
   pending_asset_ids: string[];
   exposure_brackets?: BackendExposureBracketSet[];
+  moment_quick_cull?: BackendMomentQuickCullPlan | null;
 }
 
 export interface BackendCullingReview {
   asset_id: string;
   decision: CullingUserDecision;
+}
+
+export interface BackendMomentQuickCullBatchResult {
+  group_ids: string[];
+  reviews: BackendCullingReview[];
 }
 
 export interface BackendReferenceBinding {
@@ -358,6 +374,10 @@ export interface PhotoCakeBridge {
   loadCullingReviews?(batchId: string): Promise<BackendCullingReview[]>;
   setCullingReview?(assetId: string, decision: CullingUserDecision | null): Promise<void>;
   setCullingReviews?(reviews: BackendCullingReview[]): Promise<void>;
+  confirmMomentQuickCull?(
+    batchId: string,
+    groupIds: string[],
+  ): Promise<BackendMomentQuickCullBatchResult>;
   loadReferenceBindings?(batchId: string): Promise<BackendReferenceBinding[]>;
   setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
   setGroupReferences?(

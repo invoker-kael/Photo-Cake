@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+const QUICK_CULL_DUPLICATE_QUALITY_GAP: f32 = 0.08;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CullingScore {
     pub sharpness: f32,
@@ -277,6 +279,17 @@ fn protect_exposure_bracket_members(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MomentQuickCullPlan {
+    pub group_id: Uuid,
+    pub primary_asset_id: Uuid,
+    pub keep_asset_ids: Vec<Uuid>,
+    pub review_asset_ids: Vec<Uuid>,
+    pub reject_asset_ids: Vec<Uuid>,
+    pub contains_people: bool,
+    pub people_evidence_complete: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupCullingResult {
     pub group_id: Uuid,
@@ -284,6 +297,69 @@ pub struct GroupCullingResult {
     pub pending_asset_ids: Vec<Uuid>,
     #[serde(default)]
     pub exposure_brackets: Vec<ExposureBracketSet>,
+    #[serde(default)]
+    pub moment_quick_cull: Option<MomentQuickCullPlan>,
+}
+
+/// Build an explicit photographer shortcut for one already-related moment.
+pub fn build_moment_quick_cull_plan(
+    group_id: Uuid,
+    recommendations: &[CullingRecommendation],
+    pending_asset_ids: &[Uuid],
+    exposure_brackets: &[ExposureBracketSet],
+    people_evidence_complete: bool,
+) -> Option<MomentQuickCullPlan> {
+    if recommendations.len() < 2
+        || !pending_asset_ids.is_empty()
+        || !exposure_brackets.is_empty()
+    {
+        return None;
+    }
+
+    let primary = recommendations
+        .iter()
+        .min_by_key(|item| item.group_rank)?;
+    if primary.group_rank != 1 || primary.decision != CullingDecision::Keep {
+        return None;
+    }
+
+    let contains_people = recommendations.iter().any(|item| {
+        item.portrait_evidence.as_ref().is_some_and(|evidence| {
+            evidence.person_count > 0 || evidence.face_count > 0
+        })
+    });
+    let mut review_asset_ids = Vec::new();
+    let mut reject_asset_ids = Vec::new();
+
+    let mut ordered = recommendations.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|item| item.group_rank);
+    for item in ordered {
+        if item.asset_id == primary.asset_id {
+            continue;
+        }
+
+        let duplicate_with_material_gap =
+            item.reasons.contains(&CullingReason::NearDuplicate)
+                && item.decision != CullingDecision::Keep
+                && primary.quality_score - item.quality_score
+                    >= QUICK_CULL_DUPLICATE_QUALITY_GAP;
+
+        if people_evidence_complete && !contains_people && duplicate_with_material_gap {
+            reject_asset_ids.push(item.asset_id);
+        } else {
+            review_asset_ids.push(item.asset_id);
+        }
+    }
+
+    Some(MomentQuickCullPlan {
+        group_id,
+        primary_asset_id: primary.asset_id,
+        keep_asset_ids: vec![primary.asset_id],
+        review_asset_ids,
+        reject_asset_ids,
+        contains_people,
+        people_evidence_complete,
+    })
 }
 
 #[derive(Debug, Error)]
@@ -309,6 +385,7 @@ pub fn build_group_culling_result(
     let mut candidates = Vec::new();
     let mut embeddings = Vec::new();
     let mut portrait_evidence = HashMap::new();
+    let mut people_evidence_complete = true;
     let mut pending_asset_ids = Vec::new();
 
     for asset_id in &group.asset_ids {
@@ -351,25 +428,26 @@ pub fn build_group_culling_result(
             }
         }
 
-        if let Some(artifact) =
-            cache.latest_for_asset_task(*asset_id, InferenceTask::Segmentation)?
-        {
-            let signals = serde_json::from_value::<ClassificationSignals>(artifact.payload_json)
-                .map_err(|source| CullingEvidenceError::Json {
-                    asset_id: *asset_id,
-                    source,
-                })?;
-            if signals.detected_person_count > 0 || signals.detected_face_count > 0 {
-                portrait_evidence.insert(
-                    *asset_id,
-                    CullingPortraitEvidence {
-                        person_count: signals.detected_person_count,
-                        face_count: signals.detected_face_count,
-                        primary_subject_ratio: signals.primary_subject_ratio,
-                        people_confidence: signals.people_confidence,
-                    },
-                );
+        match cache.latest_for_asset_task(*asset_id, InferenceTask::Segmentation)? {
+            Some(artifact) => {
+                let signals = serde_json::from_value::<ClassificationSignals>(artifact.payload_json)
+                    .map_err(|source| CullingEvidenceError::Json {
+                        asset_id: *asset_id,
+                        source,
+                    })?;
+                if signals.detected_person_count > 0 || signals.detected_face_count > 0 {
+                    portrait_evidence.insert(
+                        *asset_id,
+                        CullingPortraitEvidence {
+                            person_count: signals.detected_person_count,
+                            face_count: signals.detected_face_count,
+                            primary_subject_ratio: signals.primary_subject_ratio,
+                            people_confidence: signals.people_confidence,
+                        },
+                    );
+                }
             }
+            None => people_evidence_complete = false,
         }
     }
 
@@ -386,12 +464,20 @@ pub fn build_group_culling_result(
 
     let exposure_brackets = detect_exposure_brackets(cache, group)?;
     protect_exposure_bracket_members(&mut recommendations, &exposure_brackets);
+    let moment_quick_cull = build_moment_quick_cull_plan(
+        group.id,
+        &recommendations,
+        &pending_asset_ids,
+        &exposure_brackets,
+        people_evidence_complete,
+    );
 
     Ok(GroupCullingResult {
         group_id: group.id,
         recommendations,
         pending_asset_ids,
         exposure_brackets,
+        moment_quick_cull,
     })
 }
 
@@ -704,6 +790,199 @@ mod tests {
         assert_eq!(evidence.face_count, 2);
         assert!((evidence.primary_subject_ratio - 0.31).abs() < 1e-6);
         assert!((evidence.people_confidence - 0.94).abs() < 1e-6);
+    }
+
+    fn recommendation(
+        asset_id: Uuid,
+        quality_score: f32,
+        decision: CullingDecision,
+        rank: usize,
+        reasons: Vec<CullingReason>,
+        people: bool,
+    ) -> CullingRecommendation {
+        CullingRecommendation {
+            asset_id,
+            quality_score,
+            decision,
+            group_rank: rank,
+            reasons,
+            portrait_evidence: people.then_some(CullingPortraitEvidence {
+                person_count: 1,
+                face_count: 1,
+                primary_subject_ratio: 0.4,
+                people_confidence: 0.95,
+            }),
+        }
+    }
+
+    #[test]
+    fn quick_cull_rejects_only_clear_non_people_near_duplicates() {
+        let group_id = Uuid::new_v4();
+        let best = Uuid::new_v4();
+        let duplicate = Uuid::new_v4();
+        let alternate = Uuid::new_v4();
+        let plan = build_moment_quick_cull_plan(
+            group_id,
+            &[
+                recommendation(
+                    best,
+                    0.95,
+                    CullingDecision::Keep,
+                    1,
+                    vec![CullingReason::StrongTechnicalCandidate],
+                    false,
+                ),
+                recommendation(
+                    duplicate,
+                    0.82,
+                    CullingDecision::Review,
+                    2,
+                    vec![CullingReason::NearDuplicate],
+                    false,
+                ),
+                recommendation(
+                    alternate,
+                    0.91,
+                    CullingDecision::Keep,
+                    3,
+                    vec![CullingReason::StrongTechnicalCandidate],
+                    false,
+                ),
+            ],
+            &[],
+            &[],
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(plan.primary_asset_id, best);
+        assert_eq!(plan.keep_asset_ids, vec![best]);
+        assert_eq!(plan.reject_asset_ids, vec![duplicate]);
+        assert_eq!(plan.review_asset_ids, vec![alternate]);
+        assert!(!plan.contains_people);
+    }
+
+    #[test]
+    fn quick_cull_preserves_all_people_alternates_for_review() {
+        let group_id = Uuid::new_v4();
+        let best = Uuid::new_v4();
+        let duplicate = Uuid::new_v4();
+        let plan = build_moment_quick_cull_plan(
+            group_id,
+            &[
+                recommendation(
+                    best,
+                    0.96,
+                    CullingDecision::Keep,
+                    1,
+                    vec![CullingReason::StrongTechnicalCandidate],
+                    true,
+                ),
+                recommendation(
+                    duplicate,
+                    0.70,
+                    CullingDecision::Review,
+                    2,
+                    vec![CullingReason::NearDuplicate],
+                    true,
+                ),
+            ],
+            &[],
+            &[],
+            true,
+        )
+        .unwrap();
+
+        assert!(plan.contains_people);
+        assert!(plan.people_evidence_complete);
+        assert!(plan.reject_asset_ids.is_empty());
+        assert_eq!(plan.review_asset_ids, vec![duplicate]);
+    }
+
+    #[test]
+    fn quick_cull_preserves_duplicates_when_people_evidence_is_incomplete() {
+        let group_id = Uuid::new_v4();
+        let best = Uuid::new_v4();
+        let duplicate = Uuid::new_v4();
+        let plan = build_moment_quick_cull_plan(
+            group_id,
+            &[
+                recommendation(
+                    best,
+                    0.96,
+                    CullingDecision::Keep,
+                    1,
+                    vec![CullingReason::StrongTechnicalCandidate],
+                    false,
+                ),
+                recommendation(
+                    duplicate,
+                    0.70,
+                    CullingDecision::Review,
+                    2,
+                    vec![CullingReason::NearDuplicate],
+                    false,
+                ),
+            ],
+            &[],
+            &[],
+            false,
+        )
+        .unwrap();
+
+        assert!(!plan.people_evidence_complete);
+        assert!(plan.reject_asset_ids.is_empty());
+        assert_eq!(plan.review_asset_ids, vec![duplicate]);
+    }
+
+    #[test]
+    fn quick_cull_blocks_pending_and_bracket_groups() {
+        let group_id = Uuid::new_v4();
+        let best = Uuid::new_v4();
+        let alternate = Uuid::new_v4();
+        let recommendations = vec![
+            recommendation(
+                best,
+                0.95,
+                CullingDecision::Keep,
+                1,
+                vec![CullingReason::StrongTechnicalCandidate],
+                false,
+            ),
+            recommendation(
+                alternate,
+                0.80,
+                CullingDecision::Review,
+                2,
+                vec![CullingReason::NearDuplicate],
+                false,
+            ),
+        ];
+
+        assert!(build_moment_quick_cull_plan(
+            group_id,
+            &recommendations,
+            &[Uuid::new_v4()],
+            &[],
+            true,
+        )
+        .is_none());
+
+        let bracket = ExposureBracketSet {
+            group_id,
+            center_asset_id: best,
+            members: Vec::new(),
+            span_ev: 2.0,
+            minimum_embedding_similarity: 0.98,
+        };
+        assert!(build_moment_quick_cull_plan(
+            group_id,
+            &recommendations,
+            &[],
+            &[bracket],
+            true,
+        )
+        .is_none());
     }
 
     #[test]

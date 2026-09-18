@@ -437,3 +437,29 @@ The Workflow Cockpit counts unresolved HDR merge groups separately from XMP conf
 HDR completion is persisted against a fingerprint of the **current detected bracket membership + center frame**, not just the group ID. If regrouping or new analysis changes the bracket set, the saved completion no longer matches and the HDR action reopens automatically. This prevents a stale "merged" flag from hiding a materially different source stack.
 
 Safe batch handoff is deliberately stricter than individual handoff. Any group with **pending** HDR source RAWs is excluded from the transactional batch cohort. Once the current bracket fingerprint is marked merged, ordinary non-bracket peers in a mixed group may rejoin safe batch delivery. A pure bracket source group can become workflow-current without manufacturing zero-value XMP files.
+
+
+## Moment Quick Cull
+
+Large travel/family shoots often contain many short bursts where the existing group-relative ranking already identifies a clear starting frame, but forcing the photographer to persist every obvious decision one card at a time wastes time. Moment Quick Cull is an explicit batch acceptance layer on top of the existing Cull evidence; it is not a second scoring model.
+
+A quick-cull plan is available only when the group has at least two scored photos, no pending quality evidence, no detected exposure bracket, and rank #1 is a normal Cull `Keep`. The plan always keeps that primary frame. Remaining frames are routed conservatively:
+
+- if any person/face evidence exists in the group, every alternate stays `Review`; expression alternatives are never batch-rejected by this shortcut;
+- if people/face evidence is incomplete for any scored frame, the shortcut becomes conservative and every alternate stays `Review`; absence of evidence is never treated as proof that the group contains no people;
+- only when people evidence is complete and the group is confirmed non-people may a lower-ranked frame already identified as a near duplicate and trailing the primary by a material quality gap be routed to `Reject`;
+- every other alternate remains `Review`.
+
+The workstation may multi-select eligible moments, but the Windows backend re-resolves each group from the current analysis cache before writing. A selected group is rejected from the transaction if it has acquired a Reference, any photographer Cull decision, missing evidence, HDR-bracket status, or another condition that invalidates the plan. Only after all selected groups pass does the existing transactional Cull store persist the combined decisions.
+
+This preserves the workflow boundary:
+
+```text
+Analyze -> Group-relative Cull evidence -> Moment Quick Cull (explicit)
+                                      -> Keep primary
+                                      -> Review protected alternates
+                                      -> Reject only clear non-people near duplicates
+          -> manual Cull exceptions -> Reference -> Recipe -> Review -> XMP
+```
+
+A `Review` result is intentionally not equivalent to approval. It clears the initial selection ambiguity while keeping that frame in the later exception workflow. This is especially important for family photography, where the technically strongest frame may not contain the preferred expression.

@@ -383,3 +383,14 @@ Lightroom preflight must identify the exact HDR source asset IDs. Pure bracket g
 After completing the merge in Lightroom/Camera Raw, the photographer must be able to explicitly mark that bracket merge complete. Completion must be fingerprint-bound to the currently detected bracket members/center so a changed stack automatically returns to Needs action. Marking a pure bracket source group complete must close its workflow action without creating placeholder XMP sidecars.
 
 Photo-Cake does not claim to merge HDR RAWs yet. The current production path is to preserve the bracket, keep its intent visible, merge the source RAWs in Lightroom/Camera Raw, mark the source stack merged, then import/use the resulting HDR DNG when desired. HDR/DNG merging or Direct Export from brackets requires a real RAW-domain merge plus canonical Recipe/color/metadata renderer and must not be simulated with embedded-JPEG preview logic.
+
+
+### Moment-level quick culling
+
+Large travel, family and burst sessions must support an explicit Moment-level shortcut without weakening photographer control. The system may propose a Quick Cull plan only from the same cached group-relative evidence already used by ordinary Cull; it must not introduce a parallel hidden ranking model.
+
+Eligibility requires a complete multi-photo group with a rank-1 Keep candidate, no pending quality analysis and no exposure-bracket source set. The primary candidate may be persisted as photographer Keep. If the group contains people/face evidence, every alternate must remain Review rather than being batch-Rejected. If people evidence is incomplete, the same conservative Review-only treatment applies. Automatic Reject within this explicit action is allowed only when people evidence is complete, the group is confirmed non-people, and the lower-ranked frame is a near duplicate with a material quality gap from the primary; all other alternates remain Review.
+
+The photographer must explicitly choose which eligible groups to apply. The backend must revalidate the complete selected set before any writes, must refuse groups with existing photographer Cull decisions or an established Reference, and must commit all resulting decisions transactionally. A stale/invalid selected group must abort the batch rather than partially quick-culling other groups.
+
+Quick Cull is selection acceleration, not deletion. Source RAW files remain untouched, Review alternates remain available to Reference/Recipe workflows, and subsequent photographer decisions stay authoritative.

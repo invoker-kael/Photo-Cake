@@ -64,9 +64,10 @@ pub use color_sync::{
     PhotoColorAnalysis, ResolvedColorEdit, SemanticColorIntent, SemanticRegion,
 };
 pub use culling::{
-    build_group_culling_result, rank_group_candidates, rank_group_candidates_with_embeddings,
-    suggest_decision, CullingCandidate, CullingDecision, CullingEvidenceError,
-    CullingReason, CullingRecommendation, CullingScore, GroupCullingResult,
+    build_group_culling_result, build_moment_quick_cull_plan, rank_group_candidates,
+    rank_group_candidates_with_embeddings, suggest_decision, CullingCandidate, CullingDecision,
+    CullingEvidenceError, CullingReason, CullingRecommendation, CullingScore, GroupCullingResult,
+    MomentQuickCullPlan,
 };
 pub use culling_store::{
     CullingReview, CullingReviewStore, CullingReviewStoreError, CullingUserDecision,

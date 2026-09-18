@@ -10,6 +10,7 @@ import {
   type BackendLightroomBatchHandoffResult,
   type BackendLightroomHandoffPreflight,
   type BackendLightroomHandoffResult,
+  type BackendMomentQuickCullBatchResult,
   type BackendPhotoContext,
   type BackendRawMetadataEvidence,
   type BackendReferenceBatchItem,
@@ -44,6 +45,7 @@ export type {
   BackendLightroomBatchHandoffResult,
   BackendLightroomHandoffPreflight,
   BackendLightroomHandoffResult,
+  BackendMomentQuickCullBatchResult,
   BackendPhotoContext,
   BackendRawImportResult,
   BackendReferenceBatchItem,
@@ -283,6 +285,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [reviewViewMode, setReviewViewMode] = useState<ReviewViewMode>("TRIAGE");
   const [lightroomViewMode, setLightroomViewMode] = useState<LightroomViewMode>("NEEDS_ACTION");
   const [cullBatchUpdating, setCullBatchUpdating] = useState(false);
+  const [momentQuickCullTargets, setMomentQuickCullTargets] = useState<string[]>([]);
+  const [momentQuickCullUpdating, setMomentQuickCullUpdating] = useState(false);
+  const [momentQuickCullNote, setMomentQuickCullNote] = useState<string | null>(null);
   const [groupRevision, setGroupRevision] = useState(0);
   const [groupRefining, setGroupRefining] = useState(false);
   const [groupRefinementNote, setGroupRefinementNote] = useState<string | null>(null);
@@ -658,6 +663,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   }, [activeBatchId, cullingReviews, recipeReviews, referenceBindings, referenceStyles, groupRevision]);
 
   useEffect(() => {
+    setMomentQuickCullTargets([]);
+    setMomentQuickCullNote(null);
+  }, [activeBatchId, groupRevision]);
+
+  useEffect(() => {
     if (!bridge?.loadWorkflowStatus || !activeBatchId || mode !== "workstation") {
       setWorkflowStatus(null);
       return;
@@ -883,6 +893,35 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   );
   const bracketSetsForGroup = (groupId: string) =>
     cullingGroupsById.get(groupId)?.exposure_brackets ?? [];
+
+  const momentQuickCullEligibleGroups = culling.filter((group) => {
+    const plan = group.moment_quick_cull;
+    if (!plan || referenceBindings[group.group_id] != null) return false;
+    return [...plan.keep_asset_ids, ...plan.review_asset_ids, ...plan.reject_asset_ids]
+      .every((assetId) => cullingReviews[assetId] == null);
+  });
+  const eligibleMomentQuickCullGroupIds = new Set(
+    momentQuickCullEligibleGroups.map((group) => group.group_id),
+  );
+  const selectedMomentQuickCullGroups = momentQuickCullEligibleGroups.filter((group) =>
+    momentQuickCullTargets.includes(group.group_id),
+  );
+  const selectedMomentQuickCullPhotoCount = selectedMomentQuickCullGroups.reduce(
+    (total, group) => {
+      const plan = group.moment_quick_cull!;
+      return total +
+        plan.keep_asset_ids.length +
+        plan.review_asset_ids.length +
+        plan.reject_asset_ids.length;
+    },
+    0,
+  );
+  const momentQuickCullPeopleGroupCount = momentQuickCullEligibleGroups.filter(
+    (group) => group.moment_quick_cull?.contains_people,
+  ).length;
+  const momentQuickCullConservativeGroupCount = momentQuickCullEligibleGroups.filter(
+    (group) => group.moment_quick_cull?.people_evidence_complete === false,
+  ).length;
 
   const visibleCulling = useMemo(() => {
     if (cullViewMode === "ALL") return culling;
@@ -1231,6 +1270,45 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       setBackendError(String(error));
     } finally {
       setCullBatchUpdating(false);
+    }
+  };
+
+  const confirmSelectedMomentQuickCull = async () => {
+    if (
+      !bridge?.confirmMomentQuickCull ||
+      !activeBatch ||
+      selectedMomentQuickCullGroups.length === 0
+    ) {
+      return;
+    }
+
+    setMomentQuickCullUpdating(true);
+    setMomentQuickCullNote(null);
+    try {
+      const result: BackendMomentQuickCullBatchResult =
+        await bridge.confirmMomentQuickCull(
+          activeBatch.id,
+          selectedMomentQuickCullGroups.map((group) => group.group_id),
+        );
+      setCullingReviews((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          result.reviews.map((review) => [review.asset_id, review.decision]),
+        ),
+      }));
+      setMomentQuickCullTargets([]);
+      const keepCount = result.reviews.filter((review) => review.decision === "KEEP").length;
+      const reviewCount = result.reviews.filter((review) => review.decision === "REVIEW").length;
+      const rejectCount = result.reviews.filter((review) => review.decision === "REJECT").length;
+      setMomentQuickCullNote(
+        `Quick-culled ${result.group_ids.length} moments: ${keepCount} primary Keep · ${reviewCount} protected Review · ${rejectCount} clear duplicate Reject.`,
+      );
+      setEditedPreviews({});
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setMomentQuickCullUpdating(false);
     }
   };
 
@@ -1965,6 +2043,68 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             </div>
           </div>
         </div>
+        {mode === "workstation" &&
+          bridge?.confirmMomentQuickCull &&
+          momentQuickCullEligibleGroups.length > 0 && (
+            <div className="reference-batch-setup">
+              <div className="reference-batch-setup-head">
+                <div>
+                  <span>Moment quick cull</span>
+                  <strong>Best frame → Keep · uncertain alternates → Review · only clear non-people duplicates → Reject</strong>
+                </div>
+                <small>
+                  Uses the existing group-relative Cull evidence only. People/family alternates are never batch-Rejected here, HDR brackets and analysis-pending groups are excluded, and any group with an existing photographer decision or Reference stays individual work.
+                </small>
+              </div>
+              <div className="reference-batch-setup-status">
+                <span>{momentQuickCullEligibleGroups.length} eligible moments</span>
+                <span>{momentQuickCullPeopleGroupCount} people-safe</span>
+                {momentQuickCullConservativeGroupCount > 0 && (
+                  <span>{momentQuickCullConservativeGroupCount} people evidence incomplete · no auto Reject</span>
+                )}
+                <span>{selectedMomentQuickCullGroups.length} selected</span>
+                <span>{selectedMomentQuickCullPhotoCount} photos affected</span>
+              </div>
+              <div className="batch-look-actions reference-batch-actions">
+                <button
+                  className="review-choice clear"
+                  disabled={momentQuickCullUpdating}
+                  onClick={() =>
+                    setMomentQuickCullTargets(
+                      momentQuickCullEligibleGroups.map((group) => group.group_id),
+                    )
+                  }
+                >
+                  Select eligible
+                </button>
+                <button
+                  className="review-choice clear"
+                  disabled={momentQuickCullUpdating || momentQuickCullTargets.length === 0}
+                  onClick={() => setMomentQuickCullTargets([])}
+                >
+                  Clear
+                </button>
+                <button
+                  className="button primary"
+                  disabled={
+                    momentQuickCullUpdating ||
+                    selectedMomentQuickCullGroups.length === 0
+                  }
+                  onClick={() => void confirmSelectedMomentQuickCull()}
+                >
+                  {momentQuickCullUpdating
+                    ? "Quick-culling selected moments…"
+                    : `Apply to ${selectedMomentQuickCullGroups.length} moments`}
+                </button>
+              </div>
+              {momentQuickCullNote && (
+                <small className="success-text">{momentQuickCullNote}</small>
+              )}
+            </div>
+          )}
+        {momentQuickCullNote && momentQuickCullEligibleGroups.length === 0 && (
+          <div className="group-refine-note">{momentQuickCullNote}</div>
+        )}
         {cullingLoading && <div className="panel-note">Refreshing cached culling evidence…</div>}
         {!cullingLoading && culling.length === 0 && (
           <div className="panel-note">Import and analyze RAW photos before culling.</div>
@@ -1983,7 +2123,33 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   {group.recommendations.length} scored · {group.pending_asset_ids.length} pending
                   {!!group.exposure_brackets?.length &&
                     ` · ${group.exposure_brackets.length} exposure bracket set(s)`}
+                  {group.moment_quick_cull &&
+                    ` · quick plan: 1 Keep / ${group.moment_quick_cull.review_asset_ids.length} Review / ${group.moment_quick_cull.reject_asset_ids.length} Reject`}
                 </span>
+                {eligibleMomentQuickCullGroupIds.has(group.group_id) && (
+                  <label className="handoff-batch-check">
+                    <input
+                      type="checkbox"
+                      checked={momentQuickCullTargets.includes(group.group_id)}
+                      disabled={momentQuickCullUpdating}
+                      onChange={() =>
+                        setMomentQuickCullTargets((current) =>
+                          current.includes(group.group_id)
+                            ? current.filter((value) => value !== group.group_id)
+                            : [...current, group.group_id],
+                        )
+                      }
+                    />
+                    <span>
+                      Quick-cull moment
+                      {group.moment_quick_cull?.contains_people
+                        ? " · people alternates stay Review"
+                        : group.moment_quick_cull?.people_evidence_complete === false
+                          ? " · people evidence incomplete · alternates stay Review"
+                          : ""}
+                    </span>
+                  </label>
+                )}
               </div>
               <div className="cull-list">
                 {group.recommendations.map((item) => {

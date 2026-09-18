@@ -8,6 +8,7 @@ use photo_core::{
     ClassificationStore, CompanionDecisionPatch, CompanionPatchApplyReport, CompanionSnapshot,
     CompanionSnapshotStore, CullingDecision, CullingReview, CullingReviewStore, CullingUserDecision,
     ExposureBracketMergeStore, ExposureBracketSet, GroupCullingResult, GroupReferenceBinding,
+    MomentQuickCullPlan,
     JobStatus, ModelBundleManifest, ModelPlatform,
     PhotoGroup, PreviewArtifact, PreviewStore, RawAsset, RawCatalog, RawImportResult, RawImporter,
     RawMetadataStore, Recipe, RecipeReviewOverride, RecipeReviewSignal, RecipeReviewStore,
@@ -127,6 +128,12 @@ struct RecipeReviewBatchItem {
 #[derive(Clone, Serialize)]
 struct RecipeReviewBatchResult {
     asset_ids: Vec<Uuid>,
+}
+
+#[derive(Clone, Serialize)]
+struct MomentQuickCullBatchResult {
+    group_ids: Vec<Uuid>,
+    reviews: Vec<CullingReview>,
 }
 
 #[derive(Clone, Serialize)]
@@ -1004,6 +1011,113 @@ fn set_culling_reviews(
         .culling_reviews
         .set_many(&reviews)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn confirm_moment_quick_cull(
+    batch_id: String,
+    group_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<MomentQuickCullBatchResult, String> {
+    if group_ids.is_empty() {
+        return Err("no Moment groups selected for quick cull".to_string());
+    }
+
+    let batch_id = parse_batch_id(&batch_id)?;
+    let groups = state
+        .catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let groups_by_id = groups
+        .into_iter()
+        .map(|group| (group.id, group))
+        .collect::<HashMap<_, _>>();
+
+    let mut seen_groups = HashSet::with_capacity(group_ids.len());
+    let mut seen_assets = HashSet::new();
+    let mut resolved_group_ids = Vec::with_capacity(group_ids.len());
+    let mut reviews = Vec::new();
+
+    for value in group_ids {
+        let group_id = Uuid::parse_str(&value)
+            .map_err(|error| format!("invalid group id: {error}"))?;
+        if !seen_groups.insert(group_id) {
+            return Err(format!("duplicate Moment quick-cull group: {group_id}"));
+        }
+
+        let group = groups_by_id
+            .get(&group_id)
+            .ok_or_else(|| format!("photo group is not part of batch {batch_id}: {group_id}"))?;
+        if state
+            .reference_store
+            .group_binding(group_id)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Err(format!(
+                "group {group_id} already has a Reference; quick cull must finish before Reference"
+            ));
+        }
+        if !state
+            .culling_reviews
+            .list_for_assets(&group.asset_ids)
+            .map_err(|error| error.to_string())?
+            .is_empty()
+        {
+            return Err(format!(
+                "group {group_id} already has photographer Cull decisions; quick cull will not overwrite them"
+            ));
+        }
+
+        let result = build_group_culling_result(&state.analysis_cache, group, 0.98)
+            .map_err(|error| error.to_string())?;
+        let MomentQuickCullPlan {
+            keep_asset_ids,
+            review_asset_ids,
+            reject_asset_ids,
+            ..
+        } = result.moment_quick_cull.ok_or_else(|| {
+            format!(
+                "group {group_id} is not eligible for Moment quick cull; finish evidence or review it individually"
+            )
+        })?;
+
+        for asset_id in keep_asset_ids
+            .iter()
+            .chain(review_asset_ids.iter())
+            .chain(reject_asset_ids.iter())
+        {
+            if !seen_assets.insert(*asset_id) {
+                return Err(format!(
+                    "asset {asset_id} appears in more than one selected quick-cull group"
+                ));
+            }
+        }
+
+        reviews.extend(keep_asset_ids.into_iter().map(|asset_id| CullingReview {
+            asset_id,
+            decision: CullingUserDecision::Keep,
+        }));
+        reviews.extend(review_asset_ids.into_iter().map(|asset_id| CullingReview {
+            asset_id,
+            decision: CullingUserDecision::Review,
+        }));
+        reviews.extend(reject_asset_ids.into_iter().map(|asset_id| CullingReview {
+            asset_id,
+            decision: CullingUserDecision::Reject,
+        }));
+        resolved_group_ids.push(group_id);
+    }
+
+    state
+        .culling_reviews
+        .set_many(&reviews)
+        .map_err(|error| error.to_string())?;
+
+    Ok(MomentQuickCullBatchResult {
+        group_ids: resolved_group_ids,
+        reviews,
+    })
 }
 
 #[tauri::command]
@@ -2238,6 +2352,7 @@ pub fn run() {
             batch_culling_reviews,
             set_culling_review,
             set_culling_reviews,
+            confirm_moment_quick_cull,
             batch_reference_bindings,
             set_group_references,
             set_group_reference,

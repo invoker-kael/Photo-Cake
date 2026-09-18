@@ -2,9 +2,9 @@
 
 ## Scope
 
-Photo-Cake is a local-first AI photography workflow application.
+Photo-Cake is a local-first semi-automatic photography workflow application.
 
-The architecture follows the real photographer workflow instead of a generic image processing pipeline.
+The architecture follows the photographer workflow:
 
 ```text
 RAW Collection
@@ -14,9 +14,6 @@ Catalog
       |
       v
 Metadata + Preview
-      |
-      v
-Analysis
       |
       v
 Smart Culling
@@ -33,14 +30,16 @@ Recipe / Edit Graph
       +------------+
       |            |
       v            v
-     XMP        Export
+     XMP        Direct Export
 ```
+
+The goal is to reduce repetitive editing work while keeping photographer control.
 
 ---
 
 # Existing Code Reuse
 
-The current repository is the foundation.
+The repository implementation remains the foundation.
 
 ```text
 apps/
@@ -52,7 +51,7 @@ crates/
  └── photo-inference
 ```
 
-Do not create parallel implementations when existing modules can be extended.
+Extend existing modules before creating new systems.
 
 ---
 
@@ -65,34 +64,94 @@ Shared photography workflow engine.
 Responsibilities:
 
 - catalog management
-- RAW asset model
+- RAW asset identity
 - metadata
-- photo groups
-- preview system
-- Recipe model
-- Edit Graph
+- preview
+- photo grouping
+- culling decisions
+- reference sets
+- Recipe/Edit Graph
 - batch jobs
 - XMP/export interfaces
 
-This layer contains workflow rules shared by platforms.
+---
+
+# Photo Group Model
+
+Photo Group is the main editing unit.
+
+A group represents a real photography situation:
+
+- travel scene
+- portrait session
+- family event
+- landscape
+- indoor/night photography
+
+Group-level editing is preferred over isolated photo processing.
+
+```text
+Photo Assets
+      |
+      v
+Photo Group
+      |
+      v
+Recipe
+      |
+      v
+Multiple Photos
+```
 
 ---
 
+# Recipe Driven Editing
+
+Recipe is the single source of editing decisions.
+
+```text
+Reference Photos
+        |
+        v
+Style Analysis
+        |
+        v
+Recipe
+        |
+        v
+XMP / Export
+```
+
+Recipe contains future editable decisions such as:
+
+- exposure
+- white balance
+- contrast
+- color preference
+- skin tone preference
+- lighting style
+
+RAW files remain immutable.
+
+---
+
+# AI Layer
+
 ## photo-inference
 
-AI capability layer.
+Responsible for AI capabilities:
 
-Current capabilities:
+Current:
 
 - image analysis
 - similarity detection
 - segmentation
 - local model execution
 
-Future extensions:
+Future:
 
-- photo quality scoring
-- culling assistance
+- quality scoring
+- smart culling
 - style extraction
 - editing suggestions
 
@@ -130,83 +189,28 @@ Business logic stays in shared core modules.
 
 ---
 
-# Data Model
-
-```text
-Project
- |
-Catalog
- |
-Photo Asset
- |
-Photo Group
- |
-Reference Set
- |
-Recipe
- |
-Edit Graph
- |
-Output Job
-```
-
-Photo Group is a first-class object because real photography sessions contain different scenes, lighting, and editing requirements.
-
----
-
-# Non-Destructive Editing
-
-```text
-RAW
- |
-Edit Graph
- |
-Recipe
- |
-+----------+
-|          |
-XMP      Export
-```
-
-Rules:
-
-- RAW remains immutable.
-- XMP is the Lightroom bridge.
-- Export always uses the same Recipe model.
-
----
-
 # Development Priority
 
-Development should maximize photographer value:
+Implement the photographer workflow first:
 
 ```text
 Catalog
  -> Preview
- -> Grouping
+ -> Photo Group
  -> Culling
+ -> Reference Style
  -> Recipe
  -> XMP
  -> Export
  -> Advanced AI
 ```
 
-Do not block early workflow delivery on:
+Do not prioritize:
 
-- full RAW replacement engine
+- replacing Lightroom
+- full RAW engine replacement
+- cloud editing service
 - Lightroom plugin
-- cloud service
-
----
-
-# Long Term Expansion
-
-Later phases may add:
-
-- advanced RAW processing
-- personal style profile
-- AI retouch planning
-- advanced GPU acceleration
 
 Foundation remains:
 

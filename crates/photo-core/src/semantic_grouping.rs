@@ -135,7 +135,7 @@ fn cluster_category(
 
         for (index, cluster) in clusters.iter().enumerate() {
             let centroid = centroid(cluster, dimensions);
-            let similarity = cosine_similarity(&embedding.vector, &centroid);
+            let similarity = embedding_similarity(&embedding.vector, &centroid);
             if similarity >= threshold && similarity > best_similarity {
                 best_index = Some(index);
                 best_similarity = similarity;
@@ -187,13 +187,14 @@ fn choose_medoid(items: &[&ImageEmbedding], dimensions: usize) -> Option<Uuid> {
     items
         .iter()
         .max_by(|left, right| {
-            cosine_similarity(&left.vector, &center)
-                .total_cmp(&cosine_similarity(&right.vector, &center))
+            embedding_similarity(&left.vector, &center)
+                .total_cmp(&embedding_similarity(&right.vector, &center))
         })
         .map(|item| item.asset_id)
 }
 
-fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+/// Cosine similarity shared by semantic grouping and duplicate/burst review.
+pub fn embedding_similarity(left: &[f32], right: &[f32]) -> f32 {
     let mut dot = 0.0f32;
     let mut left_norm = 0.0f32;
     let mut right_norm = 0.0f32;
@@ -324,6 +325,12 @@ mod tests {
         assert_eq!(promoted.kind, PhotoGroupKind::Similar);
         assert_eq!(promoted.basis, GroupingBasis::SemanticSimilarity);
         assert_eq!(promoted.asset_ids.len(), 2);
+    }
+
+    #[test]
+    fn embedding_similarity_is_one_for_same_direction() {
+        assert!((embedding_similarity(&[1.0, 2.0], &[2.0, 4.0]) - 1.0).abs() < 1e-6);
+        assert_eq!(embedding_similarity(&[0.0, 0.0], &[1.0, 0.0]), 0.0);
     }
 
     #[test]

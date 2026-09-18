@@ -124,3 +124,8 @@ For a large personal shoot, the user can:
 5. have Photo-Cake adapt it across similar photos;
 6. review exceptions rather than every repetitive adjustment;
 7. create tiny XMP sidecars for Lightroom or explicitly export final images.
+
+
+## Workstation Entry
+
+On Windows, the user can choose an existing RAW folder with the native folder picker. Photo-Cake registers the RAWs in place, creates initial moment groups and runs local analysis. Finishing the preparation queue means the photos are ready for culling/group/reference work; it does not imply that Photo-Cake silently exported or destructively edited them.

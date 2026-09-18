@@ -237,15 +237,25 @@ pub fn sidecar_path_for_raw(raw_path: &Path) -> PathBuf {
 }
 
 fn existing_sidecar_path(raw_path: &Path) -> Option<PathBuf> {
-    let lower = sidecar_path_for_raw(raw_path);
-    if lower.exists() {
-        return Some(lower);
+    let parent = raw_path.parent().unwrap_or_else(|| Path::new("."));
+    let raw_stem = raw_path.file_stem()?;
+
+    if let Ok(entries) = std::fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() || path.file_stem() != Some(raw_stem) {
+                continue;
+            }
+            let is_xmp = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("xmp"));
+            if is_xmp {
+                return Some(path);
+            }
+        }
     }
 
-    let upper = raw_path.with_extension("XMP");
-    if upper != lower && upper.exists() {
-        return Some(upper);
-    }
     None
 }
 
@@ -513,6 +523,30 @@ mod tests {
         let error = write_group_sidecars(&[asset], &[recipe(Some(asset_id))]).unwrap_err();
         assert!(matches!(error, XmpWriteError::ExistingSidecar(path) if path.ends_with("IMG_0099.XMP")));
         assert!(!dir.path().join("IMG_0099.xmp").exists());
+    }
+
+    #[test]
+    fn mixed_case_existing_sidecar_is_protected() {
+        let dir = tempdir().unwrap();
+        let raw_path = dir.path().join("IMG_0100.CR3");
+        std::fs::write(&raw_path, b"raw").unwrap();
+        std::fs::write(dir.path().join("IMG_0100.XmP"), b"existing").unwrap();
+
+        let asset_id = Uuid::new_v4();
+        let asset = RawAsset {
+            id: asset_id,
+            source_path: raw_path.to_string_lossy().into_owned(),
+            filename: "IMG_0100.CR3".into(),
+            extension: "cr3".into(),
+            camera_id: None,
+            capture_time_ms: None,
+            file_time_ms: None,
+            sequence_number: Some(100),
+        };
+
+        let error = write_group_sidecars(&[asset], &[recipe(Some(asset_id))]).unwrap_err();
+        assert!(matches!(error, XmpWriteError::ExistingSidecar(path) if path.ends_with("IMG_0100.XmP")));
+        assert!(!dir.path().join("IMG_0100.xmp").exists());
     }
 
     #[test]

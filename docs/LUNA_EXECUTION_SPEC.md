@@ -125,3 +125,8 @@ CI is verification, not the product. Do not create repeated CI-only commits unle
 Do not turn the per-photo `AutomationRunner` into the product workflow. New imports use it for import/analyze preparation only and then become ready for group-level review. Culling, grouping, reference selection, adaptive Recipe generation and XMP delivery are higher-level operations. Preserve legacy stage decoding only for compatibility.
 
 The workstation import button must continue to call the existing `import_raw_directory` / `RawImporter` path; do not add a second importer. Android remains a companion and must reuse shared UI/core concepts.
+
+
+## Culling Execution Rule
+
+Analyze writes `QualityScoring` and image-embedding evidence into `AnalysisCache`. Downstream culling must call `build_group_culling_result` and consume that cache; do not re-run inference from the Cull page. Missing evidence is pending, not a guessed score. Duplicate ranking remains PhotoGroup-scoped, keeps the strongest candidate, and leaves alternatives reviewable.

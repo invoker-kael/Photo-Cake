@@ -125,7 +125,7 @@ mod tests {
     use super::*;
     use crate::{
         classify_photo, initial_group_raw_assets, AnalysisArtifact, AnalysisCacheKey,
-        ClassificationSignals, InitialGroupingConfig, PhotoCategory, PortraitClassificationPolicy,
+        ClassificationSignals, InitialGroupingConfig, PortraitClassificationPolicy,
         RawAsset, SceneTag,
     };
     use tempfile::tempdir;

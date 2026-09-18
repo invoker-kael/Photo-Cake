@@ -4,6 +4,7 @@
 //! It never deletes originals automatically and it does not invent scores for
 //! evidence that has not been measured yet.
 
+use crate::{embedding_similarity, ImageEmbedding};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -113,6 +114,67 @@ pub fn rank_group_candidates(candidates: &[CullingCandidate]) -> Vec<CullingReco
         .collect()
 }
 
+/// Combine cached technical quality with existing image embeddings inside one
+/// already-related PhotoGroup.
+///
+/// Similarity is only used to demote later, lower-quality near-duplicates to
+/// Review. It never compares unrelated collections globally.
+pub fn rank_group_candidates_with_embeddings(
+    candidates: &[CullingCandidate],
+    embeddings: &[ImageEmbedding],
+    duplicate_threshold: f32,
+) -> Vec<CullingRecommendation> {
+    let mut enriched = candidates.to_vec();
+    let mut order = (0..enriched.len()).collect::<Vec<_>>();
+    order.sort_by(|left, right| {
+        enriched[*right]
+            .score
+            .review_score()
+            .total_cmp(&enriched[*left].score.review_score())
+    });
+
+    let threshold = duplicate_threshold.clamp(0.0, 1.0);
+
+    for position in 1..order.len() {
+        let current_index = order[position];
+        let current_id = enriched[current_index].asset_id;
+        let Some(current_embedding) = embeddings.iter().find(|item| item.asset_id == current_id) else {
+            continue;
+        };
+        if current_embedding.vector.is_empty() {
+            continue;
+        }
+
+        let mut best_similarity = enriched[current_index]
+            .score
+            .duplicate_similarity
+            .unwrap_or(0.0);
+
+        for prior_index in &order[..position] {
+            let prior_id = enriched[*prior_index].asset_id;
+            let Some(prior_embedding) = embeddings.iter().find(|item| item.asset_id == prior_id) else {
+                continue;
+            };
+            if prior_embedding.vector.is_empty()
+                || prior_embedding.vector.len() != current_embedding.vector.len()
+            {
+                continue;
+            }
+
+            best_similarity = best_similarity.max(embedding_similarity(
+                &current_embedding.vector,
+                &prior_embedding.vector,
+            ));
+        }
+
+        if best_similarity >= threshold {
+            enriched[current_index].score.duplicate_similarity = Some(best_similarity);
+        }
+    }
+
+    rank_group_candidates(&enriched)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +210,55 @@ mod tests {
             suggest_decision(&score(0.2, None)),
             CullingDecision::RejectSuggestion
         );
+    }
+
+    fn embedding(asset_id: Uuid, vector: &[f32]) -> ImageEmbedding {
+        ImageEmbedding {
+            asset_id,
+            vector: vector.to_vec(),
+            model_id: "test-embed".to_string(),
+            model_version: "1".to_string(),
+        }
+    }
+
+    #[test]
+    fn embeddings_mark_lower_quality_near_duplicate_for_review() {
+        let best = Uuid::new_v4();
+        let near_duplicate = Uuid::new_v4();
+        let different = Uuid::new_v4();
+
+        let ranked = rank_group_candidates_with_embeddings(
+            &[
+                CullingCandidate {
+                    asset_id: best,
+                    score: score(0.96, None),
+                },
+                CullingCandidate {
+                    asset_id: near_duplicate,
+                    score: score(0.91, None),
+                },
+                CullingCandidate {
+                    asset_id: different,
+                    score: score(0.90, None),
+                },
+            ],
+            &[
+                embedding(best, &[1.0, 0.0]),
+                embedding(near_duplicate, &[0.999, 0.01]),
+                embedding(different, &[0.0, 1.0]),
+            ],
+            0.98,
+        );
+
+        assert_eq!(ranked[0].asset_id, best);
+        assert_eq!(ranked[0].decision, CullingDecision::Keep);
+        let duplicate = ranked
+            .iter()
+            .find(|item| item.asset_id == near_duplicate)
+            .unwrap();
+        assert_eq!(duplicate.decision, CullingDecision::Review);
+        let distinct = ranked.iter().find(|item| item.asset_id == different).unwrap();
+        assert_eq!(distinct.decision, CullingDecision::Keep);
     }
 
     #[test]

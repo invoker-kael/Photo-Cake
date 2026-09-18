@@ -169,11 +169,8 @@ pub fn build_adaptive_group_plan(
     manual_copy_edit: Option<&ResolvedColorEdit>,
     revision: u64,
 ) -> Result<GroupColorSyncPlan, ColorSyncError> {
-    if let Some(reference) = reference_asset_id {
-        if !asset_ids.contains(&reference) {
-            return Err(ColorSyncError::ReferenceOutsideGroup);
-        }
-    }
+    // Reference-driven style may come from an external edited photo or another
+    // group. Only an explicit in-group promotion requires membership.
     if mode == GroupSyncMode::ReferenceDriven && reference_asset_id.is_none() {
         return Err(ColorSyncError::MissingReference);
     }
@@ -361,6 +358,32 @@ mod tests {
             plan.resolved[0].temperature_delta_k,
             plan.resolved[1].temperature_delta_k
         );
+    }
+
+    #[test]
+    fn external_reference_can_drive_another_group() {
+        let external_reference = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let plan = build_adaptive_group_plan(
+            Uuid::new_v4(),
+            &[target],
+            GroupSyncMode::ReferenceDriven,
+            Some(external_reference),
+            GroupColorIntent {
+                name: "External look".into(),
+                target_exposure_ev: 0.2,
+                target_temperature_k: 5800.0,
+                ..GroupColorIntent::default()
+            },
+            &[analysis(target, -0.5, 5200.0)],
+            None,
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(plan.reference_asset_id, Some(external_reference));
+        assert_eq!(plan.resolved[0].asset_id, target);
+        assert!((plan.resolved[0].exposure_delta_ev - 0.7).abs() < 1e-6);
     }
 
     #[test]

@@ -197,3 +197,10 @@ Cross-device project transfer/synchronization is still a separate gap. Until tha
 ## Explainable Culling
 
 Every AI culling recommendation should expose concise reasons derived only from measured evidence. Current reasons cover strong technical candidate, low sharpness, blur risk, exposure risk, near-duplicate status and low technical quality. Subjective composition, eye state and expression must not be invented as explanations when dedicated evidence is absent.
+
+
+## Companion Transport Contract
+
+Cross-device companion transport is local-first and business-logic-neutral. The workstation exports a portable CompanionSnapshot containing only the mobile decision context: stable asset identities, filenames/metadata, effective groups, cached culling recommendations, photographer culling reviews, reference state, RAW metadata evidence and preview transport indexes. Desktop RAW absolute source paths are intentionally excluded.
+
+The companion returns a CompanionDecisionPatch containing only culling and reference changes. Applying a patch must validate snapshot/batch identity, asset/group membership, rejected-reference conflicts and concurrent workstation edits before any write. Transport medium is intentionally unspecified so local file transfer, LAN transfer or another private mechanism can be added without changing the photography model.

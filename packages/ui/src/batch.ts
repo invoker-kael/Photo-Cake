@@ -100,6 +100,12 @@ export interface BackendCullingReview {
   decision: CullingUserDecision;
 }
 
+export interface BackendReferenceBinding {
+  group_id: string;
+  reference_set_id: string;
+  selected_reference_asset_id: string;
+}
+
 export interface BatchWorkerEvent {
   batch: BackendBatch;
   step: unknown | null;
@@ -117,6 +123,9 @@ export interface PhotoCakeBridge {
   loadCulling?(batchId: string): Promise<BackendGroupCullingResult[]>;
   loadCullingReviews?(batchId: string): Promise<BackendCullingReview[]>;
   setCullingReview?(assetId: string, decision: CullingUserDecision | null): Promise<void>;
+  loadReferenceBindings?(batchId: string): Promise<BackendReferenceBinding[]>;
+  setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
+  clearGroupReference?(groupId: string): Promise<void>;
   subscribeBatchUpdates(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }
 

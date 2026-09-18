@@ -1,8 +1,8 @@
 use photo_core::{
     build_group_culling_result, AnalysisCache, AutomationRunner, Batch, BatchStore,
-    ClassificationRoutingExecutor, ClassificationStore, GroupCullingResult, JobStatus,
-    ModelBundleManifest, ModelPlatform, PhotoGroup, RawAsset, RawCatalog, RawImportResult,
-    RawImporter, RunStep,
+    ClassificationRoutingExecutor, ClassificationStore, CullingReview, CullingReviewStore,
+    CullingUserDecision, GroupCullingResult, JobStatus, ModelBundleManifest, ModelPlatform,
+    PhotoGroup, RawAsset, RawCatalog, RawImportResult, RawImporter, RunStep,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
@@ -69,6 +69,7 @@ struct AppState {
     store: BatchStore,
     catalog: RawCatalog,
     analysis_cache: AnalysisCache,
+    culling_reviews: CullingReviewStore,
     raw_importer: RawImporter,
     controls: Arc<Mutex<HashMap<Uuid, Arc<BatchControl>>>>,
 }
@@ -301,6 +302,49 @@ fn batch_culling(
 }
 
 #[tauri::command]
+fn batch_culling_reviews(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<CullingReview>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let batch = state
+        .store
+        .load_batch(batch_id)
+        .map_err(|error| error.to_string())?;
+    let asset_ids = batch
+        .items
+        .iter()
+        .filter_map(|item| item.asset_id)
+        .collect::<Vec<_>>();
+
+    state
+        .culling_reviews
+        .list_for_assets(&asset_ids)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_culling_review(
+    asset_id: String,
+    decision: Option<CullingUserDecision>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let asset_id = Uuid::parse_str(&asset_id)
+        .map_err(|error| format!("invalid asset id: {error}"))?;
+    match decision {
+        Some(decision) => state
+            .culling_reviews
+            .set(asset_id, decision)
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        None => state
+            .culling_reviews
+            .clear(asset_id)
+            .map_err(|error| error.to_string()),
+    }
+}
+
+#[tauri::command]
 fn create_batch(
     name: String,
     paths: Vec<String>,
@@ -450,6 +494,7 @@ pub fn run() {
             let store = BatchStore::open(&database)?;
             let catalog = RawCatalog::open(&database)?;
             let analysis_cache = AnalysisCache::open(&database)?;
+            let culling_reviews = CullingReviewStore::open(&database)?;
             let classification_store = ClassificationStore::open(&database)?;
             let analyze_executor = LocalAnalyzeExecutor::new(
                 &database,
@@ -467,6 +512,7 @@ pub fn run() {
                 store,
                 catalog,
                 analysis_cache,
+                culling_reviews,
                 raw_importer,
                 controls: Arc::new(Mutex::new(HashMap::new())),
             });
@@ -476,6 +522,8 @@ pub fn run() {
             list_batches,
             batch_photo_context,
             batch_culling,
+            batch_culling_reviews,
+            set_culling_review,
             create_batch,
             import_raw_paths,
             import_raw_directory,

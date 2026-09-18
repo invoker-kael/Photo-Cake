@@ -1,8 +1,9 @@
 use photo_core::{
-    build_group_culling_result, AnalysisCache, AssetMetadataEvidence, Batch, BatchStore,
-    CullingReview, CullingReviewStore, CullingUserDecision, GroupCullingResult,
-    GroupReferenceBinding, PhotoGroup, PreviewArtifact, PreviewStore, RawAsset, RawCatalog,
-    RawMetadataStore, ReferenceStore,
+    build_companion_decision_patch, build_group_culling_result, hydrate_companion_snapshot,
+    AnalysisCache, AssetMetadataEvidence, Batch, BatchStore, CompanionDecisionPatch,
+    CompanionSnapshot, CompanionSnapshotStore, CullingReview, CullingReviewStore,
+    CullingUserDecision, GroupCullingResult, GroupReferenceBinding, PhotoGroup, PreviewArtifact,
+    PreviewStore, RawAsset, RawCatalog, RawMetadataStore, ReferenceStore,
 };
 use serde::Serialize;
 use std::collections::HashSet;
@@ -25,6 +26,7 @@ struct AppState {
     metadata_store: RawMetadataStore,
     culling_reviews: CullingReviewStore,
     reference_store: ReferenceStore,
+    companion_snapshots: CompanionSnapshotStore,
 }
 
 fn parse_batch_id(value: &str) -> Result<Uuid, String> {
@@ -34,6 +36,42 @@ fn parse_batch_id(value: &str) -> Result<Uuid, String> {
 #[tauri::command]
 fn list_batches(state: State<'_, AppState>) -> Result<Vec<Batch>, String> {
     state.store.list_batches().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn import_companion_snapshot(
+    snapshot: CompanionSnapshot,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    hydrate_companion_snapshot(
+        &snapshot,
+        &state.store,
+        &state.catalog,
+        &state.metadata_store,
+        &state.culling_reviews,
+        &state.reference_store,
+        &state.companion_snapshots,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn build_companion_decision_patch(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<CompanionDecisionPatch, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let snapshot = state
+        .companion_snapshots
+        .get(batch_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("companion snapshot not found for batch {batch_id}"))?;
+    build_companion_decision_patch(
+        &snapshot,
+        &state.culling_reviews,
+        &state.reference_store,
+    )
+    .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -87,6 +125,14 @@ fn batch_culling(
     state: State<'_, AppState>,
 ) -> Result<Vec<GroupCullingResult>, String> {
     let batch_id = parse_batch_id(&batch_id)?;
+    if let Some(snapshot) = state
+        .companion_snapshots
+        .get(batch_id)
+        .map_err(|error| error.to_string())?
+    {
+        return Ok(snapshot.culling);
+    }
+
     let groups = state
         .catalog
         .list_effective_groups_for_collection(batch_id)
@@ -230,11 +276,14 @@ pub fn run() {
                 metadata_store: RawMetadataStore::open(&database)?,
                 culling_reviews: CullingReviewStore::open(&database)?,
                 reference_store: ReferenceStore::open(&database)?,
+                companion_snapshots: CompanionSnapshotStore::open(&database)?,
             });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list_batches,
+            import_companion_snapshot,
+            build_companion_decision_patch,
             batch_photo_context,
             batch_culling,
             batch_culling_reviews,

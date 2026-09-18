@@ -192,3 +192,10 @@ After semantic refinement, downstream workstation actions must treat persisted s
 ## Semantic Group Identity Rule
 
 Semantic refinement is repeatable, not identity-destructive. Before replacing persisted children, reuse an existing child ID whenever parent scope, semantic kind and member asset set are unchanged. Do not generate a fresh UUID for an equivalent group, because downstream Reference/Style/XMP state is bound to that effective group identity.
+
+
+## RAW White Balance Evidence Rule
+
+DNG/TIFF `AsShotNeutral` / `AsShotWhiteXY` are persisted as exact rational provenance in `RawMetadataStore`; do not treat those source tags as already-converted Lightroom Temperature/Tint. A future solver may consume them only with a documented color-model/calibration path and validation fixtures.
+
+Downstream white balance is pair-gated at multiple boundaries. If either Temperature or Tint is missing, ColorSync must resolve neither, Recipe must materialize neither, and XMP must serialize neither. Do not weaken this gate for convenience.

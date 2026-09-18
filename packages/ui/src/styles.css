@@ -195,6 +195,23 @@ h2 { font-size: 19px; }
 .review-choice.clear { color: #777f84; background: transparent; }
 .decision-user { color: #dfe4e7; border: 1px solid #42494d; background: #202528; }
 
+
+.group-refine-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.group-refine-actions span { max-width: 520px; text-align: right; }
+.group-refine-actions .button { min-height: 32px; padding: 0 10px; font-size: 10px; white-space: nowrap; }
+.group-refine-note {
+  padding: 10px 14px;
+  border-bottom: 1px solid #22272a;
+  color: #9aa3a8;
+  background: #101416;
+  font-size: 10px;
+}
+
 .group-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px; }
 .group-detail-card { min-width: 0; min-height: 110px; padding: 14px; display: grid; align-content: start; gap: 7px; border: 1px solid #22272a; border-radius: 9px; background: #101315; }
 .group-detail-card span { color: #70787d; font-size: 10px; }
@@ -472,6 +489,8 @@ h2 { font-size: 19px; }
   .recipe-compare { grid-template-columns: 1fr; }
   .reference-group-head, .handoff-card { grid-template-columns: 1fr; }
   .handoff-actions { justify-items: start; text-align: left; }
+  .reference-group-head, .group-refine-actions { flex-direction: column; align-items: flex-start; }
+  .group-refine-actions span { text-align: left; }
   .reference-group-head { flex-direction: column; }
   .reference-current { min-width: 0; justify-items: start; }
   .cull-row { grid-template-columns: 64px minmax(0, 1fr); }

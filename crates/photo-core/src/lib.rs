@@ -56,7 +56,7 @@ pub use color_sync::{
 pub use culling::{
     build_group_culling_result, rank_group_candidates, rank_group_candidates_with_embeddings,
     suggest_decision, CullingCandidate, CullingDecision, CullingEvidenceError,
-    CullingRecommendation, CullingScore, GroupCullingResult,
+    CullingReason, CullingRecommendation, CullingScore, GroupCullingResult,
 };
 pub use culling_store::{
     CullingReview, CullingReviewStore, CullingReviewStoreError, CullingUserDecision,

@@ -222,3 +222,10 @@ Windows Library reads the persisted `RawAsset.camera_id` and `capture_time_ms` f
 ## Semantic Group Identity Stability
 
 Repeated semantic refinement with the same parent, group kind and member asset set must reuse the persisted semantic child group ID. This keeps ReferenceSet/StyleProfile bindings stable across harmless re-runs. A new group ID is justified only when the actual semantic membership changes.
+
+
+## RAW White Balance Evidence Boundary
+
+`metadata` reads exact DNG/TIFF rational evidence such as `AsShotNeutral` and `AsShotWhiteXY`. `RawMetadataStore` persists the complete metadata evidence JSON by stable catalog asset ID, independently of the compact `raw_assets` grouping schema. Partial rescans merge evidence so a transient parser/container failure cannot erase previously captured WB provenance.
+
+This layer intentionally stops before Lightroom slider synthesis. `PhotoColorAnalysis`, `GroupColorIntent`, Recipe materialization and XMP serialization all enforce a complete Temperature+Tint pair. If either axis is missing, both are omitted from downstream edits.

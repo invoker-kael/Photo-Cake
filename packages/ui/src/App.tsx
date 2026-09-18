@@ -528,6 +528,16 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       );
   }, [cullViewMode, culling, cullingReviews]);
 
+  const selectedReferenceAssetIds = useMemo(
+    () =>
+      new Set(
+        Object.values(referenceBindings).map(
+          (binding) => binding.selected_reference_asset_id,
+        ),
+      ),
+    [referenceBindings],
+  );
+
   const visibleSuggestionCount = useMemo(
     () =>
       visibleCulling.reduce(
@@ -544,16 +554,6 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         0,
       ),
     [cullingReviews, selectedReferenceAssetIds, visibleCulling],
-  );
-
-  const selectedReferenceAssetIds = useMemo(
-    () =>
-      new Set(
-        Object.values(referenceBindings).map(
-          (binding) => binding.selected_reference_asset_id,
-        ),
-      ),
-    [referenceBindings],
   );
 
   const referenceCandidatesForGroup = (assetIds: string[]) =>

@@ -232,3 +232,13 @@ This ordering is presentation logic, not a new quality model. Within the attenti
 
 Lightroom handoff must report the actual deliverable target count after photographer-confirmed Reject photos are excluded. The handoff summary also exposes how many confirmed Rejects are skipped and how many deliverable photos contain persisted per-photo Recipe exceptions, so the number shown before writing matches the intended XMP batch.
 
+### Recipe review completion
+
+A photographer can explicitly mark the current adaptive Recipe as "Looks good" without creating a fake zero-value override. The confirmation is bound to a deterministic fingerprint of the actual target, Reference lineage and final Recipe adjustments after any per-photo override. Ephemeral Recipe IDs and display names do not affect the fingerprint.
+
+A matching confirmation removes that photo from Recipe Triage. If the Reference, group style, adaptive result or per-photo override changes, the fingerprint no longer matches and the photo automatically returns to attention. The photographer can also reopen a confirmed review manually. Lightroom handoff reports remaining review-attention items but does not block the photographer from writing XMP.
+
+### Direct export boundary
+
+The existing direct-export core provides collision-safe planning, checkpoints and a baseline raster renderer for already-decoded images. It is not yet a production RAW demosaic/edit renderer. The Windows photography workflow must therefore keep Lightroom XMP as the real RAW handoff and must not expose a misleading "Direct Export" action until canonical Recipe evaluation can be rendered from RAW with reliable color/metadata behavior.
+

@@ -202,6 +202,7 @@ export interface BackendGroupReferencePreview {
   selected_reference_asset_id: string;
   recipes: BackendRecipe[];
   pending_asset_id: string | null;
+  reviewed_asset_ids: string[];
 }
 
 export interface BackendLightroomHandoffResult {
@@ -253,6 +254,8 @@ export interface PhotoCakeBridge {
     saturationDelta: number,
   ): Promise<BackendRecipeReviewOverride>;
   clearRecipeReview?(assetId: string): Promise<void>;
+  setRecipeReviewed?(groupId: string, assetId: string): Promise<void>;
+  clearRecipeReviewed?(assetId: string): Promise<void>;
   renderRecipePreview?(groupId: string, assetId: string): Promise<BackendReviewRenderResult>;
   loadReferenceStyles?(batchId: string): Promise<BackendGroupReferenceStyle[]>;
   updateReferenceStyle?(

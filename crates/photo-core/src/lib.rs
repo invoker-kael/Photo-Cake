@@ -111,7 +111,8 @@ pub use raw::{
 };
 pub use recipe::{EditAdjustments, Recipe};
 pub use recipe_review_store::{
-    RecipeReviewOverride, RecipeReviewStore, RecipeReviewStoreError,
+    recipe_review_fingerprint, RecipeReviewConfirmation, RecipeReviewOverride,
+    RecipeReviewStore, RecipeReviewStoreError,
 };
 pub use reference::{ReferenceGroupResult, ReferenceSet, ReferenceWorkflowError, StyleProfile};
 pub use reference_store::{GroupReferenceBinding, ReferenceStore, ReferenceStoreError};

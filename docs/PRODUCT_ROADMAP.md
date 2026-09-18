@@ -135,3 +135,8 @@ Implemented since the previous milestone: the workstation Cull view supports per
 Current WB status: provenance capture and persistence are implemented; Lightroom Temperature/Tint synthesis is intentionally still gated. Partial WB never reaches Recipe/XMP.
 
 Recipe triage now defaults to an exception-first attention set built from existing photographer/AI Cull evidence plus persisted per-photo overrides; it does not introduce a second scoring model. The Lightroom page now previews the real deliverable XMP count after confirmed Rejects are removed and shows how many deliverable photos carry photo-specific exceptions.
+
+Review completion is now explicit: "Looks good" confirmations are persisted against a fingerprint of the current final Recipe, so resolved attention disappears from Triage but automatically returns after meaningful Reference/style/override changes. Lightroom handoff surfaces remaining review attention without forcing it to zero.
+
+Direct Export remains a guarded gap rather than a fake workstation feature. The reusable export coordinator/checkpoint/raster pieces exist, but production Windows Direct Export should wait for a real RAW demosaic + canonical Recipe renderer with trustworthy color and metadata handling.
+

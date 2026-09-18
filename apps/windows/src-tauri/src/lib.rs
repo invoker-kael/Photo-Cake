@@ -79,6 +79,7 @@ struct GroupReferencePreview {
     selected_reference_asset_id: Uuid,
     recipes: Vec<Recipe>,
     pending_asset_id: Option<Uuid>,
+    reviewed_asset_ids: Vec<Uuid>,
 }
 
 #[derive(Clone, Serialize)]
@@ -164,6 +165,25 @@ fn apply_recipe_reviews(
         }
     }
     Ok(())
+}
+
+fn confirmed_recipe_assets(
+    recipes: &[Recipe],
+    reviews: &RecipeReviewStore,
+) -> Result<Vec<Uuid>, String> {
+    let mut asset_ids = Vec::new();
+    for recipe in recipes {
+        let Some(asset_id) = recipe.target_asset_id else {
+            continue;
+        };
+        if reviews
+            .is_recipe_confirmed(recipe)
+            .map_err(|error| error.to_string())?
+        {
+            asset_ids.push(asset_id);
+        }
+    }
+    Ok(asset_ids)
 }
 
 fn resolve_reviewed_group_recipes(
@@ -829,11 +849,14 @@ fn batch_reference_previews(
         ) {
             Ok(mut result) => {
                 apply_recipe_reviews(&mut result.recipes, &state.recipe_reviews)?;
+                let reviewed_asset_ids =
+                    confirmed_recipe_assets(&result.recipes, &state.recipe_reviews)?;
                 previews.push(GroupReferencePreview {
                     group_id: group.id,
                     selected_reference_asset_id: binding.selected_reference_asset_id,
                     recipes: result.recipes,
                     pending_asset_id: None,
+                    reviewed_asset_ids,
                 });
             }
             Err(ReferenceWorkflowError::MissingExposureAnalysis(asset_id)) => {
@@ -842,6 +865,7 @@ fn batch_reference_previews(
                     selected_reference_asset_id: binding.selected_reference_asset_id,
                     recipes: Vec::new(),
                     pending_asset_id: Some(asset_id),
+                    reviewed_asset_ids: Vec::new(),
                 });
             }
             Err(error) => return Err(error.to_string()),
@@ -849,6 +873,44 @@ fn batch_reference_previews(
     }
 
     Ok(previews)
+}
+
+#[tauri::command]
+fn set_recipe_reviewed(
+    group_id: String,
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let asset_id = Uuid::parse_str(&asset_id)
+        .map_err(|error| format!("invalid asset id: {error}"))?;
+    let (editable, recipes) = resolve_reviewed_group_recipes(group_id, &state)?;
+    if !editable.asset_ids.contains(&asset_id) {
+        return Err("photo is not an editable member of this group".to_string());
+    }
+    let recipe = recipes
+        .iter()
+        .find(|recipe| recipe.target_asset_id == Some(asset_id))
+        .ok_or_else(|| format!("adaptive Recipe not found for asset {asset_id}"))?;
+    state
+        .recipe_reviews
+        .confirm_recipe(recipe)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_recipe_reviewed(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let asset_id = Uuid::parse_str(&asset_id)
+        .map_err(|error| format!("invalid asset id: {error}"))?;
+    state
+        .recipe_reviews
+        .clear_confirmation(asset_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1166,6 +1228,8 @@ pub fn run() {
             batch_reference_styles,
             update_group_reference_style,
             batch_reference_previews,
+            set_recipe_reviewed,
+            clear_recipe_reviewed,
             render_group_recipe_preview,
             write_group_reference_xmp,
             create_batch,

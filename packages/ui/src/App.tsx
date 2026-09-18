@@ -493,9 +493,20 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     return new Map(values.map((item) => [item.asset_id, item]));
   }, [culling]);
 
+  const reviewedRecipeAssetIds = useMemo(
+    () =>
+      new Set(
+        Object.values(referencePreviews).flatMap(
+          (preview) => preview.reviewed_asset_ids ?? [],
+        ),
+      ),
+    [referencePreviews],
+  );
+
   const recipeReviewPriority = (assetId: string) => {
     const userDecision = cullingReviews[assetId];
     if (userDecision === "REJECT") return 99;
+    if (reviewedRecipeAssetIds.has(assetId)) return 90;
     if (recipeReviews[assetId]) return 0;
     if (userDecision === "REVIEW") return 1;
 
@@ -508,6 +519,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const recipeReviewLabel = (assetId: string) => {
     const userDecision = cullingReviews[assetId];
     if (userDecision === "REJECT") return "Photographer Reject · excluded from Lightroom";
+    if (reviewedRecipeAssetIds.has(assetId)) return "Reviewed · current Recipe looks good";
     if (recipeReviews[assetId]) return "Saved per-photo exception";
     if (userDecision === "REVIEW") return "Photographer marked Review";
 
@@ -919,6 +931,38 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         const next = { ...current };
         delete next[assetId];
         return next;
+      });
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setReviewUpdating(null);
+    }
+  };
+
+  const setRecipeReviewed = async (
+    groupId: string,
+    assetId: string,
+    reviewed: boolean,
+  ) => {
+    if (reviewed ? !bridge?.setRecipeReviewed : !bridge?.clearRecipeReviewed) return;
+    setReviewUpdating(assetId);
+    try {
+      if (reviewed) await bridge!.setRecipeReviewed!(groupId, assetId);
+      else await bridge!.clearRecipeReviewed!(assetId);
+      setReferencePreviews((current) => {
+        const preview = current[groupId];
+        if (!preview) return current;
+        const reviewedIds = new Set(preview.reviewed_asset_ids ?? []);
+        if (reviewed) reviewedIds.add(assetId);
+        else reviewedIds.delete(assetId);
+        return {
+          ...current,
+          [groupId]: {
+            ...preview,
+            reviewed_asset_ids: Array.from(reviewedIds),
+          },
+        };
       });
       setBackendError(null);
     } catch (error) {
@@ -1569,6 +1613,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   const assetId = recipe.target_asset_id;
                   if (!assetId) return null;
                   const review = recipeReviews[assetId];
+                  const reviewed = reviewedRecipeAssetIds.has(assetId);
                   const updating = reviewUpdating === assetId;
                   return (
                     <article className="recipe-review-card" key={recipe.id}>
@@ -1637,15 +1682,24 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           <button disabled={updating} onClick={() => adjustRecipeReview(assetId, "saturation", 5)}>+</button>
                         </div>
                       </div>
-                      {review && (
+                      <div className="recipe-review-actions">
                         <button
-                          className="review-choice clear recipe-reset"
+                          className={`review-choice ${reviewed ? "clear" : "keep"}`}
                           disabled={updating}
-                          onClick={() => void resetRecipeReview(assetId)}
+                          onClick={() => void setRecipeReviewed(group.id, assetId, !reviewed)}
                         >
-                          Clear exception
+                          {reviewed ? "Reopen review" : "Looks good"}
                         </button>
-                      )}
+                        {review && (
+                          <button
+                            className="review-choice clear recipe-reset"
+                            disabled={updating}
+                            onClick={() => void resetRecipeReview(assetId)}
+                          >
+                            Clear exception
+                          </button>
+                        )}
+                      </div>
                     </article>
                   );
                 })}
@@ -1683,6 +1737,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             (recipe) =>
               recipe.target_asset_id != null && recipeReviews[recipe.target_asset_id] != null,
           ).length;
+          const reviewAttentionCount = deliverableRecipes.filter(
+            (recipe) =>
+              recipe.target_asset_id != null &&
+              recipeReviewPriority(recipe.target_asset_id) < 10,
+          ).length;
           const ready =
             binding != null &&
             preview != null &&
@@ -1710,6 +1769,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       ? [
                           `${deliverableRecipes.length} XMP targets`,
                           rejectedCount ? `${rejectedCount} confirmed Reject skipped` : null,
+                          reviewAttentionCount ? `${reviewAttentionCount} review attention` : "review clear",
                           exceptionCount ? `${exceptionCount} photo exceptions` : null,
                           `WB ${writesWhiteBalance ? "measured" : "untouched"}`,
                         ]

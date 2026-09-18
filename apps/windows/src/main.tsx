@@ -74,6 +74,10 @@ const bridge: PhotoCakeBridge = {
     }),
   clearRecipeReview: (assetId) =>
     invoke<void>("clear_recipe_review", { assetId }),
+  setRecipeReviewed: (groupId, assetId) =>
+    invoke<void>("set_recipe_reviewed", { groupId, assetId }),
+  clearRecipeReviewed: (assetId) =>
+    invoke<void>("clear_recipe_reviewed", { assetId }),
   renderRecipePreview: async (groupId, assetId) => {
     const result = await invoke<BackendReviewRenderResult>("render_group_recipe_preview", {
       groupId,

@@ -13,7 +13,41 @@ CREATE TABLE IF NOT EXISTS recipe_review_overrides (
     override_json TEXT NOT NULL,
     updated_at_unix_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS recipe_review_confirmations (
+    asset_id TEXT PRIMARY KEY NOT NULL,
+    recipe_fingerprint TEXT NOT NULL,
+    updated_at_unix_ms INTEGER NOT NULL
+);
 "#;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecipeReviewConfirmation {
+    pub asset_id: Uuid,
+    pub recipe_fingerprint: String,
+}
+
+#[derive(Serialize)]
+struct RecipeFingerprintPayload<'a> {
+    schema: &'static str,
+    target_asset_id: Uuid,
+    source_reference_ids: &'a [Uuid],
+    adjustments: &'a crate::EditAdjustments,
+}
+
+pub fn recipe_review_fingerprint(
+    recipe: &Recipe,
+) -> Result<String, RecipeReviewStoreError> {
+    let target_asset_id = recipe
+        .target_asset_id
+        .ok_or(RecipeReviewStoreError::RecipeMissingTarget(recipe.id))?;
+    let payload = RecipeFingerprintPayload {
+        schema: "photo-cake-recipe-review-v1",
+        target_asset_id,
+        source_reference_ids: &recipe.source_reference_ids,
+        adjustments: &recipe.adjustments,
+    };
+    Ok(stable_fingerprint(&serde_json::to_vec(&payload)?))
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecipeReviewOverride {
@@ -183,6 +217,78 @@ impl RecipeReviewStore {
         )?;
         Ok(())
     }
+
+    pub fn confirm_recipe(
+        &self,
+        recipe: &Recipe,
+    ) -> Result<RecipeReviewConfirmation, RecipeReviewStoreError> {
+        let asset_id = recipe
+            .target_asset_id
+            .ok_or(RecipeReviewStoreError::RecipeMissingTarget(recipe.id))?;
+        let recipe_fingerprint = recipe_review_fingerprint(recipe)?;
+        let confirmation = RecipeReviewConfirmation {
+            asset_id,
+            recipe_fingerprint,
+        };
+
+        let conn = self.connect()?;
+        conn.execute(
+            "INSERT INTO recipe_review_confirmations
+             (asset_id, recipe_fingerprint, updated_at_unix_ms)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(asset_id) DO UPDATE SET
+                 recipe_fingerprint = excluded.recipe_fingerprint,
+                 updated_at_unix_ms = excluded.updated_at_unix_ms",
+            params![
+                confirmation.asset_id.to_string(),
+                confirmation.recipe_fingerprint,
+                unix_time_ms()
+            ],
+        )?;
+        Ok(confirmation)
+    }
+
+    pub fn is_recipe_confirmed(
+        &self,
+        recipe: &Recipe,
+    ) -> Result<bool, RecipeReviewStoreError> {
+        let asset_id = recipe
+            .target_asset_id
+            .ok_or(RecipeReviewStoreError::RecipeMissingTarget(recipe.id))?;
+        let current = recipe_review_fingerprint(recipe)?;
+        let conn = self.connect()?;
+        let stored = conn
+            .query_row(
+                "SELECT recipe_fingerprint
+                 FROM recipe_review_confirmations
+                 WHERE asset_id = ?1",
+                [asset_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(stored.as_deref() == Some(current.as_str()))
+    }
+
+    pub fn clear_confirmation(
+        &self,
+        asset_id: Uuid,
+    ) -> Result<(), RecipeReviewStoreError> {
+        let conn = self.connect()?;
+        conn.execute(
+            "DELETE FROM recipe_review_confirmations WHERE asset_id = ?1",
+            [asset_id.to_string()],
+        )?;
+        Ok(())
+    }
+}
+
+fn stable_fingerprint(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 fn add_delta(base: Option<f32>, delta: f32, min: f32, max: f32) -> Option<f32> {
@@ -280,6 +386,34 @@ mod tests {
             .unwrap();
 
         assert!(store.get(asset_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn confirmation_tracks_recipe_content_not_ephemeral_recipe_id() {
+        let dir = tempdir().unwrap();
+        let store = RecipeReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let asset_id = Uuid::new_v4();
+        let mut current = recipe(asset_id);
+        current.source_reference_ids = vec![Uuid::new_v4()];
+
+        let confirmation = store.confirm_recipe(&current).unwrap();
+        assert_eq!(confirmation.asset_id, asset_id);
+        assert!(store.is_recipe_confirmed(&current).unwrap());
+
+        let mut regenerated = current.clone();
+        regenerated.id = Uuid::new_v4();
+        regenerated.name = "regenerated display name".into();
+        assert!(store.is_recipe_confirmed(&regenerated).unwrap());
+
+        regenerated.adjustments.exposure = Some(0.5);
+        assert!(!store.is_recipe_confirmed(&regenerated).unwrap());
+
+        regenerated = current.clone();
+        regenerated.source_reference_ids = vec![Uuid::new_v4()];
+        assert!(!store.is_recipe_confirmed(&regenerated).unwrap());
+
+        store.clear_confirmation(asset_id).unwrap();
+        assert!(!store.is_recipe_confirmed(&current).unwrap());
     }
 
     #[test]

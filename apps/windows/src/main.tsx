@@ -15,6 +15,7 @@ import App, {
   type BackendReferenceBinding,
   type BackendRecipeReviewOverride,
   type BackendReviewRenderResult,
+  type BackendSemanticRefinementReport,
   type BatchWorkerEvent,
   type PhotoCakeBridge,
 } from "@photo-cake/ui";
@@ -31,6 +32,8 @@ const bridge: PhotoCakeBridge = {
   pauseBatch: (batchId) => invoke<BackendBatch>("pause_batch", { batchId }),
   resumeBatch: (batchId) => invoke<BackendBatch>("resume_batch", { batchId }),
   cancelBatch: (batchId) => invoke<BackendBatch>("cancel_batch", { batchId }),
+  refineGroups: (batchId) =>
+    invoke<BackendSemanticRefinementReport>("refine_batch_groups", { batchId }),
   loadPhotoContext: async (batchId) => {
     const context = await invoke<BackendPhotoContext>("batch_photo_context", { batchId });
     return {

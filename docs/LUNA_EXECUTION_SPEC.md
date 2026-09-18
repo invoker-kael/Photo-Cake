@@ -6,7 +6,7 @@ This document is the execution authority for Luna.
 
 Photo-Cake is a local-first semi-automatic photography workflow assistant.
 
-The target workflow is:
+The target workflow:
 
 ```text
 RAW Collection
@@ -19,20 +19,22 @@ Smart Culling
     |
 Photo Group
     |
-Reference Style
+Reference Set
     |
-Recipe
+Style Profile
     |
-XMP / Export
+Recipe / Edit Graph
+    |
+XMP / Direct Export
 ```
 
-The goal is not to replace Lightroom. The goal is to reduce repetitive photographer work while preserving RAW files, Lightroom compatibility, and user control.
+The goal is not replacing Lightroom. The goal is reducing repetitive photographer work while keeping RAW files, Lightroom compatibility and photographer decisions.
 
 ---
 
 ## Existing Code First
 
-Reuse current implementation before creating new systems.
+Reuse existing implementation before creating new systems.
 
 ```text
 photo-core
@@ -44,7 +46,8 @@ photo-core
  +-- preview
  +-- grouping
  +-- culling
- +-- recipe/edit model
+ +-- reference
+ +-- recipe
  +-- export
 
 photo-inference
@@ -52,15 +55,48 @@ photo-inference
  +-- analysis
  +-- similarity
  +-- segmentation
- +-- future style/culling models
+ +-- culling models
+ +-- style extraction
 ```
 
 Rules:
 
 - Extend existing modules.
+- Do not create parallel workflow engines.
 - Keep workflow logic platform independent.
-- Do not rebuild working capabilities.
-- Do not make export the source of truth.
+- Do not make renderer/export the source of truth.
+
+---
+
+## Photography Workflow Rules
+
+The workflow follows real photographer behavior:
+
+```text
+Many RAW files
+      |
+      v
+AI assisted selection
+      |
+      v
+Photo groups
+      |
+      v
+Choose preferred references
+      |
+      v
+Generate style recipe
+      |
+      v
+Apply batch adjustments
+```
+
+Important:
+
+- RAW remains unchanged.
+- XMP is the preferred Lightroom delivery format.
+- Direct export remains available.
+- AI recommends; user controls final selection.
 
 ---
 
@@ -68,20 +104,20 @@ Rules:
 
 Windows:
 
-- Main RAW workstation
+- Primary RAW workstation
 - Large photo libraries
 - Batch processing
-- Lightroom XMP workflow
+- Lightroom workflow
 - GPU acceleration
 
 Android:
 
-- Companion workflow
-- Photo selection
-- Reference photo selection
+- Companion application
+- Mobile photo selection
+- Reference selection
 - Preview
 
-Shared models and workflow logic must remain in core layers.
+Core models and business logic must be shared.
 
 ---
 
@@ -91,23 +127,23 @@ Shared models and workflow logic must remain in core layers.
 1. Catalog and asset foundation
 2. Preview and metadata
 3. Photo Group model
-4. Smart Culling foundation
-5. Reference Style model
+4. Smart Culling
+5. Reference Set and Style Profile
 6. Recipe/Edit Graph
-7. XMP generation
+7. Lightroom XMP mapping
 8. Direct export
+9. Advanced AI assistance
 ```
 
 ---
 
 ## Non Destructive Rules
 
-- RAW files are immutable.
-- XMP is the primary Lightroom bridge.
-- Recipe is the unified editing decision format.
-- Export and Lightroom use the same Recipe.
+- Never modify RAW source files.
+- Never generate unnecessary duplicate full-size files.
+- Recipe is the editing decision source.
+- XMP and export are outputs of Recipe.
 - Never delete photos automatically.
-- AI only suggests decisions unless explicitly approved.
 
 ---
 
@@ -124,12 +160,13 @@ Output:
 ```text
 Catalog
 Preview
-Grouping foundation
+Photo Groups
+Reference foundation
 Recipe
 XMP
 ```
 
-The user can continue editing in Lightroom.
+The result must continue working in Lightroom.
 
 ---
 
@@ -138,7 +175,6 @@ The user can continue editing in Lightroom.
 A task is complete when:
 
 - It improves photographer workflow.
-- Existing architecture is reused.
-- Implementation exists.
-- Tests pass.
-- Build succeeds.
+- It reuses current architecture.
+- It has implementation, tests and build validation.
+- It moves Photo-Cake closer to semi-automatic personal editing workflow.

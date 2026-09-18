@@ -240,3 +240,5 @@ Generate the return patch by diffing current mobile CullingReviewStore / Referen
 ## Exception-first Cull Triage Rule
 
 Keep triage as a UI projection over existing CullingRecommendation and CullingReviewStore state. In Triage mode surface unresolved Review / RejectSuggestion candidates and analysis-pending assets, hide already-confirmed items and obvious AI Keep items, and preserve original group identity/numbering. Do not manufacture a confidence score just to sort the page; use existing recommendation class, measured quality and group rank only. All mode must remain available as the complete evidence view.
+
+Batch confirmation must be explicit and use one CullingReviewStore transaction. Confirm only currently visible scored suggestions that do not already have a photographer decision; never convert pending state into a decision. Protect the asset currently selected as a group Reference from automatic batch Reject conversion. Batch confirmation remains decision persistence only and must never delete, move or exclude RAW files by itself.

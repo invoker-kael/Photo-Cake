@@ -11,6 +11,7 @@ import {
   type BackendPhotoContext,
   type BackendReferenceBinding,
   type BackendRecipeReviewOverride,
+  type BackendReviewRenderResult,
   type BatchJob,
   type BatchStage,
   type CullingDecision,
@@ -29,6 +30,7 @@ export type {
   BackendRawImportResult,
   BackendReferenceBinding,
   BackendRecipeReviewOverride,
+  BackendReviewRenderResult,
   BatchWorkerEvent,
   PhotoCakeBridge,
 } from "./batch";
@@ -142,6 +144,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [referenceStyles, setReferenceStyles] = useState<Record<string, BackendGroupReferenceStyle>>({});
   const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
   const [recipeReviews, setRecipeReviews] = useState<Record<string, BackendRecipeReviewOverride>>({});
+  const [editedPreviews, setEditedPreviews] = useState<Record<string, BackendReviewRenderResult>>({});
   const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
   const [reviewUpdating, setReviewUpdating] = useState<string | null>(null);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
@@ -538,6 +541,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         else delete next[assetId];
         return next;
       });
+      setEditedPreviews((current) => {
+        const next = { ...current };
+        delete next[assetId];
+        return next;
+      });
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -549,6 +557,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     try {
       const binding = await bridge.setGroupReference(groupId, assetId);
       setReferenceBindings((current) => ({ ...current, [groupId]: binding }));
+      setEditedPreviews({});
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -564,6 +573,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         delete next[groupId];
         return next;
       });
+      setEditedPreviews({});
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -586,6 +596,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         saturationPreference,
       );
       setReferenceStyles((current) => ({ ...current, [groupId]: style }));
+      setEditedPreviews({});
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -678,6 +689,25 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         delete next[assetId];
         return next;
       });
+      setEditedPreviews((current) => {
+        const next = { ...current };
+        delete next[assetId];
+        return next;
+      });
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setReviewUpdating(null);
+    }
+  };
+
+  const renderEditedPreview = async (groupId: string, assetId: string) => {
+    if (!bridge?.renderRecipePreview) return;
+    setReviewUpdating(assetId);
+    try {
+      const result = await bridge.renderRecipePreview(groupId, assetId);
+      setEditedPreviews((current) => ({ ...current, [assetId]: result }));
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -1115,16 +1145,40 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   const updating = reviewUpdating === assetId;
                   return (
                     <article className="recipe-review-card" key={recipe.id}>
-                      {previewUrls.get(assetId) ? (
-                        <img
-                          className="recipe-review-image"
-                          src={previewUrls.get(assetId)}
-                          alt={assetNames.get(assetId) ?? "RAW preview"}
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="recipe-review-placeholder">RAW</div>
-                      )}
+                      <div className="recipe-compare">
+                        <div className="recipe-compare-pane">
+                          <small>Before</small>
+                          {previewUrls.get(assetId) ? (
+                            <img
+                              className="recipe-review-image"
+                              src={previewUrls.get(assetId)}
+                              alt={assetNames.get(assetId) ?? "RAW preview"}
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="recipe-review-placeholder">RAW</div>
+                          )}
+                        </div>
+                        <div className="recipe-compare-pane">
+                          <small>After preview</small>
+                          {editedPreviews[assetId]?.preview_url ? (
+                            <img
+                              className="recipe-review-image"
+                              src={editedPreviews[assetId].preview_url}
+                              alt={`${assetNames.get(assetId) ?? "RAW"} edited preview`}
+                              loading="lazy"
+                            />
+                          ) : (
+                            <button
+                              className="recipe-preview-button"
+                              disabled={updating || !bridge?.renderRecipePreview}
+                              onClick={() => void renderEditedPreview(group.id, assetId)}
+                            >
+                              {updating ? "Rendering…" : "Render edited preview"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       <div className="recipe-review-info">
                         <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
                         <small>
@@ -1132,6 +1186,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           {review ? ` · override ${signed(review.exposure_delta_ev)} EV` : ""}
                         </small>
                       </div>
+                      <small className="recipe-preview-note">
+                        Edited preview is a lightweight embedded-JPEG approximation; Lightroom/RAW rendering remains authoritative.
+                      </small>
                       <div className="recipe-review-controls">
                         <div className="mini-adjust">
                           <span>Exposure</span>

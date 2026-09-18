@@ -39,7 +39,7 @@ pub use classification::{
     ClassificationInvalidation, ClassificationInvalidationScope, ClassificationSignals,
     PhotoCategory, PhotoClassification, PortraitClassificationPolicy, ProcessingRoute, SceneTag,
 };
-pub use classification_store::{ClassificationStore, ClassificationStoreError};
+pub use classification_store::{ClassificationRoutingExecutor, ClassificationStore, ClassificationStoreError};
 pub use color_sync::{
     build_adaptive_group_plan, build_auto_group_plan, choose_reference_candidate,
     derive_auto_group_intent, promote_group_reference, ColorSyncError, GroupColorIntent,

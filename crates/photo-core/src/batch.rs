@@ -16,8 +16,15 @@ pub enum BatchStage {
 impl BatchStage {
     pub fn next(self) -> Self {
         match self {
+            // New RAW batches use the runner only for source preparation and
+            // reusable local analysis. Group/cull/reference/edit/output are
+            // higher-level photographer workflows, not fake per-photo stages.
             Self::Import => Self::Analyze,
-            Self::Analyze => Self::ApplyPreset,
+            Self::Analyze => Self::Done,
+
+            // Keep legacy stages loadable for existing project databases and
+            // explicit adapters such as direct export, but do not route new
+            // imports into this deprecated automatic chain.
             Self::ApplyPreset => Self::PortraitRetouch,
             Self::PortraitRetouch => Self::Qa,
             Self::Qa => Self::Export,
@@ -189,6 +196,16 @@ mod tests {
         item.retry();
         assert_eq!(item.status, JobStatus::Pending);
         assert_eq!(item.stage, BatchStage::Analyze);
+    }
+
+    #[test]
+    fn analyzed_import_becomes_ready_without_fake_edit_export_stages() {
+        let mut item = BatchItem::imported_asset(Uuid::new_v4(), "sample.cr3");
+        assert_eq!(item.stage, BatchStage::Analyze);
+        item.start();
+        item.complete_stage();
+        assert_eq!(item.stage, BatchStage::Done);
+        assert_eq!(item.status, JobStatus::Done);
     }
 
     #[test]

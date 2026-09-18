@@ -29,7 +29,7 @@ Current code already contains substantial reusable groundwork:
 - batch/job/export infrastructure;
 - local model loading, segmentation and embeddings;
 - cached technical culling evidence, group-relative duplicate ranking and persisted photographer decisions;
-- ReferenceSet and StyleProfile, plus persistent per-group reference selection;
+- ReferenceSet and StyleProfile, plus persistent per-group reference selection and editable exposure/contrast/saturation preferences;
 - adaptive `color_sync`;
 - target-bound per-photo Recipe materialization;
 - Lightroom XMP document and same-basename sidecar writing;
@@ -120,7 +120,7 @@ Not early priorities:
 - destructive generative replacement as the default workflow.
 
 
-Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view, evidence-backed Cull view, persisted photographer Cull decisions, and persisted per-group Reference selection are connected to the Rust core. ReferenceSet now previews adaptive exposure-only Recipes from cached exposure evidence and the Windows workstation has an explicit reviewed XMP handoff that leaves white balance untouched when unknown, excludes photographer-confirmed Reject photos, and refuses partial/overwrite writes. The next gaps are StyleProfile/Recipe review persistence, stronger Lightroom round-trip validation, richer reliable color evidence and Android review/reference parity.
+Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view, evidence-backed Cull view, persisted photographer Cull decisions, and persisted per-group Reference selection are connected to the Rust core. ReferenceSet now previews adaptive exposure-only Recipes from cached exposure evidence and the Windows workstation has an explicit reviewed XMP handoff that leaves white balance untouched when unknown, excludes photographer-confirmed Reject photos, and refuses partial/overwrite writes. Cull and Reference now show real cached RAW previews, and StyleProfile edits persist across reference changes. The next gaps are per-photo Recipe review overrides, stronger Lightroom round-trip validation, richer reliable color evidence and Android review/reference parity.
 
 
-Implemented since the previous milestone: the workstation Cull view now supports persisted photographer Keep/Review/Reject overrides on top of AI suggestions. Remaining selection work is richer preview/compare UX and semantic evidence such as eyes/expression when reliable local evidence is available.
+Implemented since the previous milestone: the workstation Cull view now supports persisted photographer Keep/Review/Reject overrides on top of AI suggestions. Remaining selection work is before/after compare UX and semantic evidence such as eyes/expression when reliable local evidence is available.

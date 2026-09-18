@@ -318,6 +318,7 @@ fn grouping_basis_to_db(value: GroupingBasis) -> &'static str {
         GroupingBasis::Time => "TIME",
         GroupingBasis::TimeAndSequence => "TIME_AND_SEQUENCE",
         GroupingBasis::SequenceFallback => "SEQUENCE_FALLBACK",
+        GroupingBasis::SemanticSimilarity => "SEMANTIC_SIMILARITY",
         GroupingBasis::Singleton => "SINGLETON",
     }
 }
@@ -327,6 +328,7 @@ fn grouping_basis_from_db(value: &str) -> Result<GroupingBasis, CatalogError> {
         "TIME" => Ok(GroupingBasis::Time),
         "TIME_AND_SEQUENCE" => Ok(GroupingBasis::TimeAndSequence),
         "SEQUENCE_FALLBACK" => Ok(GroupingBasis::SequenceFallback),
+        "SEMANTIC_SIMILARITY" => Ok(GroupingBasis::SemanticSimilarity),
         "SINGLETON" => Ok(GroupingBasis::Singleton),
         other => Err(CatalogError::InvalidGroupingBasis(other.to_string())),
     }
@@ -365,6 +367,28 @@ mod tests {
         let second = sample_asset("C:/shoot/IMG_1001.CR3", 1001);
         let second_id = catalog.ensure_assets(&[second]).unwrap()[0].id;
         assert_eq!(first_id, second_id);
+    }
+
+    #[test]
+    fn semantic_grouping_basis_round_trips() {
+        let dir = tempdir().unwrap();
+        let catalog = RawCatalog::open(dir.path().join("catalog.sqlite3")).unwrap();
+        let asset = catalog
+            .ensure_assets(&[sample_asset("C:/shoot/IMG_3001.CR3", 3001)])
+            .unwrap()
+            .remove(0);
+        let collection = Uuid::new_v4();
+        let group = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Similar,
+            basis: GroupingBasis::SemanticSimilarity,
+            asset_ids: vec![asset.id],
+            manual_locked: false,
+        };
+
+        catalog.replace_automatic_groups(collection, &[group.clone()]).unwrap();
+        let loaded = catalog.list_groups_for_collection(collection).unwrap();
+        assert_eq!(loaded, vec![group]);
     }
 
     #[test]

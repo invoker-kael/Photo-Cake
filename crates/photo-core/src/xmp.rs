@@ -5,6 +5,7 @@
 //! Lightroom-compatible sidecars without touching source RAW bytes.
 
 use crate::{RawAsset, Recipe};
+use quick_xml::{events::Event, Reader};
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -25,6 +26,14 @@ pub struct XmpEditState {
 }
 
 #[derive(Debug, Error)]
+pub enum XmpParseError {
+    #[error("invalid XMP: {0}")]
+    Invalid(String),
+    #[error("XMP is missing Photo-Cake recipe identity")]
+    MissingRecipeId,
+}
+
+#[derive(Debug, Error)]
 pub enum XmpWriteError {
     #[error("recipe {0} is not bound to a target asset")]
     MissingTargetAsset(Uuid),
@@ -32,6 +41,8 @@ pub enum XmpWriteError {
     MissingRawAsset(Uuid),
     #[error("XMP sidecar already exists and will not be overwritten: {0}")]
     ExistingSidecar(PathBuf),
+    #[error("written XMP failed round-trip validation: {0}")]
+    RoundTrip(String),
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -83,6 +94,113 @@ impl XmpEditState {
             attributes.join("\n      ")
         )
     }
+
+
+    pub fn from_xmp_document(document: &str) -> Result<Self, XmpParseError> {
+        let mut reader = Reader::from_str(document);
+        reader.config_mut().trim_text(true);
+        let mut state = XmpEditState {
+            recipe_id: String::new(),
+            target_asset_id: None,
+            exposure: None,
+            contrast: None,
+            highlights: None,
+            shadows: None,
+            temperature: None,
+            tint: None,
+            saturation: None,
+        };
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(element)) | Ok(Event::Empty(element)) => {
+                    if element.name().as_ref() != b"rdf:Description" {
+                        continue;
+                    }
+                    for attribute in element.attributes().with_checks(false) {
+                        let attribute = attribute
+                            .map_err(|error| XmpParseError::Invalid(error.to_string()))?;
+                        let key = std::str::from_utf8(attribute.key.as_ref())
+                            .map_err(|error| XmpParseError::Invalid(error.to_string()))?;
+                        let value = attribute
+                            .decode_and_unescape_value(reader.decoder())
+                            .map_err(|error| XmpParseError::Invalid(error.to_string()))?
+                            .into_owned();
+                        assign_xmp_attribute(&mut state, key, &value)?;
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(error) => return Err(XmpParseError::Invalid(error.to_string())),
+            }
+        }
+
+        if state.recipe_id.is_empty() {
+            return Err(XmpParseError::MissingRecipeId);
+        }
+        Ok(state)
+    }
+}
+
+fn assign_xmp_attribute(
+    state: &mut XmpEditState,
+    name: &str,
+    value: &str,
+) -> Result<(), XmpParseError> {
+    match name {
+        "pc:RecipeId" => state.recipe_id = value.to_string(),
+        "pc:TargetAssetId" => state.target_asset_id = Some(value.to_string()),
+        "crs:Exposure2012" => state.exposure = Some(parse_xmp_number(name, value)?),
+        "crs:Contrast2012" => state.contrast = Some(parse_xmp_number(name, value)?),
+        "crs:Highlights2012" => state.highlights = Some(parse_xmp_number(name, value)?),
+        "crs:Shadows2012" => state.shadows = Some(parse_xmp_number(name, value)?),
+        "crs:Temperature" => state.temperature = Some(parse_xmp_number(name, value)?),
+        "crs:Tint" => state.tint = Some(parse_xmp_number(name, value)?),
+        "crs:Saturation" => state.saturation = Some(parse_xmp_number(name, value)?),
+        _ => {}
+    }
+    Ok(())
+}
+
+fn parse_xmp_number(name: &str, value: &str) -> Result<f32, XmpParseError> {
+    value
+        .parse::<f32>()
+        .map_err(|error| XmpParseError::Invalid(format!("{name}={value}: {error}")))
+}
+
+pub fn validate_recipe_xmp(recipe: &Recipe, document: &str) -> Result<(), XmpParseError> {
+    let expected = XmpEditState::from_recipe(recipe);
+    let actual = XmpEditState::from_xmp_document(document)?;
+
+    if expected.recipe_id != actual.recipe_id {
+        return Err(XmpParseError::Invalid("recipe id mismatch".to_string()));
+    }
+    if expected.target_asset_id != actual.target_asset_id {
+        return Err(XmpParseError::Invalid("target asset id mismatch".to_string()));
+    }
+
+    for (name, expected, actual) in [
+        ("exposure", expected.exposure, actual.exposure),
+        ("contrast", expected.contrast, actual.contrast),
+        ("highlights", expected.highlights, actual.highlights),
+        ("shadows", expected.shadows, actual.shadows),
+        ("temperature", expected.temperature, actual.temperature),
+        ("tint", expected.tint, actual.tint),
+        ("saturation", expected.saturation, actual.saturation),
+    ] {
+        if !same_xmp_number(expected, actual) {
+            return Err(XmpParseError::Invalid(format!("{name} mismatch")));
+        }
+    }
+    Ok(())
+}
+
+fn same_xmp_number(left: Option<f32>, right: Option<f32>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => (left - right).abs() <= 0.0002,
+        _ => false,
+    }
 }
 
 fn push_attr(attributes: &mut Vec<String>, name: &str, value: Option<f32>) {
@@ -110,11 +228,23 @@ pub fn sidecar_path_for_raw(raw_path: &Path) -> PathBuf {
     raw_path.with_extension("xmp")
 }
 
-pub fn write_recipe_sidecar(raw_path: &Path, recipe: &Recipe) -> io::Result<PathBuf> {
+pub fn write_recipe_sidecar(
+    raw_path: &Path,
+    recipe: &Recipe,
+) -> Result<PathBuf, XmpWriteError> {
     let path = sidecar_path_for_raw(raw_path);
+    let document = XmpEditState::from_recipe(recipe).to_xmp_document();
     let mut file = OpenOptions::new().write(true).create_new(true).open(&path)?;
-    file.write_all(XmpEditState::from_recipe(recipe).to_xmp_document().as_bytes())?;
+    file.write_all(document.as_bytes())?;
     file.sync_all()?;
+    drop(file);
+
+    let written = std::fs::read_to_string(&path)?;
+    if let Err(error) = validate_recipe_xmp(recipe, &written) {
+        let _ = std::fs::remove_file(&path);
+        return Err(XmpWriteError::RoundTrip(error.to_string()));
+    }
+
     Ok(path)
 }
 
@@ -148,7 +278,15 @@ pub fn write_group_sidecars(
 
     let mut written = Vec::with_capacity(planned.len());
     for (raw_path, recipe) in planned {
-        written.push(write_recipe_sidecar(&raw_path, recipe)?);
+        match write_recipe_sidecar(&raw_path, recipe) {
+            Ok(path) => written.push(path),
+            Err(error) => {
+                for path in &written {
+                    let _ = std::fs::remove_file(path);
+                }
+                return Err(error);
+            }
+        }
     }
     Ok(written)
 }
@@ -202,6 +340,39 @@ mod tests {
         assert!(xmp.contains(r#"crs:Exposure2012="0.6""#));
         assert!(xmp.contains(r#"crs:Temperature="5700""#));
         assert!(xmp.contains(r#"crs:Tint="3""#));
+    }
+
+    #[test]
+    fn xmp_round_trip_preserves_supported_recipe_state() {
+        let mut source = recipe(Some(Uuid::new_v4()));
+        source.id = Uuid::new_v4();
+        source.adjustments.contrast = Some(12.0);
+        source.adjustments.saturation = Some(-7.0);
+        source.adjustments.temperature = Some(6100.0);
+        source.adjustments.tint = Some(-3.0);
+
+        let document = XmpEditState::from_recipe(&source).to_xmp_document();
+        validate_recipe_xmp(&source, &document).unwrap();
+
+        let parsed = XmpEditState::from_xmp_document(&document).unwrap();
+        assert_eq!(parsed.recipe_id, source.id.to_string());
+        assert_eq!(
+            parsed.target_asset_id,
+            source.target_asset_id.map(|value| value.to_string())
+        );
+        assert_eq!(parsed.temperature, Some(6100.0));
+        assert_eq!(parsed.tint, Some(-3.0));
+    }
+
+    #[test]
+    fn malformed_or_wrong_identity_fails_round_trip_gate() {
+        let source = recipe(Some(Uuid::new_v4()));
+        let document = XmpEditState::from_recipe(&source)
+            .to_xmp_document()
+            .replace(&source.id.to_string(), &Uuid::new_v4().to_string());
+
+        assert!(validate_recipe_xmp(&source, &document).is_err());
+        assert!(XmpEditState::from_xmp_document("<x:xmpmeta />").is_err());
     }
 
     #[test]

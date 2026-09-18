@@ -183,7 +183,7 @@ fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
     if year < 1 {
         return None;
     }
-    let adjusted_year = year - i32::from(month <= 2);
+    let adjusted_year = year - if month <= 2 { 1 } else { 0 };
     let era = adjusted_year.div_euclid(400);
     let year_of_era = adjusted_year - era * 400;
     let shifted_month = i32::try_from(month).ok()? + if month > 2 { -3 } else { 9 };

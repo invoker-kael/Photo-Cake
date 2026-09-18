@@ -46,6 +46,7 @@ The existing modules are the implementation backbone:
 - `semantic_grouping`: portrait/scene similarity refinement inside a parent moment group; promote results through `SemanticPhotoGroup::to_photo_group`.
 - `culling`: Keep / Review / RejectSuggestion only; never destructive deletion.
 - `reference`: `ReferenceSet` and `StyleProfile`; a reference may be outside the target group.
+- `reference_store`: persistent ReferenceSet storage and active group→reference binding; changing the selected photo preserves the set's StyleProfile.
 - `color_sync`: shared style intent resolved against each target photo.
 - `recipe`: one target-bound Recipe per photo; Recipe is the source of editing decisions.
 - `xmp`: same-basename Lightroom sidecar generation.
@@ -86,7 +87,9 @@ one Recipe per target asset
 
 `StyleProfile` is an editable preference layer on top of measured reference values. `color_sync` is the only group color resolution engine; do not add a parallel preset-copy system.
 
-References may come from the target group or from another compatible group. In-group reference promotion still validates membership.
+References may come from the target group or from another compatible group. In-group reference promotion still validates membership. The workstation now persists the selected reference for each group before any adaptive edit is applied.
+
+Reference selection is intentionally separated from color application: the current preview analysis does not provide a sufficiently reliable RAW white-balance/temperature measurement, so the UI must not invent Kelvin/tint values merely to make the XMP path appear complete.
 
 ## Lightroom Bridge
 

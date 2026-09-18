@@ -141,3 +141,8 @@ Technical culling starts from locally measured preview evidence: sharpness/blur 
 ## Photographer Culling Decisions
 
 AI culling remains advisory. The workstation separates the suggested decision from the photographer's saved decision. The photographer can mark Keep, Review or Reject, clear that override to return to the suggestion, and re-import the same RAW without losing the decision because it is stored against the stable asset ID. Reject is workflow state only; it never deletes the RAW.
+
+
+## Partial Edit Evidence
+
+Photo-Cake may apply a subset of trustworthy adjustments. Current local preview analysis supports relative exposure adaptation between photos in the same photographic context. If RAW white-balance evidence is unavailable, temperature and tint remain untouched rather than guessed. Lightroom XMP contains only fields backed by the current Recipe/evidence.

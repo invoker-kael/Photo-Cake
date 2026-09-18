@@ -1,13 +1,15 @@
 //! Lightroom XMP sidecar bridge.
 //!
 //! Recipe remains the source of editing decisions. This module serializes
-//! supported non-destructive adjustments into a small Adobe Camera Raw /
-//! Lightroom-compatible XMP sidecar without touching the source RAW.
+//! supported non-destructive adjustments into small Adobe Camera Raw /
+//! Lightroom-compatible sidecars without touching source RAW bytes.
 
-use crate::recipe::Recipe;
+use crate::{RawAsset, Recipe};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct XmpEditState {
@@ -20,6 +22,16 @@ pub struct XmpEditState {
     pub temperature: Option<f32>,
     pub tint: Option<f32>,
     pub saturation: Option<f32>,
+}
+
+#[derive(Debug, Error)]
+pub enum XmpWriteError {
+    #[error("recipe {0} is not bound to a target asset")]
+    MissingTargetAsset(Uuid),
+    #[error("target asset {0} is missing from the supplied RAW assets")]
+    MissingRawAsset(Uuid),
+    #[error(transparent)]
+    Io(#[from] io::Error),
 }
 
 impl XmpEditState {
@@ -84,18 +96,41 @@ pub fn write_recipe_sidecar(raw_path: &Path, recipe: &Recipe) -> io::Result<Path
     Ok(path)
 }
 
+/// Write one same-basename XMP sidecar for each target-bound Recipe.
+///
+/// The caller supplies catalog assets, so Photo-Cake never needs to copy RAW
+/// files into a managed library just to hand edits to Lightroom.
+pub fn write_group_sidecars(
+    assets: &[RawAsset],
+    recipes: &[Recipe],
+) -> Result<Vec<PathBuf>, XmpWriteError> {
+    let mut written = Vec::with_capacity(recipes.len());
+
+    for recipe in recipes {
+        let target_id = recipe
+            .target_asset_id
+            .ok_or(XmpWriteError::MissingTargetAsset(recipe.id))?;
+        let asset = assets
+            .iter()
+            .find(|asset| asset.id == target_id)
+            .ok_or(XmpWriteError::MissingRawAsset(target_id))?;
+        written.push(write_recipe_sidecar(Path::new(&asset.source_path), recipe)?);
+    }
+
+    Ok(written)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recipe::{EditAdjustments, Recipe};
-    use uuid::Uuid;
+    use crate::EditAdjustments;
+    use tempfile::tempdir;
 
-    #[test]
-    fn serializes_only_present_adjustments() {
-        let recipe = Recipe {
+    fn recipe(target_asset_id: Option<Uuid>) -> Recipe {
+        Recipe {
             id: Uuid::nil(),
             name: "test".into(),
-            target_asset_id: Some(Uuid::nil()),
+            target_asset_id,
             source_reference_ids: vec![],
             adjustments: EditAdjustments {
                 exposure: Some(0.35),
@@ -106,9 +141,12 @@ mod tests {
                 tint: None,
                 saturation: None,
             },
-        };
+        }
+    }
 
-        let xmp = XmpEditState::from_recipe(&recipe).to_xmp_document();
+    #[test]
+    fn serializes_only_present_adjustments() {
+        let xmp = XmpEditState::from_recipe(&recipe(Some(Uuid::nil()))).to_xmp_document();
         assert!(xmp.contains(r#"pc:TargetAssetId="00000000-0000-0000-0000-000000000000""#));
         assert!(xmp.contains(r#"crs:Exposure2012="0.35""#));
         assert!(xmp.contains(r#"crs:Highlights2012="-40""#));
@@ -121,5 +159,53 @@ mod tests {
             sidecar_path_for_raw(Path::new("IMG_0001.CR3")),
             PathBuf::from("IMG_0001.xmp")
         );
+    }
+
+    #[test]
+    fn writes_target_bound_group_sidecars_without_copying_raws() {
+        let dir = tempdir().unwrap();
+        let first_path = dir.path().join("IMG_0001.CR3");
+        let second_path = dir.path().join("IMG_0002.CR3");
+        fs::write(&first_path, b"raw-one").unwrap();
+        fs::write(&second_path, b"raw-two").unwrap();
+
+        let first_id = Uuid::new_v4();
+        let second_id = Uuid::new_v4();
+        let assets = vec![
+            RawAsset {
+                id: first_id,
+                source_path: first_path.to_string_lossy().into_owned(),
+                filename: "IMG_0001.CR3".into(),
+                extension: "cr3".into(),
+                camera_id: None,
+                capture_time_ms: None,
+                file_time_ms: None,
+                sequence_number: Some(1),
+            },
+            RawAsset {
+                id: second_id,
+                source_path: second_path.to_string_lossy().into_owned(),
+                filename: "IMG_0002.CR3".into(),
+                extension: "cr3".into(),
+                camera_id: None,
+                capture_time_ms: None,
+                file_time_ms: None,
+                sequence_number: Some(2),
+            },
+        ];
+
+        let before_first = fs::read(&first_path).unwrap();
+        let before_second = fs::read(&second_path).unwrap();
+        let paths = write_group_sidecars(
+            &assets,
+            &[recipe(Some(first_id)), recipe(Some(second_id))],
+        )
+        .unwrap();
+
+        assert_eq!(paths.len(), 2);
+        assert!(dir.path().join("IMG_0001.xmp").is_file());
+        assert!(dir.path().join("IMG_0002.xmp").is_file());
+        assert_eq!(fs::read(&first_path).unwrap(), before_first);
+        assert_eq!(fs::read(&second_path).unwrap(), before_second);
     }
 }

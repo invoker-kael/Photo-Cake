@@ -307,3 +307,17 @@ The workstation should continuously summarize the current batch into one next-ac
 The status is derived read-only from existing project truth. The workflow cockpit does not create a parallel task database and does not mark work complete just because a user visited a page. Counts must come from the same evidence, stores, Recipe fingerprints and XMP preflight used by the underlying views.
 
 A `Continue workflow` action only navigates to the relevant workspace. Photographer-authoritative actions remain explicit: AI Cull suggestions are not silently accepted, References are not auto-selected, Recipe review confirmations are not auto-created and Lightroom XMP is never written automatically. This keeps the speed benefit of a guided batch editor while preserving Photo-Cake's non-destructive decision boundaries.
+
+
+### Manual group correction
+
+Semantic grouping is advisory and must be cheap to correct on real travel/family shoots. Before Reference selection, Groups exposes compact previews and explicit correction actions instead of requiring threshold tuning:
+
+- `Keep original moment together` collapses semantic children back to their Moment parent and locks it;
+- `Allow semantic refine again` reopens an automatically locked Moment;
+- adjacent non-semantic groups can be selected and merged;
+- a non-semantic group can be split before any photo except its first.
+
+Merge and split are transactional catalog operations and produce manual-locked groups with an explicit `MANUAL` grouping basis. Invalid/non-adjacent selections fail without partial catalog changes. Automatic refinement never rewrites a manual correction.
+
+Once any Reference is selected, all merge/split/regroup actions are disabled in both UI and backend. Grouping changes must happen before the Reference → Recipe → Review → Lightroom lineage is established.

@@ -159,3 +159,6 @@ Reference consistency now scales beyond one target at a time: one group can act 
 
 
 The workstation now has a workflow cockpit instead of a static process legend: canonical batch/project/XMP state is reduced to a deterministic next photographer focus and live per-stage counts. A Continue workflow action jumps directly to the current attention stage while all destructive or photographer-authoritative transitions remain explicit. This adopts the useful “guided batch flow” behavior of mature AI photo editors without adding a generic node builder or a second workflow engine.
+
+
+Grouping correction now closes the main real-shoot gap in Milestone C: semantic splits can be reverted to their original Moment, automatically locked Moments can be reopened, adjacent parent groups can be merged, and a group can be split at a chosen photo. Manual merge/split persists an explicit MANUAL basis and is locked before Reference lineage begins, so automatic grouping handles the common case while photographer corrections remain authoritative.

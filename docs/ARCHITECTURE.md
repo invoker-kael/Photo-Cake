@@ -371,3 +371,18 @@ Prepare
 The Windows workstation assembles those facts from the existing batch queue, culling evidence/reviews, Reference bindings, canonical reviewed Recipes and read-only XMP preflight. Lightroom facts include unresolved groups, existing-sidecar conflicts, missing sidecars and groups whose current Photo-Cake XMP already matches the current Recipes.
 
 This is navigation automation, not decision automation. `Continue workflow` may move the photographer to the most relevant surface, but it never confirms a Cull decision, selects a Reference, accepts a Recipe or writes XMP. The cockpit is intentionally a fixed photography state machine rather than a generic node editor: the goal is to reduce scanning and setup overhead while preserving the existing canonical workflow and explicit photographer gates.
+
+
+## Manual Group Corrections
+
+Automatic grouping remains the default, but the photographer can correct the small number of mistakes before Reference selection. Manual corrections operate on the same canonical catalog rather than creating an overlay:
+
+- a semantic child can restore its original Moment parent and lock that Moment together;
+- an automatically locked Moment can be reopened for a later semantic-refinement pass;
+- adjacent non-semantic parent groups can be merged transactionally;
+- a parent group can be split immediately before a selected photo;
+- merged/split groups are persisted as `PhotoGroupKind::Manual` with `GroupingBasis::Manual` and remain locked against automatic refinement.
+
+Merge preserves the earliest group ID and chronological member order. Split preserves the original group ID for the left side and creates one new ID for the right side. Semantic children are removed when their parent is manually corrected.
+
+All grouping mutations are blocked after any Reference selection in the current batch. This prevents a grouping correction from silently orphaning Reference bindings, Recipe lineage, review fingerprints or Lightroom delivery state. The photographer must clear References first if they intentionally want to regroup.

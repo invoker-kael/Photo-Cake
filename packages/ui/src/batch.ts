@@ -92,6 +92,7 @@ export interface BackendPhotoGroup {
     | "TIME_AND_SEQUENCE"
     | "SEQUENCE_FALLBACK"
     | "SEMANTIC_SIMILARITY"
+    | "MANUAL"
     | "SINGLETON";
   asset_ids: string[];
   manual_locked: boolean;
@@ -293,6 +294,14 @@ export interface PhotoCakeBridge {
   loadPhotoContext?(batchId: string): Promise<BackendPhotoContext>;
   loadWorkflowStatus?(batchId: string): Promise<BackendWorkflowStatus>;
   refineGroups?(batchId: string): Promise<BackendSemanticRefinementReport>;
+  keepMomentTogether?(batchId: string, groupId: string): Promise<BackendPhotoGroup[]>;
+  allowGroupRefinement?(batchId: string, groupId: string): Promise<BackendPhotoGroup[]>;
+  mergeGroups?(batchId: string, groupIds: string[]): Promise<BackendPhotoGroup[]>;
+  splitGroup?(
+    batchId: string,
+    groupId: string,
+    splitBeforeAssetId: string,
+  ): Promise<BackendPhotoGroup[]>;
   loadCulling?(batchId: string): Promise<BackendGroupCullingResult[]>;
   loadCullingReviews?(batchId: string): Promise<BackendCullingReview[]>;
   setCullingReview?(assetId: string, decision: CullingUserDecision | null): Promise<void>;

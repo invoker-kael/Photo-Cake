@@ -40,6 +40,27 @@ const bridge: PhotoCakeBridge = {
   cancelBatch: (batchId) => invoke<BackendBatch>("cancel_batch", { batchId }),
   refineGroups: (batchId) =>
     invoke<BackendSemanticRefinementReport>("refine_batch_groups", { batchId }),
+  keepMomentTogether: (batchId, groupId) =>
+    invoke<BackendPhotoContext["groups"]>("keep_batch_moment_together", {
+      batchId,
+      groupId,
+    }),
+  allowGroupRefinement: (batchId, groupId) =>
+    invoke<BackendPhotoContext["groups"]>("allow_batch_group_refinement", {
+      batchId,
+      groupId,
+    }),
+  mergeGroups: (batchId, groupIds) =>
+    invoke<BackendPhotoContext["groups"]>("merge_batch_groups", {
+      batchId,
+      groupIds,
+    }),
+  splitGroup: (batchId, groupId, splitBeforeAssetId) =>
+    invoke<BackendPhotoContext["groups"]>("split_batch_group", {
+      batchId,
+      groupId,
+      splitBeforeAssetId,
+    }),
   loadWorkflowStatus: (batchId) =>
     invoke<BackendWorkflowStatus>("batch_workflow_status", { batchId }),
   loadPhotoContext: async (batchId) => {

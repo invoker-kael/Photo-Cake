@@ -531,18 +531,15 @@ fn batch_photo_context(
     })
 }
 
-#[tauri::command]
-fn refine_batch_groups(
-    batch_id: String,
-    state: State<'_, AppState>,
-) -> Result<SemanticRefinementReport, String> {
-    let batch_id = parse_batch_id(&batch_id)?;
+fn ensure_grouping_mutation_allowed(
+    batch_id: Uuid,
+    state: &AppState,
+) -> Result<(), String> {
     let current = state
         .catalog
         .list_effective_groups_for_collection(batch_id)
         .map_err(|error| error.to_string())?;
-
-    for group in &current {
+    for group in current {
         if state
             .reference_store
             .group_binding(group.id)
@@ -550,11 +547,106 @@ fn refine_batch_groups(
             .is_some()
         {
             return Err(
-                "semantic refinement is locked after Reference selection; clear group references first"
+                "grouping is locked after Reference selection; clear group references first"
                     .to_string(),
             );
         }
     }
+    Ok(())
+}
+
+fn current_effective_groups(
+    batch_id: Uuid,
+    state: &AppState,
+) -> Result<Vec<PhotoGroup>, String> {
+    state
+        .catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn keep_batch_moment_together(
+    batch_id: String,
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<PhotoGroup>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    ensure_grouping_mutation_allowed(batch_id, &state)?;
+    state
+        .catalog
+        .keep_moment_together(batch_id, group_id)
+        .map_err(|error| error.to_string())?;
+    current_effective_groups(batch_id, &state)
+}
+
+#[tauri::command]
+fn allow_batch_group_refinement(
+    batch_id: String,
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<PhotoGroup>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    ensure_grouping_mutation_allowed(batch_id, &state)?;
+    state
+        .catalog
+        .allow_parent_refinement(batch_id, group_id)
+        .map_err(|error| error.to_string())?;
+    current_effective_groups(batch_id, &state)
+}
+
+#[tauri::command]
+fn merge_batch_groups(
+    batch_id: String,
+    group_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<PhotoGroup>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    ensure_grouping_mutation_allowed(batch_id, &state)?;
+    let group_ids = group_ids
+        .into_iter()
+        .map(|value| {
+            Uuid::parse_str(&value).map_err(|error| format!("invalid group id: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    state
+        .catalog
+        .merge_parent_groups(batch_id, &group_ids)
+        .map_err(|error| error.to_string())?;
+    current_effective_groups(batch_id, &state)
+}
+
+#[tauri::command]
+fn split_batch_group(
+    batch_id: String,
+    group_id: String,
+    split_before_asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<PhotoGroup>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let split_before_asset_id = Uuid::parse_str(&split_before_asset_id)
+        .map_err(|error| format!("invalid split asset id: {error}"))?;
+    ensure_grouping_mutation_allowed(batch_id, &state)?;
+    state
+        .catalog
+        .split_parent_group(batch_id, group_id, split_before_asset_id)
+        .map_err(|error| error.to_string())?;
+    current_effective_groups(batch_id, &state)
+}
+
+#[tauri::command]
+fn refine_batch_groups(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<SemanticRefinementReport, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    ensure_grouping_mutation_allowed(batch_id, &state)?;
 
     refine_collection_semantic_groups(
         &state.catalog,
@@ -1679,6 +1771,10 @@ pub fn run() {
             apply_companion_decision_patch,
             batch_photo_context,
             refine_batch_groups,
+            keep_batch_moment_together,
+            allow_batch_group_refinement,
+            merge_batch_groups,
+            split_batch_group,
             batch_workflow_status,
             batch_culling,
             batch_culling_reviews,

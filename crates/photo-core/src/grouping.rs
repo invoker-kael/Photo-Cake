@@ -19,6 +19,7 @@ pub enum GroupingBasis {
     TimeAndSequence,
     SequenceFallback,
     SemanticSimilarity,
+    Manual,
     Singleton,
 }
 

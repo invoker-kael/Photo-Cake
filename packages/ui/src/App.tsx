@@ -275,6 +275,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [groupRevision, setGroupRevision] = useState(0);
   const [groupRefining, setGroupRefining] = useState(false);
   const [groupRefinementNote, setGroupRefinementNote] = useState<string | null>(null);
+  const [groupMutationRunning, setGroupMutationRunning] = useState(false);
+  const [groupMergeSelection, setGroupMergeSelection] = useState<string[]>([]);
+  const [groupSplitPoints, setGroupSplitPoints] = useState<Record<string, string>>({});
   const [referenceBindings, setReferenceBindings] = useState<Record<string, BackendReferenceBinding>>({});
   const [referenceStyles, setReferenceStyles] = useState<Record<string, BackendGroupReferenceStyle>>({});
   const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
@@ -346,6 +349,12 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         .join("|") ?? "",
     [activeBatch],
   );
+
+  useEffect(() => {
+    setGroupMergeSelection([]);
+    setGroupSplitPoints({});
+    setGroupRefinementNote(null);
+  }, [activeBatchId]);
 
   useEffect(() => {
     if (!bridge?.loadPhotoContext || !activeBatchId) {
@@ -947,6 +956,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       setPhotoContext((current) =>
         current ? { ...current, groups: report.effective_groups } : current,
       );
+      setGroupMergeSelection([]);
+      setGroupSplitPoints({});
       setGroupRevision((value) => value + 1);
       setEditedPreviews({});
       setGroupRefinementNote(
@@ -960,6 +971,67 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     } finally {
       setGroupRefining(false);
     }
+  };
+
+  const applyGroupMutation = (
+    groups: BackendPhotoContext["groups"],
+    note: string,
+  ) => {
+    setPhotoContext((current) => (current ? { ...current, groups } : current));
+    setGroupMergeSelection([]);
+    setGroupSplitPoints({});
+    setGroupRevision((value) => value + 1);
+    setEditedPreviews({});
+    setGroupRefinementNote(note);
+    setBackendError(null);
+  };
+
+  const runGroupMutation = async (
+    action: () => Promise<BackendPhotoContext["groups"]>,
+    note: string,
+  ) => {
+    setGroupMutationRunning(true);
+    try {
+      applyGroupMutation(await action(), note);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setGroupMutationRunning(false);
+    }
+  };
+
+  const keepMomentTogether = (groupId: string) => {
+    if (!bridge?.keepMomentTogether || !activeBatch) return;
+    void runGroupMutation(
+      () => bridge.keepMomentTogether!(activeBatch.id, groupId),
+      "Semantic split reverted. The original moment is now locked together.",
+    );
+  };
+
+  const allowGroupRefinement = (groupId: string) => {
+    if (!bridge?.allowGroupRefinement || !activeBatch) return;
+    void runGroupMutation(
+      () => bridge.allowGroupRefinement!(activeBatch.id, groupId),
+      "Moment unlocked. Run semantic refinement when you want Photo-Cake to split it again.",
+    );
+  };
+
+  const mergeSelectedGroups = () => {
+    if (!bridge?.mergeGroups || !activeBatch || groupMergeSelection.length < 2) return;
+    void runGroupMutation(
+      () => bridge.mergeGroups!(activeBatch.id, groupMergeSelection),
+      `Merged ${groupMergeSelection.length} adjacent groups into one manual-locked editing context.`,
+    );
+  };
+
+  const splitGroupAtSelectedPhoto = (groupId: string, fallbackAssetId: string) => {
+    if (!bridge?.splitGroup || !activeBatch) return;
+    const splitBeforeAssetId = groupSplitPoints[groupId] ?? fallbackAssetId;
+    if (!splitBeforeAssetId) return;
+    void runGroupMutation(
+      () => bridge.splitGroup!(activeBatch.id, groupId, splitBeforeAssetId),
+      "Group split into two manual-locked editing contexts.",
+    );
   };
 
   const setPhotoDecision = async (
@@ -1707,37 +1779,212 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     </>
   );
 
-  const renderGroups = () => (
-    <section className="queue-card">
-      <div className="queue-title">
-        <strong>Photo Groups</strong>
-        <div className="group-refine-actions">
-          <span>Moment parents are preserved; semantic children become the effective editing groups</span>
-          {mode === "workstation" && bridge?.refineGroups && activeBatch && (
+  const renderGroups = () => {
+    const groups = photoContext?.groups ?? [];
+    const groupingLockedByReference = Object.keys(referenceBindings).length > 0;
+    const selectedGroupIndexes = groupMergeSelection
+      .map((groupId) => groups.findIndex((group) => group.id === groupId))
+      .filter((index) => index >= 0)
+      .sort((left, right) => left - right);
+    const mergeSelectionAdjacent =
+      selectedGroupIndexes.length >= 2 &&
+      selectedGroupIndexes.every(
+        (index, position) =>
+          position === 0 || index === selectedGroupIndexes[position - 1] + 1,
+      ) &&
+      groupMergeSelection.every(
+        (groupId) =>
+          groups.find((group) => group.id === groupId)?.basis !==
+          "SEMANTIC_SIMILARITY",
+      );
+
+    const toggleMergeGroup = (groupId: string) => {
+      setGroupMergeSelection((current) =>
+        current.includes(groupId)
+          ? current.filter((value) => value !== groupId)
+          : [...current, groupId],
+      );
+    };
+
+    return (
+      <section className="queue-card">
+        <div className="queue-title">
+          <strong>Photo Groups</strong>
+          <div className="group-refine-actions">
+            <span>
+              Automatic grouping handles the common case; manual corrections lock only the exceptions.
+            </span>
+            {mode === "workstation" && bridge?.refineGroups && activeBatch && (
+              <button
+                className="button secondary"
+                disabled={
+                  groupRefining ||
+                  groupMutationRunning ||
+                  groupingLockedByReference
+                }
+                onClick={() => void refineGroups()}
+              >
+                {groupRefining ? "Refining…" : "Refine semantic groups"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {groupingLockedByReference && (
+          <div className="group-refine-note">
+            Grouping is locked because Reference selection has started. Clear References before merge, split or semantic regrouping.
+          </div>
+        )}
+        {groupRefinementNote && (
+          <div className="group-refine-note">{groupRefinementNote}</div>
+        )}
+
+        {mode === "workstation" && bridge?.mergeGroups && groups.length > 1 && (
+          <div className="group-manual-toolbar">
+            <div>
+              <strong>Manual correction</strong>
+              <small>
+                Select adjacent non-semantic groups to merge. Semantic children can first be restored to their original moment.
+              </small>
+            </div>
             <button
               className="button secondary"
-              disabled={groupRefining}
-              onClick={() => void refineGroups()}
+              disabled={
+                groupingLockedByReference ||
+                groupMutationRunning ||
+                !mergeSelectionAdjacent
+              }
+              onClick={mergeSelectedGroups}
             >
-              {groupRefining ? "Refining…" : "Refine semantic groups"}
+              {groupMutationRunning
+                ? "Updating groups…"
+                : `Merge selected (${groupMergeSelection.length})`}
             </button>
-          )}
-        </div>
-      </div>
-      {groupRefinementNote && <div className="group-refine-note">{groupRefinementNote}</div>}
-      <div className="group-detail-grid">
-        {photoContext?.groups.map((group, index) => (
-          <div className="group-detail-card" key={group.id}>
-            <span>Group {index + 1}</span>
-            <strong>{group.asset_ids.length} photos</strong>
-            <small>{group.kind.toLowerCase()} · {group.basis.replaceAll("_", " ").toLowerCase()}</small>
-            {group.manual_locked && <em>Manual lock</em>}
           </div>
-        ))}
-        {!photoContext?.groups.length && <div className="panel-note">No photo groups yet.</div>}
-      </div>
-    </section>
-  );
+        )}
+
+        <div className="group-detail-grid group-correction-grid">
+          {groups.map((group, index) => {
+            const semantic = group.basis === "SEMANTIC_SIMILARITY";
+            const canMerge = !semantic;
+            const splitBeforeAssetId =
+              groupSplitPoints[group.id] ?? group.asset_ids[1] ?? "";
+            return (
+              <div className="group-detail-card group-correction-card" key={group.id}>
+                <div className="group-correction-head">
+                  <div>
+                    <span>Group {index + 1}</span>
+                    <strong>{group.asset_ids.length} photos</strong>
+                    <small>
+                      {group.kind.toLowerCase()} · {group.basis.replaceAll("_", " ").toLowerCase()}
+                    </small>
+                  </div>
+                  {mode === "workstation" && bridge?.mergeGroups && canMerge && (
+                    <label className="group-merge-check">
+                      <input
+                        type="checkbox"
+                        checked={groupMergeSelection.includes(group.id)}
+                        disabled={groupMutationRunning || groupingLockedByReference}
+                        onChange={() => toggleMergeGroup(group.id)}
+                      />
+                      <span>Merge</span>
+                    </label>
+                  )}
+                </div>
+
+                <div className="group-preview-strip">
+                  {group.asset_ids.slice(0, 6).map((assetId) =>
+                    previewUrls.get(assetId) ? (
+                      <img
+                        key={assetId}
+                        src={previewUrls.get(assetId)}
+                        alt={assetNames.get(assetId) ?? "RAW preview"}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="group-preview-placeholder" key={assetId}>RAW</div>
+                    ),
+                  )}
+                  {group.asset_ids.length > 6 && (
+                    <div className="group-preview-more">+{group.asset_ids.length - 6}</div>
+                  )}
+                </div>
+
+                <div className="group-correction-actions">
+                  {semantic && bridge?.keepMomentTogether && (
+                    <button
+                      className="review-choice clear"
+                      disabled={groupMutationRunning || groupingLockedByReference}
+                      onClick={() => keepMomentTogether(group.id)}
+                    >
+                      Keep original moment together
+                    </button>
+                  )}
+
+                  {!semantic &&
+                    group.manual_locked &&
+                    group.kind !== "MANUAL" &&
+                    bridge?.allowGroupRefinement && (
+                      <button
+                        className="review-choice clear"
+                        disabled={groupMutationRunning || groupingLockedByReference}
+                        onClick={() => allowGroupRefinement(group.id)}
+                      >
+                        Allow semantic refine again
+                      </button>
+                    )}
+
+                  {!semantic && group.kind === "MANUAL" && (
+                    <em>Manual correction locked</em>
+                  )}
+
+                  {!semantic &&
+                    group.asset_ids.length > 1 &&
+                    bridge?.splitGroup && (
+                      <div className="group-split-control">
+                        <select
+                          value={splitBeforeAssetId}
+                          disabled={groupMutationRunning || groupingLockedByReference}
+                          onChange={(event) =>
+                            setGroupSplitPoints((current) => ({
+                              ...current,
+                              [group.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          {group.asset_ids.slice(1).map((assetId) => (
+                            <option key={assetId} value={assetId}>
+                              Split before {assetNames.get(assetId) ?? assetId.slice(0, 8)}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="review-choice keep"
+                          disabled={
+                            groupMutationRunning ||
+                            groupingLockedByReference ||
+                            !splitBeforeAssetId
+                          }
+                          onClick={() =>
+                            splitGroupAtSelectedPhoto(
+                              group.id,
+                              group.asset_ids[1] ?? "",
+                            )
+                          }
+                        >
+                          Split
+                        </button>
+                      </div>
+                    )}
+                </div>
+              </div>
+            );
+          })}
+          {!groups.length && <div className="panel-note">No photo groups yet.</div>}
+        </div>
+      </section>
+    );
+  };
 
   const renderReference = () => {
     const lookGroups = (photoContext?.groups ?? []).filter(

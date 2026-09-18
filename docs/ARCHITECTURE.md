@@ -289,3 +289,8 @@ identity + membership + reject + concurrency validation
 ```
 
 A patch cannot silently overwrite workstation decisions made after the snapshot. It also cannot reject the currently selected reference unless the patch clears/replaces that reference in the same validated change set.
+
+
+## Companion Conflict Scope
+
+Concurrency checks are entity-scoped, not project-global. A mobile patch compares current workstation state only for assets/groups it changes, plus any currently selected Reference whose asset decision is being changed. Unrelated workstation edits must not block an otherwise valid patch.

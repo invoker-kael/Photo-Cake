@@ -2,12 +2,28 @@ use crate::{ExportRenderer, ExportWorkerError};
 use image::{DynamicImage, GenericImageView, ImageFormat};
 use std::path::Path;
 
+use crate::export::ExportRecipe;
+
 /// Runtime rendering options derived from export recipe.
 #[derive(Debug, Clone, Copy)]
 pub struct RenderOptions {
     pub jpeg_quality: u8,
     pub resize_long_edge: Option<u32>,
     pub allow_upscale: bool,
+}
+
+impl RenderOptions {
+    pub fn from_recipe(recipe: &ExportRecipe) -> Self {
+        Self {
+            jpeg_quality: recipe.jpeg_quality.unwrap_or(92),
+            resize_long_edge: recipe.resize.as_ref().map(|resize| resize.long_edge_px),
+            allow_upscale: recipe
+                .resize
+                .as_ref()
+                .map(|resize| resize.allow_upscale)
+                .unwrap_or(false),
+        }
+    }
 }
 
 impl Default for RenderOptions {
@@ -26,6 +42,14 @@ impl Default for RenderOptions {
 /// non-destructive edit evaluation remain separate stages.
 pub struct ImageExportRenderer {
     pub options: RenderOptions,
+}
+
+impl ImageExportRenderer {
+    pub fn from_recipe(recipe: &ExportRecipe) -> Self {
+        Self {
+            options: RenderOptions::from_recipe(recipe),
+        }
+    }
 }
 
 impl Default for ImageExportRenderer {

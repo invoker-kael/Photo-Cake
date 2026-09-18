@@ -54,6 +54,8 @@ Grouping is two-stage:
 1. immediately create conservative moment groups from capture time, camera and filename sequence;
 2. refine only inside those groups using local classification and visual embeddings.
 
+Moment groups remain persisted as parent structure. Semantic refinement is stored as child groups and becomes the effective editing/culling context only when evidence is complete. This keeps capture chronology available for future model/version re-refinement instead of destructively replacing it.
+
 Useful contexts include portrait sequences, travel scenes, landscape moments, indoor/family scenes and night photography. Manual group decisions override automatic refinement.
 
 ## Reference-driven Editing
@@ -101,7 +103,7 @@ IMG_0001.CR3
 IMG_0001.xmp
 ```
 
-The XMP must contain only mapped edits, remain small, and be traceable to the target Recipe/asset. Lightroom/Camera Raw should be able to continue from those edits.
+The XMP must contain only mapped edits, remain small, and be traceable to the target Recipe/asset. Photo-Cake re-parses every newly written sidecar and verifies Recipe identity, target asset and mapped numeric values before reporting handoff success. Lightroom/Camera Raw should be able to continue from those edits.
 
 No early requirement for Lightroom catalog modification, database writing or a Lightroom plugin.
 
@@ -124,7 +126,7 @@ For a large personal shoot, the user can:
 3. reduce manual review with culling suggestions;
 4. select a preferred look/reference;
 5. have Photo-Cake adapt it across similar photos;
-6. review exceptions rather than every repetitive adjustment, with persistent per-photo corrections only where needed;
+6. review exceptions rather than every repetitive adjustment, with persistent per-photo corrections only where needed and an on-demand Before/After preview;
 7. create tiny XMP sidecars for Lightroom or explicitly export final images.
 
 
@@ -156,3 +158,8 @@ Lightroom delivery is a deliberate photographer action, not an automatic batch s
 ## Visual Review Surface
 
 The workstation reuses the existing PreviewStore artifacts in Cull and Reference views. Cached embedded RAW JPEG previews are displayed directly from managed local storage; the UI must not create full-size rendered working copies merely to show thumbnails. Preview availability follows Analyze progress and missing previews degrade to a lightweight RAW placeholder.
+
+
+## Before / After Review
+
+Review can render a small edited preview from the already-cached embedded RAW JPEG using the current canonical Recipe. It is explicitly an approximation for visual direction and exception review, not a replacement RAW renderer. The backend regenerates the Recipe from the current ReferenceSet, StyleProfile, cached evidence and per-photo override before rendering, so the preview cannot diverge from the decision chain used for XMP handoff. No full-size working copy is created.

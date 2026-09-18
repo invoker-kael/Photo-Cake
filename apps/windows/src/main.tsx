@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import App, {
   type BackendBatch,
+  type BackendCullingReview,
   type BackendGroupCullingResult,
   type BackendPhotoContext,
   type BackendRawImportResult,
@@ -28,6 +29,10 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendPhotoContext>("batch_photo_context", { batchId }),
   loadCulling: (batchId) =>
     invoke<BackendGroupCullingResult[]>("batch_culling", { batchId }),
+  loadCullingReviews: (batchId) =>
+    invoke<BackendCullingReview[]>("batch_culling_reviews", { batchId }),
+  setCullingReview: (assetId, decision) =>
+    invoke<void>("set_culling_review", { assetId, decision }),
   importRawDirectory: async () => {
     const selected = await open({
       directory: true,

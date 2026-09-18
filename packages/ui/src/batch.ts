@@ -251,6 +251,7 @@ export interface BackendLightroomHandoffPreflight {
   group_id: string;
   target_sidecars: string[];
   current_sidecars: string[];
+  missing_sidecars: string[];
   conflicting_sidecars: string[];
 }
 

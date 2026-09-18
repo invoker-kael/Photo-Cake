@@ -301,10 +301,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [reviewBatchUpdating, setReviewBatchUpdating] = useState(false);
   const [reviewBatchNote, setReviewBatchNote] = useState<string | null>(null);
   const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
+  const [handoffPreflightErrors, setHandoffPreflightErrors] = useState<Record<string, string>>({});
   const [handoffPreflightLoading, setHandoffPreflightLoading] = useState(false);
+  const [handoffPreflightRevision, setHandoffPreflightRevision] = useState(0);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
   const [handoffRunning, setHandoffRunning] = useState<string | null>(null);
   const [handoffBatchRunning, setHandoffBatchRunning] = useState(false);
+  const [handoffBatchTargets, setHandoffBatchTargets] = useState<string[]>([]);
+  const [handoffBatchNote, setHandoffBatchNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (!bridge) return;
@@ -367,6 +371,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setReferenceBatchTargets([]);
     setReferenceBatchNote(null);
     setReviewBatchNote(null);
+    setHandoffPreflightErrors({});
+    setHandoffBatchTargets([]);
+    setHandoffBatchNote(null);
   }, [activeBatchId]);
 
   useEffect(() => {
@@ -553,7 +560,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       !bridge?.preflightGroupXmp ||
       !photoContext?.groups.length
     ) {
-      if (activeView !== "lightroom") setHandoffPreflights({});
+      if (activeView !== "lightroom") {
+        setHandoffPreflights({});
+        setHandoffPreflightErrors({});
+      }
       return;
     }
 
@@ -568,25 +578,34 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     });
     if (groups.length === 0) {
       setHandoffPreflights({});
+      setHandoffPreflightErrors({});
       return;
     }
 
     let disposed = false;
     setHandoffPreflightLoading(true);
-    Promise.all(
+    Promise.allSettled(
       groups.map(async (group) => {
         const preflight = await bridge.preflightGroupXmp!(group.id);
         return [group.id, preflight] as const;
       }),
     )
-      .then((entries) => {
-        if (!disposed) {
-          setHandoffPreflights(Object.fromEntries(entries));
-          setBackendError(null);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!disposed) setBackendError(String(error));
+      .then((results) => {
+        if (disposed) return;
+        const preflights: Record<string, BackendLightroomHandoffPreflight> = {};
+        const errors: Record<string, string> = {};
+        results.forEach((result, index) => {
+          const groupId = groups[index].id;
+          if (result.status === "fulfilled") {
+            const [resolvedGroupId, preflight] = result.value;
+            preflights[resolvedGroupId] = preflight;
+          } else {
+            errors[groupId] = String(result.reason);
+          }
+        });
+        setHandoffPreflights(preflights);
+        setHandoffPreflightErrors(errors);
+        setBackendError(null);
       })
       .finally(() => {
         if (!disposed) setHandoffPreflightLoading(false);
@@ -599,6 +618,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     activeView,
     bridge,
     cullingReviews,
+    handoffPreflightRevision,
     photoContext,
     recipeReviews,
     referenceBindings,
@@ -607,6 +627,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   useEffect(() => {
     setHandoffResults({});
+    setHandoffBatchTargets([]);
+    setHandoffBatchNote(null);
   }, [activeBatchId, cullingReviews, recipeReviews, referenceBindings, referenceStyles, groupRevision]);
 
   useEffect(() => {
@@ -1491,6 +1513,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           [groupId]: {
             ...previous,
             current_sidecars: previous.target_sidecars,
+            missing_sidecars: [],
             conflicting_sidecars: [],
           },
         };
@@ -1506,6 +1529,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const writeBatchXmp = async (groupIds: string[]) => {
     if (!bridge?.writeBatchXmp || groupIds.length === 0) return;
     setHandoffBatchRunning(true);
+    setHandoffBatchNote(null);
     try {
       const result: BackendLightroomBatchHandoffResult = await bridge.writeBatchXmp(groupIds);
       setHandoffResults((current) => ({
@@ -1520,11 +1544,19 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           next[group.group_id] = {
             ...previous,
             current_sidecars: previous.target_sidecars,
+            missing_sidecars: [],
             conflicting_sidecars: [],
           };
         }
         return next;
       });
+      const completed = new Set(result.groups.map((group) => group.group_id));
+      setHandoffBatchTargets((current) =>
+        current.filter((groupId) => !completed.has(groupId)),
+      );
+      setHandoffBatchNote(
+        `Verified ${result.groups.reduce((total, group) => total + group.verified_sidecar_count, 0)} XMP across ${result.groups.length} selected groups.`,
+      );
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -2834,6 +2866,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       const binding = referenceBindings[group.id];
       const preview = referencePreviews[group.id];
       const preflight = handoffPreflights[group.id];
+      const preflightError = handoffPreflightErrors[group.id];
       const result = handoffResults[group.id];
       const deliverableRecipes =
         preview?.recipes.filter((recipe) => recipe.target_asset_id != null) ?? [];
@@ -2852,30 +2885,25 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       const conflictCount = preflight?.conflicting_sidecars.length ?? 0;
       const currentCount = preflight?.current_sidecars.length ?? 0;
       const preflightReady = !bridge?.preflightGroupXmp || preflight != null;
-      const missingCount = preflight
-        ? Math.max(
-            0,
-            preflight.target_sidecars.length -
-              preflight.current_sidecars.length -
-              preflight.conflicting_sidecars.length,
-          )
-        : deliverableRecipes.length;
+      const missingCount = preflight?.missing_sidecars.length ?? deliverableRecipes.length;
       const unresolved =
         binding == null ||
         preview == null ||
         preview.pending_asset_id != null ||
         deliverableRecipes.length === 0 ||
+        preflightError != null ||
         !preflightReady;
       const ready =
         !unresolved &&
         conflictCount === 0 &&
         missingCount > 0;
+      const safeBatchReady = ready && reviewAttentionCount === 0;
       const writesWhiteBalance = deliverableRecipes.some(
         (recipe) =>
           recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
       );
       const priority =
-        conflictCount > 0
+        conflictCount > 0 || preflightError != null
           ? 0
           : unresolved
             ? 1
@@ -2891,6 +2919,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         binding,
         preview,
         preflight,
+        preflightError,
         result,
         deliverableRecipes,
         rejectedCount,
@@ -2902,22 +2931,30 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         missingCount,
         unresolved,
         ready,
+        safeBatchReady,
         writesWhiteBalance,
         priority,
       };
     });
 
-    const readyGroups = allHandoffGroups.filter((item) => !item.unresolved);
-    const batchConflictCount = readyGroups.reduce(
+    const batchConflictCount = allHandoffGroups.reduce(
       (total, item) => total + item.conflictCount,
       0,
     );
-    const batchGroupIds = readyGroups
-      .filter((item) => item.conflictCount === 0 && item.missingCount > 0)
-      .map((item) => item.group.id);
-    const batchMissingCount = readyGroups.reduce(
-      (total, item) =>
-        total + (item.conflictCount === 0 ? item.missingCount : 0),
+    const preflightErrorGroupCount = allHandoffGroups.filter(
+      (item) => item.preflightError != null,
+    ).length;
+    const safeBatchGroups = allHandoffGroups.filter((item) => item.safeBatchReady);
+    const selectedSafeBatchGroups = safeBatchGroups.filter((item) =>
+      handoffBatchTargets.includes(item.group.id),
+    );
+    const selectedBatchGroupIds = selectedSafeBatchGroups.map((item) => item.group.id);
+    const selectedBatchMissingCount = selectedSafeBatchGroups.reduce(
+      (total, item) => total + item.missingCount,
+      0,
+    );
+    const safeBatchMissingCount = safeBatchGroups.reduce(
+      (total, item) => total + item.missingCount,
       0,
     );
     const batchReviewAttentionCount = allHandoffGroups.reduce(
@@ -2959,6 +2996,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             Needs action puts conflicts, unresolved groups, Recipe attention and missing XMP ahead of already-current delivery groups.
           </span>
           <div className="cull-toolbar-actions">
+            <button
+              className="cull-batch-action"
+              disabled={handoffBatchRunning || handoffRunning != null || handoffPreflightLoading}
+              onClick={() => setHandoffPreflightRevision((value) => value + 1)}
+            >
+              {handoffPreflightLoading ? "Checking XMP…" : "Refresh XMP checks"}
+            </button>
             {batchReviewAttentionCount > 0 && (
               <button
                 className="cull-batch-action"
@@ -2985,22 +3029,44 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
         <div className="handoff-card">
           <div className="handoff-card-main">
-            <span>Batch handoff</span>
-            <strong>{batchMissingCount} missing XMP across {batchGroupIds.length} ready groups</strong>
+            <span>Safe batch handoff</span>
+            <strong>{safeBatchMissingCount} missing XMP across {safeBatchGroups.length} review-clear groups</strong>
             <small>
-              All selected groups are preflighted before the first new sidecar is created.
-              Matching Photo-Cake XMP stays untouched.
+              Safe batch only includes groups whose Recipe attention is clear and whose XMP preflight succeeded without conflicts.
+              Exceptional groups stay in Needs action for individual review.
             </small>
+            <div className="handoff-batch-controls">
+              <button
+                className="cull-batch-action"
+                disabled={handoffBatchRunning || handoffRunning != null || safeBatchGroups.length === 0}
+                onClick={() => setHandoffBatchTargets(safeBatchGroups.map((item) => item.group.id))}
+              >
+                Select ready ({safeBatchGroups.length})
+              </button>
+              <button
+                className="cull-batch-action"
+                disabled={handoffBatchRunning || handoffRunning != null || handoffBatchTargets.length === 0}
+                onClick={() => setHandoffBatchTargets([])}
+              >
+                Clear
+              </button>
+            </div>
             <small className={batchReviewAttentionCount > 0 ? "attention-text" : "success-text"}>
               {batchReviewAttentionCount > 0
-                ? `${batchReviewAttentionCount} Recipe review attention items remain; XMP handoff stays available by design.`
+                ? `${batchReviewAttentionCount} Recipe attention items are isolated from safe batch delivery.`
                 : "Recipe review attention is clear for delivery groups."}
             </small>
             {batchConflictCount > 0 && (
               <small className="error-text">
-                {batchConflictCount} conflicting XMP must be resolved before batch handoff.
+                {batchConflictCount} conflicting XMP are isolated; safe groups can still be delivered.
               </small>
             )}
+            {preflightErrorGroupCount > 0 && (
+              <small className="error-text">
+                {preflightErrorGroupCount} groups failed XMP preflight and remain isolated in Needs action.
+              </small>
+            )}
+            {handoffBatchNote && <small className="success-text">{handoffBatchNote}</small>}
           </div>
           <div className="handoff-actions">
             <button
@@ -3010,21 +3076,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 handoffBatchRunning ||
                 handoffRunning != null ||
                 handoffPreflightLoading ||
-                batchConflictCount > 0 ||
-                batchGroupIds.length === 0
+                selectedBatchGroupIds.length === 0
               }
-              onClick={() => void writeBatchXmp(batchGroupIds)}
+              onClick={() => void writeBatchXmp(selectedBatchGroupIds)}
             >
               {handoffBatchRunning
-                ? "Writing + verifying batch XMP…"
-                : batchConflictCount > 0
-                  ? "Resolve XMP conflicts"
-                  : batchGroupIds.length > 0
-                    ? `Write + verify ${batchMissingCount} missing XMP`
-                    : "Batch already current / not ready"}
+                ? "Writing + verifying selected XMP…"
+                : selectedBatchGroupIds.length > 0
+                  ? `Write + verify ${selectedBatchMissingCount} XMP in ${selectedBatchGroupIds.length} groups`
+                  : "Select review-clear groups"}
             </button>
             <small>
-              Each group is re-read against the canonical Recipe after write; later batch failure rolls back newly created XMP.
+              The backend re-preflights every selected group before the first write and rolls back new XMP if a later selected group fails.
             </small>
           </div>
         </div>
@@ -3037,6 +3100,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               binding,
               preview,
               preflight,
+              preflightError,
               result,
               deliverableRecipes,
               rejectedCount,
@@ -3047,6 +3111,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               preflightReady,
               missingCount,
               ready,
+              safeBatchReady,
               writesWhiteBalance,
             } = item;
 
@@ -3076,6 +3141,26 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                             .join(" · ")
                         : "Resolve adaptive Recipes first"}
                   </small>
+                  {safeBatchReady && (
+                    <label className="handoff-batch-check">
+                      <input
+                        type="checkbox"
+                        checked={handoffBatchTargets.includes(group.id)}
+                        disabled={handoffBatchRunning || handoffRunning != null}
+                        onChange={() =>
+                          setHandoffBatchTargets((current) =>
+                            current.includes(group.id)
+                              ? current.filter((value) => value !== group.id)
+                              : [...current, group.id],
+                          )
+                        }
+                      />
+                      <span>Include in safe batch</span>
+                    </label>
+                  )}
+                  {preflightError && (
+                    <small className="error-text">XMP preflight failed: {preflightError}</small>
+                  )}
                   {conflictCount > 0 && (
                     <small className="error-text">
                       Conflicting XMP: {preflight!.conflicting_sidecars

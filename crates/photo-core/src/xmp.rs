@@ -41,6 +41,21 @@ pub struct XmpSidecarPreflight {
     pub existing_sidecar: Option<PathBuf>,
     pub existing_matches_recipe: bool,
 }
+
+impl XmpSidecarPreflight {
+    pub fn is_current(&self) -> bool {
+        self.existing_sidecar.is_some() && self.existing_matches_recipe
+    }
+
+    pub fn is_conflict(&self) -> bool {
+        self.existing_sidecar.is_some() && !self.existing_matches_recipe
+    }
+
+    pub fn is_missing(&self) -> bool {
+        self.existing_sidecar.is_none()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct XmpHandoffVerification {
     pub target_count: usize,
@@ -361,14 +376,20 @@ pub fn verify_group_sidecars(
     let mut verified_sidecars = Vec::with_capacity(preflight.len());
 
     for target in preflight {
-        match (target.existing_sidecar, target.existing_matches_recipe) {
-            (Some(path), true) => verified_sidecars.push(path),
-            (Some(path), false) => {
-                return Err(XmpWriteError::VerificationMismatch(path));
-            }
-            (None, _) => {
-                return Err(XmpWriteError::MissingSidecar(target.sidecar_path));
-            }
+        if target.is_current() {
+            verified_sidecars.push(
+                target
+                    .existing_sidecar
+                    .expect("current XMP target must have an existing sidecar"),
+            );
+        } else if target.is_conflict() {
+            return Err(XmpWriteError::VerificationMismatch(
+                target
+                    .existing_sidecar
+                    .expect("conflicting XMP target must have an existing sidecar"),
+            ));
+        } else {
+            return Err(XmpWriteError::MissingSidecar(target.sidecar_path));
         }
     }
 
@@ -380,11 +401,10 @@ pub fn verify_group_sidecars(
 
 fn first_conflicting_sidecar(preflight: &[XmpSidecarPreflight]) -> Option<PathBuf> {
     preflight.iter().find_map(|target| {
-        if target.existing_sidecar.is_some() && !target.existing_matches_recipe {
-            target.existing_sidecar.clone()
-        } else {
-            None
-        }
+        target
+            .is_conflict()
+            .then(|| target.existing_sidecar.clone())
+            .flatten()
     })
 }
 
@@ -744,10 +764,13 @@ mod tests {
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].sidecar_path, dir.path().join("IMG_0001.xmp"));
-        assert!(result[0].existing_sidecar.is_none());
-        assert!(!result[0].existing_matches_recipe);
+        assert!(result[0].is_missing());
+        assert!(!result[0].is_current());
+        assert!(!result[0].is_conflict());
         assert_eq!(result[1].existing_sidecar.as_deref(), Some(existing.as_path()));
-        assert!(!result[1].existing_matches_recipe);
+        assert!(result[1].is_conflict());
+        assert!(!result[1].is_current());
+        assert!(!result[1].is_missing());
         assert!(!dir.path().join("IMG_0001.xmp").exists());
         assert_eq!(std::fs::read(existing).unwrap(), b"lightroom-edit");
     }
@@ -782,6 +805,9 @@ mod tests {
         .unwrap();
 
         assert!(preflight[0].existing_matches_recipe);
+        assert!(preflight[0].is_current());
+        assert!(!preflight[0].is_missing());
+        assert!(!preflight[0].is_conflict());
         let written = write_group_sidecars(&[asset], &[regenerated]).unwrap();
         assert!(written.is_empty());
         assert_eq!(std::fs::read(dir.path().join("IMG_0007.xmp")).unwrap(), before);

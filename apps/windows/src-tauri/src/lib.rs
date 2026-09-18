@@ -90,6 +90,7 @@ struct LightroomHandoffPreflight {
     group_id: Uuid,
     target_sidecars: Vec<String>,
     current_sidecars: Vec<String>,
+    missing_sidecars: Vec<String>,
     conflicting_sidecars: Vec<String>,
 }
 
@@ -1690,7 +1691,7 @@ fn preflight_group_reference_xmp(
             .collect(),
         current_sidecars: targets
             .iter()
-            .filter(|target| target.existing_matches_recipe)
+            .filter(|target| target.is_current())
             .filter_map(|target| {
                 target
                     .existing_sidecar
@@ -1698,14 +1699,18 @@ fn preflight_group_reference_xmp(
                     .map(|path| path.to_string_lossy().into_owned())
             })
             .collect(),
+        missing_sidecars: targets
+            .iter()
+            .filter(|target| target.is_missing())
+            .map(|target| target.sidecar_path.to_string_lossy().into_owned())
+            .collect(),
         conflicting_sidecars: targets
-            .into_iter()
-            .filter(|target| {
-                target.existing_sidecar.is_some() && !target.existing_matches_recipe
-            })
+            .iter()
+            .filter(|target| target.is_conflict())
             .filter_map(|target| {
                 target
                     .existing_sidecar
+                    .as_ref()
                     .map(|path| path.to_string_lossy().into_owned())
             })
             .collect(),

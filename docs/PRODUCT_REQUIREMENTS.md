@@ -342,3 +342,15 @@ A group is clear only when it has a selected Reference, resolved target-bound Re
 The UI may offer both one-group and all-clear-groups actions, but the backend always re-resolves current Recipes and revalidates the complete selected group set. All selected groups must still be clear before any new review fingerprint is written. Their current Recipe fingerprints are then confirmed in one transaction, so a stale group cannot produce a partial batch confirmation.
 
 This is an explicit photographer acceptance shortcut, not automatic quality approval. Reference/style/Recipe-exception changes continue to invalidate affected confirmations through the existing fingerprint contract and return those photos to Review when appropriate. The workflow follows the efficient standard-photo pattern used by mature batch photo editors: establish the look, synchronize adaptively, inspect exceptions, explicitly accept the clear remainder, then hand off to Lightroom.
+
+### Safe Lightroom delivery cohorts
+
+Large shoots must not let one exceptional group stall unrelated delivery work. The Lightroom workspace therefore separates batch-safe groups from Needs action groups. A group is batch-safe only when its Reference/Recipe state resolves, the XMP preflight succeeds, no conflicting sidecar exists, at least one XMP is missing, and Recipe attention is clear. Groups with Review attention remain individually writable by explicit photographer action, preserving the existing advisory review policy without silently mixing them into the fast batch path.
+
+The photographer explicitly selects the safe groups to hand off. `Select ready` selects only the current review-clear, conflict-free cohort; individual group checkboxes can narrow that set further. The backend still re-resolves and re-preflights every selected group before the first write, and the existing cross-group rollback remains authoritative if a race or filesystem failure happens after UI preflight.
+
+XMP preflight is resilient per group. One unreadable or otherwise failing group records its own preflight error and remains in Needs action while successful groups keep their current/missing/conflict state. A manual `Refresh XMP checks` action lets the photographer re-read filesystem state after resolving an external Lightroom conflict without leaving and reopening the workspace.
+
+Preflight now reports missing sidecars explicitly instead of inferring them only from total-current-conflict arithmetic. Core XMP target classification defines current, missing and conflict states once and is reused by the Windows bridge, keeping UI delivery counts tied to the same non-destructive sidecar truth used by write-time validation.
+
+This mirrors the useful batch-production principle of processing normal, homogeneous work together while isolating exceptional cases for focused review. Photo-Cake still does not overwrite existing conflicting XMP and does not auto-deliver attention groups.

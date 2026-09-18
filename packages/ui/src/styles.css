@@ -767,6 +767,18 @@ h2 { font-size: 19px; }
   background: #101315;
 }
 .handoff-card-main, .handoff-actions { display: grid; align-content: start; gap: 6px; }
+.handoff-batch-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.handoff-batch-check {
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #8f989d;
+  font-size: 9px;
+  cursor: pointer;
+}
+.handoff-batch-check input { margin: 0; }
+.handoff-batch-check span { font-size: 9px; }
 .handoff-card-main > span { color: #70787d; font-size: 10px; }
 .handoff-card-main > strong { font-size: 15px; }
 .handoff-card small, .handoff-actions small { color: #737b80; font-size: 10px; line-height: 1.45; }

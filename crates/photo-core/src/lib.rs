@@ -9,6 +9,7 @@ pub mod color_sync_store;
 pub mod culling;
 pub mod culling_store;
 pub mod export;
+pub mod edit_preview;
 pub mod export_stage;
 pub mod export_store;
 pub mod export_worker;
@@ -57,6 +58,7 @@ pub use culling::{
 pub use culling_store::{
     CullingReview, CullingReviewStore, CullingReviewStoreError, CullingUserDecision,
 };
+pub use edit_preview::{apply_preview_adjustments, render_recipe_preview, EditPreviewError};
 pub use export::{
     collision_safe_output, plan_export, ExportColorSpace, ExportFormat, ExportPlan,
     ExportPlanError, ExportRecipe, ResizeRecipe,

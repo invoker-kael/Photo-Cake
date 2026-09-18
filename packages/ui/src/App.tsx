@@ -17,6 +17,7 @@ import {
   type BatchJob,
   type BatchStage,
   type CullingDecision,
+  type CullingReason,
   type CullingUserDecision,
   type PhotoCakeBridge,
 } from "./batch";
@@ -100,6 +101,18 @@ function cullingLabel(decision: CullingDecision) {
 function userDecisionLabel(decision: CullingUserDecision) {
   if (decision === "REJECT") return "Reject";
   return decision === "KEEP" ? "Keep" : "Review";
+}
+
+function cullingReasonLabel(reason: CullingReason) {
+  const labels: Record<CullingReason, string> = {
+    STRONG_TECHNICAL_CANDIDATE: "Strong technical candidate",
+    LOW_SHARPNESS: "Low sharpness",
+    BLUR_RISK: "Blur risk",
+    EXPOSURE_RISK: "Exposure risk",
+    NEAR_DUPLICATE: "Near duplicate",
+    LOW_TECHNICAL_QUALITY: "Low technical quality",
+  };
+  return labels[reason];
 }
 
 function signed(value: number, decimals = 1) {
@@ -955,6 +968,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         <small>
                           Quality {Math.round(item.quality_score * 100)}% · Suggested {cullingLabel(item.decision)}
                         </small>
+                        {!!item.reasons?.length && (
+                          <small className="cull-reasons">
+                            {item.reasons.map(cullingReasonLabel).join(" · ")}
+                          </small>
+                        )}
                         {item.portrait_evidence && (
                           <small>
                             People {item.portrait_evidence.person_count} · Faces {item.portrait_evidence.face_count}

@@ -9,6 +9,7 @@ import {
   type BackendGroupReferenceStyle,
   type BackendLightroomHandoffResult,
   type BackendPhotoContext,
+  type BackendRawMetadataEvidence,
   type BackendReferenceBinding,
   type BackendRecipeReviewOverride,
   type BackendReviewRenderResult,
@@ -103,6 +104,15 @@ function userDecisionLabel(decision: CullingUserDecision) {
 
 function signed(value: number, decimals = 1) {
   return `${value > 0 ? "+" : ""}${value.toFixed(decimals)}`;
+}
+
+function whiteBalanceEvidenceLabel(evidence: BackendRawMetadataEvidence | undefined) {
+  const wb = evidence?.white_balance;
+  if (!wb) return "WB evidence unavailable";
+  const kinds = [];
+  if (wb.as_shot_neutral) kinds.push("AsShotNeutral");
+  if (wb.as_shot_white_xy) kinds.push("WhiteXY");
+  return kinds.length ? `RAW WB evidence · ${kinds.join(" + ")}` : "WB evidence unavailable";
 }
 
 function JobRow({ job }: { job: BatchJob }) {
@@ -446,6 +456,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         (photoContext?.previews ?? [])
           .filter((preview) => preview.preview_url)
           .map((preview) => [preview.asset_id, preview.preview_url as string]),
+      ),
+    [photoContext],
+  );
+
+  const metadataEvidence = useMemo(
+    () =>
+      new Map(
+        (photoContext?.metadata ?? []).map((record) => [record.asset_id, record.evidence]),
       ),
     [photoContext],
   );
@@ -831,6 +849,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <strong>{asset.filename}</strong>
                 <span>{asset.camera_id ?? "Camera metadata unavailable"}</span>
                 <small>{timelineLabel(asset.capture_time_ms, asset.file_time_ms)}</small>
+                <small>{whiteBalanceEvidenceLabel(metadataEvidence.get(asset.id))}</small>
               </div>
             ))}
           </div>

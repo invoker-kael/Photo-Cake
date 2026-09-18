@@ -129,3 +129,8 @@ For a large personal shoot, the user can:
 ## Workstation Entry
 
 On Windows, the user can choose an existing RAW folder with the native folder picker. Photo-Cake registers the RAWs in place, creates initial moment groups and runs local analysis. Finishing the preparation queue means the photos are ready for culling/group/reference work; it does not imply that Photo-Cake silently exported or destructively edited them.
+
+
+## Culling Evidence Behavior
+
+Technical culling starts from locally measured preview evidence: sharpness/blur and severe exposure quality. Existing embeddings are reused for near-duplicate/burst ranking inside the same photo group. Expression, composition and other semantic quality dimensions are only added when dedicated evidence exists; Photo-Cake must not fabricate those scores. The workstation shows pending items while analysis is incomplete.

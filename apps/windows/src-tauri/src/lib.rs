@@ -2,8 +2,9 @@ use photo_core::{
     build_group_culling_result, AnalysisCache, AutomationRunner, Batch, BatchStore,
     write_group_sidecars, ClassificationRoutingExecutor, ClassificationStore, CullingReview,
     CullingReviewStore, CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus,
-    ModelBundleManifest, ModelPlatform, PhotoGroup, RawAsset, RawCatalog, RawImportResult,
-    RawImporter, Recipe, ReferenceStore, ReferenceWorkflowError, RunStep, StyleProfile,
+    ModelBundleManifest, ModelPlatform, PhotoGroup, PreviewArtifact, PreviewStore, RawAsset,
+    RawCatalog, RawImportResult, RawImporter, Recipe, ReferenceStore, ReferenceWorkflowError,
+    RunStep, StyleProfile,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
@@ -63,6 +64,7 @@ struct BatchWorkerError {
 struct BatchPhotoContext {
     assets: Vec<RawAsset>,
     groups: Vec<PhotoGroup>,
+    previews: Vec<PreviewArtifact>,
 }
 
 #[derive(Clone, Serialize)]
@@ -91,6 +93,7 @@ struct AppState {
     store: BatchStore,
     catalog: RawCatalog,
     analysis_cache: AnalysisCache,
+    preview_store: PreviewStore,
     culling_reviews: CullingReviewStore,
     reference_store: ReferenceStore,
     raw_importer: RawImporter,
@@ -327,7 +330,16 @@ fn batch_photo_context(
         .catalog
         .list_groups_for_collection(batch_id)
         .map_err(|error| error.to_string())?;
-    Ok(BatchPhotoContext { assets, groups })
+    let preview_ids = assets.iter().map(|asset| asset.id).collect::<Vec<_>>();
+    let previews = state
+        .preview_store
+        .list_for_assets(&preview_ids)
+        .map_err(|error| error.to_string())?;
+    Ok(BatchPhotoContext {
+        assets,
+        groups,
+        previews,
+    })
 }
 
 #[tauri::command]
@@ -815,6 +827,7 @@ pub fn run() {
             let store = BatchStore::open(&database)?;
             let catalog = RawCatalog::open(&database)?;
             let analysis_cache = AnalysisCache::open(&database)?;
+            let preview_store = PreviewStore::open(&database)?;
             let culling_reviews = CullingReviewStore::open(&database)?;
             let reference_store = ReferenceStore::open(&database)?;
             let classification_store = ClassificationStore::open(&database)?;
@@ -834,6 +847,7 @@ pub fn run() {
                 store,
                 catalog,
                 analysis_cache,
+                preview_store,
                 culling_reviews,
                 reference_store,
                 raw_importer,

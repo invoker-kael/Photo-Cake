@@ -3,6 +3,7 @@ import {
   demoJobs,
   type BackendBatch,
   type BackendBatchItem,
+  type BackendPhotoContext,
   type BatchJob,
   type BatchStage,
   type PhotoCakeBridge,
@@ -10,6 +11,7 @@ import {
 
 export type {
   BackendBatch,
+  BackendPhotoContext,
   BackendRawImportResult,
   BatchWorkerEvent,
   PhotoCakeBridge,
@@ -99,6 +101,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [backendError, setBackendError] = useState<string | null>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [photoContext, setPhotoContext] = useState<BackendPhotoContext | null>(null);
 
   useEffect(() => {
     if (!bridge) return;
@@ -144,6 +147,27 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     [activeBatchId, batches],
   );
 
+  useEffect(() => {
+    if (!bridge?.loadPhotoContext || !activeBatchId) {
+      setPhotoContext(null);
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadPhotoContext(activeBatchId)
+      .then((context) => {
+        if (!disposed) setPhotoContext(context);
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeBatchId, bridge]);
+
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
     [activeBatch, bridge, demoState],
@@ -184,6 +208,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       const result = await bridge.importRawDirectory();
       if (!result) return;
       if (result.batch) applyBackendBatch(result.batch);
+      setPhotoContext({ assets: result.assets, groups: result.groups });
       setImportNote(
         `${result.assets.length} RAW imported · ${result.groups.length} moment groups` +
           (result.skipped_non_raw.length ? ` · ${result.skipped_non_raw.length} non-RAW skipped` : ""),
@@ -289,6 +314,45 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             )}
           </div>
         </section>
+
+        {photoContext && (
+          <section className="photo-overview">
+            <div className="overview-card">
+              <span>RAW assets</span>
+              <strong>{photoContext.assets.length}</strong>
+            </div>
+            <div className="overview-card">
+              <span>Photo groups</span>
+              <strong>{photoContext.groups.length}</strong>
+            </div>
+            <div className="overview-card">
+              <span>Ready for review</span>
+              <strong>{summary.done}</strong>
+            </div>
+            <div className="overview-card wide">
+              <span>Next workflow</span>
+              <strong>Cull → Groups → Reference → XMP</strong>
+            </div>
+          </section>
+        )}
+
+        {photoContext && photoContext.groups.length > 0 && (
+          <section className="group-strip">
+            <div className="group-strip-head">
+              <strong>Initial photo groups</strong>
+              <span>Fast moment grouping; semantic refinement follows local analysis</span>
+            </div>
+            <div className="group-grid">
+              {photoContext.groups.slice(0, 8).map((group, index) => (
+                <div className="group-card" key={group.id}>
+                  <span>Group {index + 1}</span>
+                  <strong>{group.asset_ids.length} photos</strong>
+                  <small>{group.basis.replaceAll("_", " ").toLowerCase()}</small>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="queue-card">
           <div className="queue-title">

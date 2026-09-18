@@ -223,3 +223,8 @@ Cull must explain suggestions from measured evidence without creating a parallel
 Use `CompanionSnapshot` / `CompanionDecisionPatch` as the cross-device domain boundary. Do not copy RAW absolute paths, full AnalysisCache databases or workstation editing state into the mobile contract. Snapshot assets use stable IDs plus portable metadata only; previews are represented by transport indexes.
 
 Before applying a mobile patch, validate schema version, base snapshot ID, batch ID, asset/group membership, duplicate changes, rejected-reference invariants and concurrent workstation culling/reference edits. Reject conflicts instead of last-writer-wins. Keep the actual transport mechanism separate from this contract.
+
+
+## Companion Conflict Scope Rule
+
+Do not reject a mobile patch because unrelated project state changed after the snapshot. Compare concurrent culling state only for touched assets, reference state only for touched groups, and additionally the group of any selected reference whose culling decision is being changed. Preserve conflict rejection where the same photographer decision actually overlaps.

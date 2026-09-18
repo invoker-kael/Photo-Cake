@@ -60,15 +60,21 @@ impl StyleProfile {
         name: impl Into<String>,
         reference: &PhotoColorAnalysis,
     ) -> GroupColorIntent {
+        let (target_temperature_k, target_tint) = reference
+            .white_balance()
+            .map(|(temperature, tint)| {
+                (
+                    Some(temperature + self.temperature_bias.unwrap_or(0.0)),
+                    Some(tint + self.tint_bias.unwrap_or(0.0)),
+                )
+            })
+            .unwrap_or((None, None));
+
         GroupColorIntent {
             name: name.into(),
             target_exposure_ev: reference.exposure_ev + self.exposure_bias_ev.unwrap_or(0.0),
-            target_temperature_k: reference
-                .temperature_k
-                .map(|value| value + self.temperature_bias.unwrap_or(0.0)),
-            target_tint: reference
-                .tint
-                .map(|value| value + self.tint_bias.unwrap_or(0.0)),
+            target_temperature_k,
+            target_tint,
             contrast: self.contrast_preference.unwrap_or(0.0),
             saturation: self.saturation_preference.unwrap_or(0.0),
             semantic: Vec::new(),

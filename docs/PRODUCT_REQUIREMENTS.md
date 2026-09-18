@@ -178,3 +178,10 @@ Cull may surface cached portrait evidence already produced by local segmentation
 ## Metadata Transparency
 
 The workstation Library should expose the camera identity and capture time used for grouping so the photographer can see whether a shoot is using embedded RAW/EXIF evidence or a fallback. Missing metadata remains visible as unavailable/fallback rather than being silently invented.
+
+
+## RAW White Balance Evidence
+
+Photo-Cake now captures exact DNG/TIFF white-balance source evidence when present, including `AsShotNeutral` and `AsShotWhiteXY`, and persists that evidence by stable asset ID. These raw values are provenance, not Lightroom slider values.
+
+White balance remains a paired adjustment contract: Temperature and Tint must both be supported by reliable derived evidence before Reference, Recipe or XMP may apply them. A partial measurement is treated as unknown and omitted. Photo-Cake must not convert rendered preview colors or EXIF Auto/Manual white-balance mode into fabricated Lightroom Kelvin/Tint values.

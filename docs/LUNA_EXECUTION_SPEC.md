@@ -98,12 +98,12 @@ At every run inspect what is already implemented and take the smallest complete 
 
 1. compile/test/CI regressions;
 2. end-to-end wiring between existing core modules;
-3. culling evidence quality and duplicate/burst selection;
-4. reference/style extraction and editable Recipe coverage;
+3. reliable color/exposure evidence for reference-driven adaptive edits;
+4. StyleProfile editing, Recipe persistence and reference-to-Recipe orchestration;
 5. Lightroom XMP compatibility and round-trip behavior;
-6. review UX on Windows, then shared/Android UX;
-7. direct export polish;
-8. richer local AI and edit controls.
+6. richer culling evidence (eyes/expression) and review UX;
+7. shared/Android review/reference UX;
+8. direct export polish and richer local AI/edit controls.
 
 Do not redo lower-numbered items that already pass.
 
@@ -135,3 +135,8 @@ Analyze writes `QualityScoring` and image-embedding evidence into `AnalysisCache
 ## Human Review Authority
 
 Treat `CullingReviewStore` as authoritative for explicit photographer Keep/Review/Reject decisions. AI output remains a suggestion underneath it. Never overwrite a saved photographer decision when analysis/model versions change, and never translate Reject into file deletion. A cleared override returns control to the latest suggestion.
+
+
+## Reference Selection Boundary
+
+The workstation already persists per-group reference selection through `ReferenceStore`. Preserve the selected `ReferenceSet` and its `StyleProfile` when the photographer changes the chosen photo. Do not generate adaptive white-balance/XMP values from an invented preview-derived Kelvin estimate; wire real color evidence first, then call the existing `ReferenceSet::resolve_group` → Recipe → XMP chain.

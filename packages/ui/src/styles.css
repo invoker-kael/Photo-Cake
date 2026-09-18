@@ -196,6 +196,11 @@ h2 { font-size: 19px; }
 .cull-name { min-width: 0; display: grid; gap: 3px; }
 .cull-name strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
 .cull-name small { color: #6f777c; font-size: 10px; }
+.cull-reasons {
+  color: #9ea7ac;
+  line-height: 1.35;
+}
+
 .cull-decision { padding: 4px 7px; border-radius: 5px; background: #242a2d; color: #a7afb4; font-size: 9px; white-space: nowrap; }
 .decision-keep { color: #badfc2; background: #1b3021; }
 .decision-review { color: #e1d7a8; background: #312d1b; }

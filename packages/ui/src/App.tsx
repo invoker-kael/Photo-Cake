@@ -651,6 +651,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         else next[assetId] = review;
         return next;
       });
+      setEditedPreviews((current) => {
+        const next = { ...current };
+        delete next[assetId];
+        return next;
+      });
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));

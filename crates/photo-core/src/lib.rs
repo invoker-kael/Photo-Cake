@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod batch;
 pub mod batch_export;
 pub mod export_stage;
+pub mod pipeline;
 pub mod catalog;
 pub mod classification;
 pub mod classification_store;
@@ -24,6 +25,7 @@ pub mod store;
 pub use batch::{Batch, BatchItem, BatchStage, JobStatus};
 pub use batch_export::{BatchExportExecutor, BatchExportItem};
 pub use export_stage::{ExportStageError, ExportStageExecutor};
+pub use pipeline::BatchPipelineExecutor;
 
 pub use analysis::{
     AnalysisArtifact, AnalysisCache, AnalysisCacheError, AnalysisCacheKey, InferenceBackend,

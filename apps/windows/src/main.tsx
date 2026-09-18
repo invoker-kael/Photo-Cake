@@ -8,6 +8,7 @@ import App, {
   type BackendCullingReview,
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
+  type BackendLightroomHandoffResult,
   type BackendPhotoContext,
   type BackendRawImportResult,
   type BackendReferenceBinding,
@@ -43,6 +44,8 @@ const bridge: PhotoCakeBridge = {
     invoke<void>("clear_group_reference", { groupId }),
   loadReferencePreviews: (batchId) =>
     invoke<BackendGroupReferencePreview[]>("batch_reference_previews", { batchId }),
+  writeGroupXmp: (groupId) =>
+    invoke<BackendLightroomHandoffResult>("write_group_reference_xmp", { groupId }),
   importRawDirectory: async () => {
     const selected = await open({
       directory: true,

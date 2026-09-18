@@ -5,9 +5,10 @@
 //! evidence that has not been measured yet.
 
 use crate::{
-    embedding_similarity, AnalysisCache, AnalysisCacheError, ImageEmbedding, InferenceTask,
-    PhotoGroup,
+    embedding_similarity, AnalysisCache, AnalysisCacheError, ClassificationSignals, ImageEmbedding,
+    InferenceTask, PhotoGroup,
 };
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -63,11 +64,21 @@ pub struct CullingCandidate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CullingPortraitEvidence {
+    pub person_count: u32,
+    pub face_count: u32,
+    pub primary_subject_ratio: f32,
+    pub people_confidence: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CullingRecommendation {
     pub asset_id: Uuid,
     pub quality_score: f32,
     pub decision: CullingDecision,
     pub group_rank: usize,
+    #[serde(default)]
+    pub portrait_evidence: Option<CullingPortraitEvidence>,
 }
 
 pub fn suggest_decision(score: &CullingScore) -> CullingDecision {
@@ -114,6 +125,7 @@ pub fn rank_group_candidates(candidates: &[CullingCandidate]) -> Vec<CullingReco
                 quality_score: quality,
                 decision,
                 group_rank: rank + 1,
+                portrait_evidence: None,
             }
         })
         .collect()
@@ -207,6 +219,7 @@ pub fn build_group_culling_result(
 ) -> Result<GroupCullingResult, CullingEvidenceError> {
     let mut candidates = Vec::new();
     let mut embeddings = Vec::new();
+    let mut portrait_evidence = HashMap::new();
     let mut pending_asset_ids = Vec::new();
 
     for asset_id in &group.asset_ids {
@@ -248,15 +261,43 @@ pub fn build_group_culling_result(
                 }
             }
         }
+
+        if let Some(artifact) =
+            cache.latest_for_asset_task(*asset_id, InferenceTask::Segmentation)?
+        {
+            let signals = serde_json::from_value::<ClassificationSignals>(artifact.payload_json)
+                .map_err(|source| CullingEvidenceError::Json {
+                    asset_id: *asset_id,
+                    source,
+                })?;
+            if signals.detected_person_count > 0 || signals.detected_face_count > 0 {
+                portrait_evidence.insert(
+                    *asset_id,
+                    CullingPortraitEvidence {
+                        person_count: signals.detected_person_count,
+                        face_count: signals.detected_face_count,
+                        primary_subject_ratio: signals.primary_subject_ratio,
+                        people_confidence: signals.people_confidence,
+                    },
+                );
+            }
+        }
+    }
+
+    let mut recommendations = rank_group_candidates_with_embeddings(
+        &candidates,
+        &embeddings,
+        duplicate_threshold,
+    );
+    for recommendation in &mut recommendations {
+        recommendation.portrait_evidence = portrait_evidence
+            .get(&recommendation.asset_id)
+            .cloned();
     }
 
     Ok(GroupCullingResult {
         group_id: group.id,
-        recommendations: rank_group_candidates_with_embeddings(
-            &candidates,
-            &embeddings,
-            duplicate_threshold,
-        ),
+        recommendations,
         pending_asset_ids,
     })
 }
@@ -264,7 +305,9 @@ pub fn build_group_culling_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AnalysisArtifact, AnalysisCacheKey, GroupingBasis, PhotoGroupKind};
+    use crate::{
+        AnalysisArtifact, AnalysisCacheKey, ClassificationSignals, GroupingBasis, PhotoGroupKind,
+    };
     use tempfile::tempdir;
 
     fn score(quality: f32, duplicate_similarity: Option<f32>) -> CullingScore {
@@ -430,6 +473,50 @@ mod tests {
             CullingDecision::Review
         );
         assert_eq!(result.pending_asset_ids, vec![pending]);
+    }
+
+    #[test]
+    fn culling_surfaces_portrait_evidence_without_changing_quality_decision() {
+        let dir = tempdir().unwrap();
+        let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
+        let asset_id = Uuid::new_v4();
+        let group = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Similar,
+            basis: GroupingBasis::SemanticSimilarity,
+            asset_ids: vec![asset_id],
+            manual_locked: false,
+        };
+
+        cache_artifact(
+            &cache,
+            asset_id,
+            InferenceTask::QualityScoring,
+            serde_json::to_value(score(0.92, None)).unwrap(),
+        );
+        cache_artifact(
+            &cache,
+            asset_id,
+            InferenceTask::Segmentation,
+            serde_json::to_value(ClassificationSignals {
+                asset_id,
+                detected_person_count: 2,
+                detected_face_count: 2,
+                primary_subject_ratio: 0.31,
+                people_confidence: 0.94,
+                scene_tags: Vec::new(),
+            })
+            .unwrap(),
+        );
+
+        let result = build_group_culling_result(&cache, &group, 0.98).unwrap();
+        let recommendation = &result.recommendations[0];
+        assert_eq!(recommendation.decision, CullingDecision::Keep);
+        let evidence = recommendation.portrait_evidence.as_ref().unwrap();
+        assert_eq!(evidence.person_count, 2);
+        assert_eq!(evidence.face_count, 2);
+        assert!((evidence.primary_subject_ratio - 0.31).abs() < 1e-6);
+        assert!((evidence.people_confidence - 0.94).abs() < 1e-6);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use photo_core::{
-    build_companion_decision_patch, build_group_culling_result, hydrate_companion_snapshot,
+    build_companion_decision_patch as build_companion_decision_patch_core,
+    build_group_culling_result, hydrate_companion_snapshot,
     AnalysisCache, AssetMetadataEvidence, Batch, BatchStore, CompanionDecisionPatch,
     CompanionSnapshot, CompanionSnapshotStore, CullingReview, CullingReviewStore,
     CullingUserDecision, GroupCullingResult, GroupReferenceBinding, PhotoGroup, PreviewArtifact,
@@ -66,7 +67,7 @@ fn build_companion_decision_patch(
         .get(batch_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("companion snapshot not found for batch {batch_id}"))?;
-    build_companion_decision_patch(
+    build_companion_decision_patch_core(
         &snapshot,
         &state.culling_reviews,
         &state.reference_store,

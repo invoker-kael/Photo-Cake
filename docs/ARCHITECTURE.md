@@ -49,6 +49,7 @@ The existing modules are the implementation backbone:
 - `reference_store`: persistent ReferenceSet storage, active group→reference binding and StyleProfile updates; changing the selected photo preserves the set's photographer preferences.
 - `color_sync`: shared style intent resolved against each target photo.
 - `recipe`: one target-bound Recipe per photo; Recipe is the source of editing decisions.
+- `recipe_review_store`: stable per-asset additive review overrides for photographer exceptions; regenerated base Recipes remain reference/style driven.
 - `xmp`: same-basename Lightroom sidecar generation.
 - `export` / renderer / workers: optional final rendered output, not the editing source of truth.
 - batch / stores / runner: resumable background execution and persistence.
@@ -82,7 +83,10 @@ color_sync resolves each target photo
 Recipe::materialize_group
         |
         v
-one Recipe per target asset
+per-asset RecipeReviewOverride (only when needed)
+        |
+        v
+one reviewed Recipe per target asset
 ```
 
 `StyleProfile` is an editable preference layer on top of measured reference values. `color_sync` is the only group color resolution engine; do not add a parallel preset-copy system.
@@ -112,7 +116,7 @@ Current mapped adjustments:
 - tint
 - saturation
 
-XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. The workstation writes sidecars only after an explicit user action, excludes only photographer-confirmed Reject photos, and preflights the entire group so an existing XMP prevents any partial write. RAW bytes are never changed.
+XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. At preview and handoff time, Photo-Cake regenerates the base Recipe from the current ReferenceSet/StyleProfile/evidence and then applies the persisted per-photo review override, so preview and XMP share the same final values. The workstation writes sidecars only after an explicit user action, excludes only photographer-confirmed Reject photos, and preflights the entire group so an existing XMP prevents any partial write. RAW bytes are never changed.
 
 Future mappings such as HSL, tone curve, masks and richer skin/color controls extend the Recipe/XMP model rather than creating a second editing model.
 

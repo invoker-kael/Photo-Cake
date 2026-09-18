@@ -116,6 +116,29 @@ h2 { font-size: 19px; }
 .queue-card { border: 1px solid #252a2d; border-radius: 12px; background: #121517; overflow: hidden; }
 .queue-title { display: flex; justify-content: space-between; padding: 17px 18px; border-bottom: 1px solid #252a2d; }
 .queue-title span { color: #737b80; font-size: 12px; }
+
+.metadata-list { display: grid; }
+.metadata-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(160px, 260px) 170px;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 14px;
+  border-top: 1px solid #202528;
+}
+.metadata-row:first-child { border-top: 0; }
+.metadata-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.metadata-row span, .metadata-row small {
+  color: #737b80;
+  font-size: 10px;
+}
+
 .job-list { display: grid; }
 .job-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 48px; gap: 14px; align-items: center; padding: 14px 18px; border-bottom: 1px solid #1f2325; }
 .job-row:last-child { border-bottom: 0; }

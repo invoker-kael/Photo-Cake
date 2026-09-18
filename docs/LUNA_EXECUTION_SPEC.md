@@ -199,3 +199,8 @@ Semantic refinement is repeatable, not identity-destructive. Before replacing pe
 DNG/TIFF `AsShotNeutral` / `AsShotWhiteXY` are persisted as exact rational provenance in `RawMetadataStore`; do not treat those source tags as already-converted Lightroom Temperature/Tint. A future solver may consume them only with a documented color-model/calibration path and validation fixtures.
 
 Downstream white balance is pair-gated at multiple boundaries. If either Temperature or Tint is missing, ColorSync must resolve neither, Recipe must materialize neither, and XMP must serialize neither. Do not weaken this gate for convenience.
+
+
+## XMP Compatibility Rule
+
+Do not depend on a specific XML namespace prefix when reading supported XMP attributes; namespace processors may legally rename prefixes. Continue treating existing `.xmp` or `.XMP` as protected photographer/Lightroom state. Until a safe merge strategy exists, never overwrite an existing sidecar.

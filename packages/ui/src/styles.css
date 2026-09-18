@@ -192,6 +192,34 @@ h2 { font-size: 19px; }
   font-size: 8px;
 }
 
+.cull-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #22272a;
+  background: #101416;
+}
+.cull-toolbar > span { color: #7d868b; font-size: 10px; line-height: 1.4; }
+.cull-view-switch { display: flex; gap: 5px; flex: 0 0 auto; }
+.cull-view-switch button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #30363a;
+  border-radius: 5px;
+  background: #171b1d;
+  color: #858e93;
+  font-size: 9px;
+  cursor: pointer;
+}
+.cull-view-switch button:hover { background: #202529; color: #d9dde0; }
+.cull-view-switch button.active {
+  background: #dfe4e7;
+  border-color: #dfe4e7;
+  color: #111416;
+}
+
 .cull-rank { color: #626a6f; font-size: 11px; }
 .cull-name { min-width: 0; display: grid; gap: 3px; }
 .cull-name strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }

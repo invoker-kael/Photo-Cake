@@ -57,6 +57,17 @@ pub enum CullingDecision {
     RejectSuggestion,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CullingReason {
+    StrongTechnicalCandidate,
+    LowSharpness,
+    BlurRisk,
+    ExposureRisk,
+    NearDuplicate,
+    LowTechnicalQuality,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CullingCandidate {
     pub asset_id: Uuid,
@@ -78,6 +89,8 @@ pub struct CullingRecommendation {
     pub decision: CullingDecision,
     pub group_rank: usize,
     #[serde(default)]
+    pub reasons: Vec<CullingReason>,
+    #[serde(default)]
     pub portrait_evidence: Option<CullingPortraitEvidence>,
 }
 
@@ -91,6 +104,34 @@ pub fn suggest_decision(score: &CullingScore) -> CullingDecision {
         value if value >= 0.55 => CullingDecision::Review,
         _ => CullingDecision::RejectSuggestion,
     }
+}
+
+fn recommendation_reasons(
+    score: &CullingScore,
+    decision: CullingDecision,
+) -> Vec<CullingReason> {
+    let mut reasons = Vec::new();
+
+    if score.sharpness.clamp(0.0, 1.0) <= 0.45 {
+        reasons.push(CullingReason::LowSharpness);
+    }
+    if score.blur_penalty.clamp(0.0, 1.0) >= 0.45 {
+        reasons.push(CullingReason::BlurRisk);
+    }
+    if score.exposure.clamp(0.0, 1.0) <= 0.45 {
+        reasons.push(CullingReason::ExposureRisk);
+    }
+    if score.is_burst_duplicate() {
+        reasons.push(CullingReason::NearDuplicate);
+    }
+
+    if decision == CullingDecision::RejectSuggestion {
+        reasons.push(CullingReason::LowTechnicalQuality);
+    } else if decision == CullingDecision::Keep && reasons.is_empty() {
+        reasons.push(CullingReason::StrongTechnicalCandidate);
+    }
+
+    reasons
 }
 
 /// Rank candidates inside one already-related photo group.
@@ -125,6 +166,7 @@ pub fn rank_group_candidates(candidates: &[CullingCandidate]) -> Vec<CullingReco
                 quality_score: quality,
                 decision,
                 group_rank: rank + 1,
+                reasons: recommendation_reasons(&candidate.score, decision),
                 portrait_evidence: None,
             }
         })
@@ -350,6 +392,42 @@ mod tests {
             model_id: "test-embed".to_string(),
             model_version: "1".to_string(),
         }
+    }
+
+    #[test]
+    fn reasons_explain_only_measured_technical_evidence() {
+        let candidate = CullingScore {
+            sharpness: 0.38,
+            blur_penalty: 0.62,
+            exposure: 0.40,
+            expression: None,
+            duplicate_similarity: Some(0.98),
+            composition: None,
+        };
+
+        let reasons = recommendation_reasons(&candidate, CullingDecision::RejectSuggestion);
+        assert!(reasons.contains(&CullingReason::LowSharpness));
+        assert!(reasons.contains(&CullingReason::BlurRisk));
+        assert!(reasons.contains(&CullingReason::ExposureRisk));
+        assert!(reasons.contains(&CullingReason::NearDuplicate));
+        assert!(reasons.contains(&CullingReason::LowTechnicalQuality));
+    }
+
+    #[test]
+    fn strong_candidate_reason_requires_no_measured_warning() {
+        let candidate = CullingScore {
+            sharpness: 0.94,
+            blur_penalty: 0.02,
+            exposure: 0.91,
+            expression: None,
+            duplicate_similarity: None,
+            composition: None,
+        };
+
+        assert_eq!(
+            recommendation_reasons(&candidate, CullingDecision::Keep),
+            vec![CullingReason::StrongTechnicalCandidate]
+        );
     }
 
     #[test]

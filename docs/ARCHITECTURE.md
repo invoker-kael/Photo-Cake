@@ -94,7 +94,9 @@ Reference selection is intentionally separated from unsupported color guesses. A
 ## Lightroom Bridge
 
 ```text
-Recipe
+reviewed Reference + cached evidence
+  -> per-photo Recipe preview
+  -> explicit workstation handoff
   -> XmpEditState
   -> IMG_0001.xmp beside IMG_0001.CR3
   -> Lightroom / Camera Raw
@@ -110,7 +112,7 @@ Current mapped adjustments:
 - tint
 - saturation
 
-XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. RAW bytes are never changed.
+XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. The workstation writes sidecars only after an explicit user action, excludes only photographer-confirmed Reject photos, and preflights the entire group so an existing XMP prevents any partial write. RAW bytes are never changed.
 
 Future mappings such as HSL, tone curve, masks and richer skin/color controls extend the Recipe/XMP model rather than creating a second editing model.
 

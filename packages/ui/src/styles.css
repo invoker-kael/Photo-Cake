@@ -337,6 +337,36 @@ h2 { font-size: 19px; }
   color: #697176;
   font-size: 10px;
 }
+
+.recipe-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.recipe-compare-pane { min-width: 0; display: grid; gap: 5px; }
+.recipe-compare-pane > small {
+  color: #6e777c;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.recipe-preview-button {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  border: 1px dashed #384044;
+  border-radius: 6px;
+  background: #14191b;
+  color: #9aa2a7;
+  cursor: pointer;
+}
+.recipe-preview-button:hover:not(:disabled) { background: #202629; color: #e4e8ea; }
+.recipe-preview-button:disabled { cursor: default; }
+.recipe-preview-note {
+  color: #687176;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
 .recipe-review-info { min-width: 0; display: grid; gap: 4px; }
 .recipe-review-info strong {
   white-space: nowrap;
@@ -439,6 +469,7 @@ h2 { font-size: 19px; }
   .photo-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-card.wide { grid-column: 1 / -1; }
   .group-grid, .group-detail-grid, .reference-candidates, .reference-style, .recipe-review-grid { grid-template-columns: 1fr; }
+  .recipe-compare { grid-template-columns: 1fr; }
   .reference-group-head, .handoff-card { grid-template-columns: 1fr; }
   .handoff-actions { justify-items: start; text-align: left; }
   .reference-group-head { flex-direction: column; }

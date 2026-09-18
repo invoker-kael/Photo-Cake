@@ -222,11 +222,11 @@ export interface BatchWorkerEvent {
 
 export interface PhotoCakeBridge {
   listBatches(): Promise<BackendBatch[]>;
-  runBatch(batchId: string): Promise<BackendBatch>;
-  retryFailed(batchId: string): Promise<BackendBatch>;
-  pauseBatch(batchId: string): Promise<BackendBatch>;
-  resumeBatch(batchId: string): Promise<BackendBatch>;
-  cancelBatch(batchId: string): Promise<BackendBatch>;
+  runBatch?(batchId: string): Promise<BackendBatch>;
+  retryFailed?(batchId: string): Promise<BackendBatch>;
+  pauseBatch?(batchId: string): Promise<BackendBatch>;
+  resumeBatch?(batchId: string): Promise<BackendBatch>;
+  cancelBatch?(batchId: string): Promise<BackendBatch>;
   importRawDirectory?(): Promise<BackendRawImportResult | null>;
   loadPhotoContext?(batchId: string): Promise<BackendPhotoContext>;
   refineGroups?(batchId: string): Promise<BackendSemanticRefinementReport>;
@@ -254,7 +254,7 @@ export interface PhotoCakeBridge {
   ): Promise<BackendGroupReferenceStyle>;
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
   writeGroupXmp?(groupId: string): Promise<BackendLightroomHandoffResult>;
-  subscribeBatchUpdates(handler: (batch: BackendBatch) => void): Promise<() => void>;
+  subscribeBatchUpdates?(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }
 
 export const demoJobs: BatchJob[] = [

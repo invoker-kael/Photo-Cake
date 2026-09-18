@@ -204,3 +204,6 @@ Every AI culling recommendation should expose concise reasons derived only from 
 Cross-device companion transport is local-first and business-logic-neutral. The workstation exports a portable CompanionSnapshot containing only the mobile decision context: stable asset identities, filenames/metadata, effective groups, cached culling recommendations, photographer culling reviews, reference state, RAW metadata evidence and preview transport indexes. Desktop RAW absolute source paths are intentionally excluded.
 
 The companion returns a CompanionDecisionPatch containing only culling and reference changes. Applying a patch must validate snapshot/batch identity, asset/group membership, rejected-reference conflicts and concurrent workstation edits before any write. Transport medium is intentionally unspecified so local file transfer, LAN transfer or another private mechanism can be added without changing the photography model.
+
+
+Companion conflict handling is scoped to the decisions being changed. Unrelated workstation edits do not invalidate a mobile patch; overlapping culling/reference changes still fail closed instead of silently overwriting photographer work.

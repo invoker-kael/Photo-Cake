@@ -1,7 +1,8 @@
 //! Smart culling foundation for photographer workflow.
 //!
 //! This module provides non-destructive review suggestions for RAW collections.
-//! It never deletes originals automatically.
+//! It never deletes originals automatically and it does not invent scores for
+//! evidence that has not been measured yet.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -11,20 +12,34 @@ pub struct CullingScore {
     pub sharpness: f32,
     pub blur_penalty: f32,
     pub exposure: f32,
-    pub expression: f32,
-    pub duplicate_similarity: f32,
-    pub composition: f32,
+    #[serde(default)]
+    pub expression: Option<f32>,
+    #[serde(default)]
+    pub duplicate_similarity: Option<f32>,
+    #[serde(default)]
+    pub composition: Option<f32>,
 }
 
 impl CullingScore {
     pub fn review_score(&self) -> f32 {
         let technical = self.sharpness * (1.0 - self.blur_penalty.clamp(0.0, 1.0));
-        ((technical + self.exposure + self.expression + self.composition) / 4.0)
-            .clamp(0.0, 1.0)
+        let mut values = vec![technical.clamp(0.0, 1.0), self.exposure.clamp(0.0, 1.0)];
+        if let Some(value) = self.expression {
+            values.push(value.clamp(0.0, 1.0));
+        }
+        if let Some(value) = self.composition {
+            values.push(value.clamp(0.0, 1.0));
+        }
+        values.iter().sum::<f32>() / values.len() as f32
     }
 
     pub fn is_burst_duplicate(&self) -> bool {
-        self.duplicate_similarity >= 0.95
+        self.duplicate_similarity.is_some_and(|value| value >= 0.95)
+    }
+
+    pub fn with_duplicate_similarity(mut self, similarity: f32) -> Self {
+        self.duplicate_similarity = Some(similarity.clamp(0.0, 1.0));
+        self
     }
 }
 
@@ -102,21 +117,35 @@ pub fn rank_group_candidates(candidates: &[CullingCandidate]) -> Vec<CullingReco
 mod tests {
     use super::*;
 
-    fn score(quality: f32, duplicate_similarity: f32) -> CullingScore {
+    fn score(quality: f32, duplicate_similarity: Option<f32>) -> CullingScore {
         CullingScore {
             sharpness: quality,
             blur_penalty: 0.0,
             exposure: quality,
-            expression: quality,
+            expression: Some(quality),
             duplicate_similarity,
-            composition: quality,
+            composition: Some(quality),
         }
+    }
+
+    #[test]
+    fn unknown_semantic_evidence_is_not_faked_into_review_score() {
+        let score = CullingScore {
+            sharpness: 0.95,
+            blur_penalty: 0.0,
+            exposure: 0.95,
+            expression: None,
+            duplicate_similarity: None,
+            composition: None,
+        };
+        assert!((score.review_score() - 0.95).abs() < 1e-6);
+        assert_eq!(suggest_decision(&score), CullingDecision::Keep);
     }
 
     #[test]
     fn low_quality_frame_is_only_a_reject_suggestion() {
         assert_eq!(
-            suggest_decision(&score(0.2, 0.0)),
+            suggest_decision(&score(0.2, None)),
             CullingDecision::RejectSuggestion
         );
     }
@@ -129,15 +158,15 @@ mod tests {
         let ranked = rank_group_candidates(&[
             CullingCandidate {
                 asset_id: weak,
-                score: score(0.68, 0.98),
+                score: score(0.68, Some(0.98)),
             },
             CullingCandidate {
                 asset_id: best,
-                score: score(0.94, 0.99),
+                score: score(0.94, Some(0.99)),
             },
             CullingCandidate {
                 asset_id: middle,
-                score: score(0.82, 0.97),
+                score: score(0.82, Some(0.97)),
             },
         ]);
 

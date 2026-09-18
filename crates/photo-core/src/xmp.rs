@@ -154,16 +154,17 @@ fn assign_xmp_attribute(
     name: &str,
     value: &str,
 ) -> Result<(), XmpParseError> {
-    match name {
-        "pc:RecipeId" => state.recipe_id = value.to_string(),
-        "pc:TargetAssetId" => state.target_asset_id = Some(value.to_string()),
-        "crs:Exposure2012" => state.exposure = Some(parse_xmp_number(name, value)?),
-        "crs:Contrast2012" => state.contrast = Some(parse_xmp_number(name, value)?),
-        "crs:Highlights2012" => state.highlights = Some(parse_xmp_number(name, value)?),
-        "crs:Shadows2012" => state.shadows = Some(parse_xmp_number(name, value)?),
-        "crs:Temperature" => state.temperature = Some(parse_xmp_number(name, value)?),
-        "crs:Tint" => state.tint = Some(parse_xmp_number(name, value)?),
-        "crs:Saturation" => state.saturation = Some(parse_xmp_number(name, value)?),
+    let local = name.rsplit(':').next().unwrap_or(name);
+    match local {
+        "RecipeId" => state.recipe_id = value.to_string(),
+        "TargetAssetId" => state.target_asset_id = Some(value.to_string()),
+        "Exposure2012" => state.exposure = Some(parse_xmp_number(name, value)?),
+        "Contrast2012" => state.contrast = Some(parse_xmp_number(name, value)?),
+        "Highlights2012" => state.highlights = Some(parse_xmp_number(name, value)?),
+        "Shadows2012" => state.shadows = Some(parse_xmp_number(name, value)?),
+        "Temperature" => state.temperature = Some(parse_xmp_number(name, value)?),
+        "Tint" => state.tint = Some(parse_xmp_number(name, value)?),
+        "Saturation" => state.saturation = Some(parse_xmp_number(name, value)?),
         _ => {}
     }
     Ok(())
@@ -235,6 +236,19 @@ pub fn sidecar_path_for_raw(raw_path: &Path) -> PathBuf {
     raw_path.with_extension("xmp")
 }
 
+fn existing_sidecar_path(raw_path: &Path) -> Option<PathBuf> {
+    let lower = sidecar_path_for_raw(raw_path);
+    if lower.exists() {
+        return Some(lower);
+    }
+
+    let upper = raw_path.with_extension("XMP");
+    if upper != lower && upper.exists() {
+        return Some(upper);
+    }
+    None
+}
+
 pub fn write_recipe_sidecar(
     raw_path: &Path,
     recipe: &Recipe,
@@ -276,8 +290,7 @@ pub fn write_group_sidecars(
             .find(|asset| asset.id == target_id)
             .ok_or(XmpWriteError::MissingRawAsset(target_id))?;
         let raw_path = PathBuf::from(&asset.source_path);
-        let sidecar = sidecar_path_for_raw(&raw_path);
-        if sidecar.exists() {
+        if let Some(sidecar) = existing_sidecar_path(&raw_path) {
             return Err(XmpWriteError::ExistingSidecar(sidecar));
         }
         planned.push((raw_path, recipe));
@@ -385,6 +398,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_lightroom_style_xmp_even_when_namespace_prefixes_change() {
+        let recipe_id = Uuid::new_v4();
+        let asset_id = Uuid::new_v4();
+        let document = format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+    <rdf:Description
+      xmlns:cameraRaw="http://ns.adobe.com/camera-raw-settings/1.0/"
+      xmlns:photoCake="https://photo-cake.local/ns/1.0/"
+      cameraRaw:Exposure2012="0.45"
+      cameraRaw:Contrast2012="12"
+      photoCake:RecipeId="{recipe_id}"
+      photoCake:TargetAssetId="{asset_id}"
+      dc:format="image/x-canon-cr3"
+      xmlns:dc="http://purl.org/dc/elements/1.1/" />
+  </rdf:RDF>
+</x:xmpmeta>"#
+        );
+
+        let parsed = XmpEditState::from_xmp_document(&document).unwrap();
+        assert_eq!(parsed.recipe_id, recipe_id.to_string());
+        assert_eq!(parsed.target_asset_id, Some(asset_id.to_string()));
+        assert_eq!(parsed.exposure, Some(0.45));
+        assert_eq!(parsed.contrast, Some(12.0));
+    }
+
+    #[test]
     fn malformed_or_wrong_identity_fails_round_trip_gate() {
         let source = recipe(Some(Uuid::new_v4()));
         let document = XmpEditState::from_recipe(&source)
@@ -449,6 +489,30 @@ mod tests {
             std::fs::read(dir.path().join("IMG_0002.xmp")).unwrap(),
             b"lightroom-edit"
         );
+    }
+
+    #[test]
+    fn refuses_uppercase_existing_lightroom_sidecar() {
+        let dir = tempdir().unwrap();
+        let raw_path = dir.path().join("IMG_0099.CR3");
+        std::fs::write(&raw_path, b"raw").unwrap();
+        std::fs::write(dir.path().join("IMG_0099.XMP"), b"existing").unwrap();
+
+        let asset_id = Uuid::new_v4();
+        let asset = RawAsset {
+            id: asset_id,
+            source_path: raw_path.to_string_lossy().into_owned(),
+            filename: "IMG_0099.CR3".into(),
+            extension: "cr3".into(),
+            camera_id: None,
+            capture_time_ms: None,
+            file_time_ms: None,
+            sequence_number: Some(99),
+        };
+
+        let error = write_group_sidecars(&[asset], &[recipe(Some(asset_id))]).unwrap_err();
+        assert!(matches!(error, XmpWriteError::ExistingSidecar(path) if path.ends_with("IMG_0099.XMP")));
+        assert!(!dir.path().join("IMG_0099.xmp").exists());
     }
 
     #[test]

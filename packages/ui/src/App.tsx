@@ -6,6 +6,7 @@ import {
   type BackendCullingReview,
   type BackendGroupCullingResult,
   type BackendPhotoContext,
+  type BackendReferenceBinding,
   type BatchJob,
   type BatchStage,
   type CullingDecision,
@@ -19,6 +20,7 @@ export type {
   BackendGroupCullingResult,
   BackendPhotoContext,
   BackendRawImportResult,
+  BackendReferenceBinding,
   BatchWorkerEvent,
   PhotoCakeBridge,
 } from "./batch";
@@ -124,6 +126,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [culling, setCulling] = useState<BackendGroupCullingResult[]>([]);
   const [cullingReviews, setCullingReviews] = useState<Record<string, CullingUserDecision>>({});
   const [cullingLoading, setCullingLoading] = useState(false);
+  const [referenceBindings, setReferenceBindings] = useState<Record<string, BackendReferenceBinding>>({});
 
   useEffect(() => {
     if (!bridge) return;
@@ -250,6 +253,30 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     };
   }, [activeBatchId, bridge]);
 
+  useEffect(() => {
+    if (!bridge?.loadReferenceBindings || !activeBatchId) {
+      setReferenceBindings({});
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadReferenceBindings(activeBatchId)
+      .then((bindings) => {
+        if (disposed) return;
+        setReferenceBindings(
+          Object.fromEntries(bindings.map((binding) => [binding.group_id, binding])),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeBatchId, bridge]);
+
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
     [activeBatch, bridge, demoState],
@@ -284,6 +311,37 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     () => new Map(photoContext?.assets.map((asset) => [asset.id, asset.filename]) ?? []),
     [photoContext],
   );
+
+  const cullingRecommendations = useMemo(() => {
+    const values = culling.flatMap((group) => group.recommendations);
+    return new Map(values.map((item) => [item.asset_id, item]));
+  }, [culling]);
+
+  const referenceCandidatesForGroup = (assetIds: string[]) =>
+    assetIds
+      .filter((assetId) => {
+        const user = cullingReviews[assetId];
+        if (user === "REJECT") return false;
+        const recommendation = cullingRecommendations.get(assetId);
+        return user != null || recommendation?.decision !== "REJECT_SUGGESTION";
+      })
+      .sort((left, right) => {
+        const score = (assetId: string) => {
+          const user = cullingReviews[assetId];
+          const recommendation = cullingRecommendations.get(assetId);
+          if (user === "KEEP") return 0;
+          if (recommendation?.decision === "KEEP") return 1;
+          if (user === "REVIEW") return 2;
+          if (recommendation?.decision === "REVIEW") return 3;
+          return 4;
+        };
+        const byClass = score(left) - score(right);
+        if (byClass !== 0) return byClass;
+        return (
+          (cullingRecommendations.get(left)?.group_rank ?? Number.MAX_SAFE_INTEGER) -
+          (cullingRecommendations.get(right)?.group_rank ?? Number.MAX_SAFE_INTEGER)
+        );
+      });
 
   const isPaused = bridge
     ? summary.paused > 0 && summary.running === 0 && summary.pending === 0
@@ -371,6 +429,32 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         const next = { ...current };
         if (decision) next[assetId] = decision;
         else delete next[assetId];
+        return next;
+      });
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    }
+  };
+
+  const setReferencePhoto = async (groupId: string, assetId: string) => {
+    if (!bridge?.setGroupReference) return;
+    try {
+      const binding = await bridge.setGroupReference(groupId, assetId);
+      setReferenceBindings((current) => ({ ...current, [groupId]: binding }));
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    }
+  };
+
+  const clearReferencePhoto = async (groupId: string) => {
+    if (!bridge?.clearGroupReference) return;
+    try {
+      await bridge.clearGroupReference(groupId);
+      setReferenceBindings((current) => {
+        const next = { ...current };
+        delete next[groupId];
         return next;
       });
       setBackendError(null);
@@ -557,6 +641,81 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     </section>
   );
 
+  const renderReference = () => (
+    <section className="queue-card">
+      <div className="queue-title">
+        <strong>Reference look</strong>
+        <span>Selection is saved now; adaptive edits wait for reliable color evidence</span>
+      </div>
+      <div className="reference-groups">
+        {photoContext?.groups.map((group, index) => {
+          const binding = referenceBindings[group.id];
+          const candidates = referenceCandidatesForGroup(group.asset_ids);
+          return (
+            <div className="reference-group" key={group.id}>
+              <div className="reference-group-head">
+                <div>
+                  <span>Group {index + 1}</span>
+                  <strong>{group.asset_ids.length} photos</strong>
+                </div>
+                <div className="reference-current">
+                  <small>Selected reference</small>
+                  <strong>
+                    {binding
+                      ? assetNames.get(binding.selected_reference_asset_id) ??
+                        binding.selected_reference_asset_id.slice(0, 8)
+                      : "Not selected"}
+                  </strong>
+                  {binding && bridge?.clearGroupReference && (
+                    <button
+                      className="review-choice clear"
+                      onClick={() => void clearReferencePhoto(group.id)}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="reference-candidates">
+                {candidates.slice(0, 10).map((assetId) => {
+                  const user = cullingReviews[assetId];
+                  const recommendation = cullingRecommendations.get(assetId);
+                  const selected = binding?.selected_reference_asset_id === assetId;
+                  const evidence =
+                    user != null
+                      ? `Your ${userDecisionLabel(user)}`
+                      : recommendation
+                        ? `AI ${cullingLabel(recommendation.decision)} · #${recommendation.group_rank}`
+                        : "Pending evidence";
+                  return (
+                    <button
+                      className={`reference-candidate ${selected ? "selected" : ""}`}
+                      key={assetId}
+                      disabled={!bridge?.setGroupReference}
+                      onClick={() => void setReferencePhoto(group.id, assetId)}
+                    >
+                      <span>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</span>
+                      <small>{evidence}</small>
+                    </button>
+                  );
+                })}
+                {candidates.length === 0 && (
+                  <div className="panel-note">
+                    No usable reference candidate. Review this group in Cull first.
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {!photoContext?.groups.length && (
+          <div className="panel-note">Import and group RAW photos before choosing references.</div>
+        )}
+      </div>
+    </section>
+  );
+
   const renderFutureView = (title: string, body: string) => (
     <section className="queue-card">
       <div className="queue-title"><strong>{title}</strong></div>
@@ -636,10 +795,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         {activeView === "library" && renderLibrary()}
         {activeView === "cull" && renderCull()}
         {activeView === "groups" && renderGroups()}
-        {activeView === "reference" && renderFutureView(
-          "Reference look",
-          "Core ReferenceSet → StyleProfile → adaptive per-photo Recipe is implemented. The next UI step is selecting a reference from the reviewed group and editing its style preferences.",
-        )}
+        {activeView === "reference" && renderReference()}
         {activeView === "lightroom" && renderFutureView(
           "Lightroom handoff",
           "Core same-basename XMP generation is implemented and protects existing sidecars. The workstation UI will expose explicit apply/handoff only after a reference-driven Recipe set exists.",

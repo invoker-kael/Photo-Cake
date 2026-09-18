@@ -55,8 +55,8 @@ impl Recipe {
                 contrast: Some(resolved.contrast),
                 highlights: None,
                 shadows: None,
-                temperature: Some(plan.intent.target_temperature_k),
-                tint: Some(plan.intent.target_tint),
+                temperature: plan.intent.target_temperature_k,
+                tint: plan.intent.target_tint,
                 saturation: Some(resolved.saturation),
             },
         }
@@ -95,8 +95,8 @@ mod tests {
             intent: GroupColorIntent {
                 name: "Shared look".into(),
                 target_exposure_ev: 0.0,
-                target_temperature_k: 5700.0,
-                target_tint: 4.0,
+                target_temperature_k: Some(5700.0),
+                target_tint: Some(4.0),
                 contrast: 6.0,
                 saturation: 3.0,
                 semantic: vec![],
@@ -113,15 +113,15 @@ mod tests {
         let edit = ResolvedColorEdit {
             asset_id,
             exposure_delta_ev: 0.6,
-            temperature_delta_k: 300.0,
-            tint_delta: 2.0,
+            temperature_delta_k: Some(300.0),
+            tint_delta: Some(2.0),
             contrast: 8.0,
             saturation: 4.0,
             semantic: vec![],
         };
         let mut plan = group_plan(reference_id, vec![edit.clone()]);
-        plan.intent.target_temperature_k = 5900.0;
-        plan.intent.target_tint = 6.0;
+        plan.intent.target_temperature_k = Some(5900.0);
+        plan.intent.target_tint = Some(6.0);
         plan.intent.contrast = 8.0;
         plan.intent.saturation = 4.0;
 
@@ -144,8 +144,8 @@ mod tests {
                 ResolvedColorEdit {
                     asset_id: dark,
                     exposure_delta_ev: 0.8,
-                    temperature_delta_k: 500.0,
-                    tint_delta: 4.0,
+                    temperature_delta_k: Some(500.0),
+                    tint_delta: Some(4.0),
                     contrast: 6.0,
                     saturation: 3.0,
                     semantic: vec![],
@@ -153,8 +153,8 @@ mod tests {
                 ResolvedColorEdit {
                     asset_id: bright,
                     exposure_delta_ev: -0.35,
-                    temperature_delta_k: -200.0,
-                    tint_delta: 4.0,
+                    temperature_delta_k: Some(-200.0),
+                    tint_delta: Some(4.0),
                     contrast: 6.0,
                     saturation: 3.0,
                     semantic: vec![],

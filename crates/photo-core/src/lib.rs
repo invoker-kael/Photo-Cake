@@ -101,4 +101,7 @@ pub use semantic_grouping::{
     SemanticGroupingError, SemanticPhotoGroup,
 };
 pub use store::{BatchStore, StoreError};
-pub use xmp::{sidecar_path_for_raw, write_group_sidecars, write_recipe_sidecar, XmpEditState, XmpWriteError};
+pub use xmp::{
+    sidecar_path_for_raw, validate_recipe_xmp, write_group_sidecars, write_recipe_sidecar,
+    XmpEditState, XmpParseError, XmpWriteError,
+};

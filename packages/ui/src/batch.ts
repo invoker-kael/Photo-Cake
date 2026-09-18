@@ -45,6 +45,37 @@ export interface BackendBatch {
   stop_on_error: boolean;
 }
 
+export interface BackendRawAsset {
+  id: string;
+  source_path: string;
+  filename: string;
+  extension: string;
+  camera_id: string | null;
+  capture_time_ms: number | null;
+  file_time_ms: number | null;
+  sequence_number: number | null;
+}
+
+export interface BackendPhotoGroup {
+  id: string;
+  kind: "MOMENT" | "SIMILAR" | "MANUAL";
+  basis:
+    | "TIME"
+    | "TIME_AND_SEQUENCE"
+    | "SEQUENCE_FALLBACK"
+    | "SEMANTIC_SIMILARITY"
+    | "SINGLETON";
+  asset_ids: string[];
+  manual_locked: boolean;
+}
+
+export interface BackendRawImportResult {
+  assets: BackendRawAsset[];
+  groups: BackendPhotoGroup[];
+  batch: BackendBatch | null;
+  skipped_non_raw: string[];
+}
+
 export interface BatchWorkerEvent {
   batch: BackendBatch;
   step: unknown | null;
@@ -57,35 +88,14 @@ export interface PhotoCakeBridge {
   pauseBatch(batchId: string): Promise<BackendBatch>;
   resumeBatch(batchId: string): Promise<BackendBatch>;
   cancelBatch(batchId: string): Promise<BackendBatch>;
+  importRawDirectory?(): Promise<BackendRawImportResult | null>;
   subscribeBatchUpdates(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }
 
-export interface AutomationRecipe {
-  name: string;
-  autoAnalyze: boolean;
-  autoPreset: boolean;
-  autoRetouch: boolean;
-  autoQa: boolean;
-  autoExportPass: boolean;
-  retries: number;
-  continueOnError: boolean;
-}
-
-export const defaultRecipe: AutomationRecipe = {
-  name: "Natural Batch",
-  autoAnalyze: true,
-  autoPreset: true,
-  autoRetouch: true,
-  autoQa: true,
-  autoExportPass: true,
-  retries: 2,
-  continueOnError: true,
-};
-
 export const demoJobs: BatchJob[] = [
-  { id: "1", filename: "DSC_1042.ARW", stage: "PORTRAIT_RETOUCH", status: "RUNNING", progress: 68, qa: null },
-  { id: "2", filename: "DSC_1043.ARW", stage: "QA", status: "RUNNING", progress: 82, qa: null },
-  { id: "3", filename: "DSC_1044.ARW", stage: "DONE", status: "DONE", progress: 100, qa: "PASS" },
+  { id: "1", filename: "DSC_1042.ARW", stage: "ANALYZE", status: "RUNNING", progress: 54, qa: null },
+  { id: "2", filename: "DSC_1043.ARW", stage: "DONE", status: "DONE", progress: 100, qa: null },
+  { id: "3", filename: "DSC_1044.ARW", stage: "DONE", status: "DONE", progress: 100, qa: null },
   { id: "4", filename: "DSC_1045.ARW", stage: "ANALYZE", status: "FAILED", progress: 24, qa: null, error: "Analysis worker unavailable" },
-  { id: "5", filename: "DSC_1046.ARW", stage: "IMPORT", status: "PENDING", progress: 0, qa: null },
+  { id: "5", filename: "DSC_1046.ARW", stage: "ANALYZE", status: "PENDING", progress: 20, qa: null },
 ];

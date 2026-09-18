@@ -207,3 +207,10 @@ The companion returns a CompanionDecisionPatch containing only culling and refer
 
 
 Companion conflict handling is scoped to the decisions being changed. Unrelated workstation edits do not invalidate a mobile patch; overlapping culling/reference changes still fail closed instead of silently overwriting photographer work.
+
+
+## Companion Snapshot Hydration
+
+Android can now hydrate a received CompanionSnapshot into its local project stores without RAW files. Imported assets use synthetic companion:// source references, imported groups are the workstation's effective groups, batch items are marked prepared, and the snapshot baseline is persisted separately.
+
+Android culling must use the snapshot's precomputed recommendations instead of rerunning workstation analysis. Mobile changes are reduced to a CompanionDecisionPatch against the persisted baseline. A different snapshot for the same batch is rejected until the previous mobile decisions are synchronized, preventing silent replacement of unsynced photographer work.

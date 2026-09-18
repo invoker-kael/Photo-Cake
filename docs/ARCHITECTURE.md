@@ -8,38 +8,31 @@ The architecture follows the photographer workflow:
 
 ```text
 RAW Collection
-      |
-      v
+    |
 Catalog
-      |
-      v
+    |
 Metadata + Preview
-      |
-      v
+    |
 Smart Culling
-      |
-      v
+    |
 Photo Group
-      |
-      v
+    |
 Reference Style
-      |
-      v
+    |
 Recipe / Edit Graph
-      |
-      +------------+
-      |            |
-      v            v
-     XMP        Direct Export
+    |
++----------+
+|          |
+XMP     Direct Export
 ```
 
-The goal is to reduce repetitive editing work while keeping photographer control.
+The goal is reducing repetitive editing while keeping photographer control.
 
 ---
 
 # Existing Code Reuse
 
-The repository implementation remains the foundation.
+Current repository structure remains the foundation:
 
 ```text
 apps/
@@ -55,15 +48,13 @@ Extend existing modules before creating new systems.
 
 ---
 
-# Core Layer
-
-## photo-core
+# photo-core
 
 Shared photography workflow engine.
 
 Responsibilities:
 
-- catalog management
+- catalog
 - RAW asset identity
 - metadata
 - preview
@@ -74,40 +65,25 @@ Responsibilities:
 - batch jobs
 - XMP/export interfaces
 
----
-
-# Photo Group Model
-
-Photo Group is the main editing unit.
-
-A group represents a real photography situation:
-
-- travel scene
-- portrait session
-- family event
-- landscape
-- indoor/night photography
-
-Group-level editing is preferred over isolated photo processing.
+Current workflow objects:
 
 ```text
-Photo Assets
-      |
-      v
+Photo Asset
+    |
 Photo Group
-      |
-      v
+    |
+Reference Set
+    |
 Recipe
-      |
-      v
-Multiple Photos
+    |
+XMP / Export
 ```
 
 ---
 
 # Recipe Driven Editing
 
-Recipe is the single source of editing decisions.
+Recipe is the unified editing decision model.
 
 ```text
 Reference Photos
@@ -122,16 +98,24 @@ Recipe
 XMP / Export
 ```
 
-Recipe contains future editable decisions such as:
+Recipe stores reusable adjustments instead of modifying RAW files.
+
+Initial adjustments:
 
 - exposure
-- white balance
 - contrast
-- color preference
-- skin tone preference
-- lighting style
+- highlights
+- shadows
+- temperature
+- tint
+- saturation
 
-RAW files remain immutable.
+Future extensions:
+
+- HSL
+- tone curve
+- skin tone preference
+- personal style profile
 
 ---
 
@@ -139,7 +123,7 @@ RAW files remain immutable.
 
 ## photo-inference
 
-Responsible for AI capabilities:
+Responsible for:
 
 Current:
 
@@ -155,19 +139,15 @@ Future:
 - style extraction
 - editing suggestions
 
-Models must remain replaceable.
-
 ---
 
 # Platform Architecture
 
 ## Windows
 
-Primary workstation.
+Primary workstation:
 
-Responsibilities:
-
-- large RAW collections
+- RAW collections
 - batch processing
 - GPU acceleration
 - Lightroom workflow
@@ -176,22 +156,18 @@ Responsibilities:
 
 ## Android
 
-Mobile companion.
-
-Responsibilities:
+Mobile companion:
 
 - photo selection
-- reference photo selection
+- reference selection
 - preview
 - lightweight analysis
 
-Business logic stays in shared core modules.
+Business logic remains in shared core modules.
 
 ---
 
 # Development Priority
-
-Implement the photographer workflow first:
 
 ```text
 Catalog
@@ -205,14 +181,7 @@ Catalog
  -> Advanced AI
 ```
 
-Do not prioritize:
-
-- replacing Lightroom
-- full RAW engine replacement
-- cloud editing service
-- Lightroom plugin
-
-Foundation remains:
+Foundation:
 
 ```text
 RAW -> Recipe -> XMP -> Lightroom

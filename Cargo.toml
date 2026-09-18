@@ -22,3 +22,4 @@ tempfile = "3"
 image = { version = "0.25", default-features = false, features = ["jpeg", "tiff", "png"] }
 sha2 = "0.10"
 libloading = "0.8"
+quick-xml = "0.38"

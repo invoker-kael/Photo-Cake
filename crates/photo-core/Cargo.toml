@@ -12,6 +12,7 @@ thiserror.workspace = true
 rusqlite.workspace = true
 image.workspace = true
 quick-xml.workspace = true
+kamadak-exif.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

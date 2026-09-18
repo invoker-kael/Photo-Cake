@@ -398,7 +398,7 @@ fn batch_photo_context(
         .iter()
         .filter_map(|item| item.asset_id)
         .collect::<HashSet<_>>();
-    let assets = state
+    let assets: Vec<RawAsset> = state
         .catalog
         .list_assets()
         .map_err(|error| error.to_string())?

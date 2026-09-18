@@ -214,3 +214,8 @@ Companion conflict handling is scoped to the decisions being changed. Unrelated 
 Android can now hydrate a received CompanionSnapshot into its local project stores without RAW files. Imported assets use synthetic companion:// source references, imported groups are the workstation's effective groups, batch items are marked prepared, and the snapshot baseline is persisted separately.
 
 Android culling must use the snapshot's precomputed recommendations instead of rerunning workstation analysis. Mobile changes are reduced to a CompanionDecisionPatch against the persisted baseline. A different snapshot for the same batch is rejected until the previous mobile decisions are synchronized, preventing silent replacement of unsynced photographer work.
+
+
+## Exception-first Culling Triage
+
+Cull defaults to an exception-first Triage view for large shoots. Triage shows unresolved AI Review / RejectSuggestion items and analysis-pending photos, while hiding AI Keep items and photos that already have an explicit photographer decision. Within unresolved scored items, RejectSuggestion comes first and lower technical quality is surfaced before stronger candidates. This is presentation ordering only: it does not create a new score, change AI evidence, override photographer decisions or delete/exclude source files. The photographer can switch to All at any time to inspect the complete culling set.

@@ -179,6 +179,10 @@ export interface BackendGroupReferenceStyle {
   style_profile: BackendStyleProfile;
 }
 
+export interface BackendGroupReferenceStyleBatchResult {
+  styles: BackendGroupReferenceStyle[];
+}
+
 export interface BackendEditAdjustments {
   exposure: number | null;
   contrast: number | null;
@@ -290,6 +294,10 @@ export interface PhotoCakeBridge {
     sourceGroupId: string,
     targetGroupId: string,
   ): Promise<BackendGroupReferenceStyle>;
+  copyReferenceStyleToGroups?(
+    sourceGroupId: string,
+    targetGroupIds: string[],
+  ): Promise<BackendGroupReferenceStyleBatchResult>;
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
   preflightGroupXmp?(groupId: string): Promise<BackendLightroomHandoffPreflight>;
   writeGroupXmp?(groupId: string): Promise<BackendLightroomHandoffResult>;

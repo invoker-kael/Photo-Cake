@@ -121,6 +121,11 @@ struct GroupReferenceStyle {
 }
 
 #[derive(Clone, Serialize)]
+struct GroupReferenceStyleBatchResult {
+    styles: Vec<GroupReferenceStyle>,
+}
+
+#[derive(Clone, Serialize)]
 struct ReviewRenderResult {
     asset_id: Uuid,
     recipe_id: Uuid,
@@ -859,6 +864,53 @@ fn copy_group_reference_style(
 }
 
 #[tauri::command]
+fn copy_reference_style_to_groups(
+    source_group_id: String,
+    target_group_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<GroupReferenceStyleBatchResult, String> {
+    if target_group_ids.is_empty() {
+        return Err("no target groups selected for look reuse".to_string());
+    }
+
+    let source_group_id = Uuid::parse_str(&source_group_id)
+        .map_err(|error| format!("invalid source group id: {error}"))?;
+    state
+        .catalog
+        .find_group(source_group_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("source photo group not found: {source_group_id}"))?;
+
+    let mut target_ids = Vec::with_capacity(target_group_ids.len());
+    for value in target_group_ids {
+        let target_group_id = Uuid::parse_str(&value)
+            .map_err(|error| format!("invalid target group id: {error}"))?;
+        state
+            .catalog
+            .find_group(target_group_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("target photo group not found: {target_group_id}"))?;
+        target_ids.push(target_group_id);
+    }
+
+    let copied = state
+        .reference_store
+        .copy_group_style_profile_many(source_group_id, &target_ids)
+        .map_err(|error| error.to_string())?;
+
+    Ok(GroupReferenceStyleBatchResult {
+        styles: copied
+            .into_iter()
+            .map(|(group_id, set)| GroupReferenceStyle {
+                group_id,
+                reference_set_id: set.id,
+                style_profile: set.style_profile,
+            })
+            .collect(),
+    })
+}
+
+#[tauri::command]
 fn batch_reference_previews(
     batch_id: String,
     state: State<'_, AppState>,
@@ -1436,6 +1488,7 @@ pub fn run() {
             batch_reference_styles,
             update_group_reference_style,
             copy_group_reference_style,
+            copy_reference_style_to_groups,
             batch_reference_previews,
             set_recipe_reviewed,
             confirm_recipe_reviews,

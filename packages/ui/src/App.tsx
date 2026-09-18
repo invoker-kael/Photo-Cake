@@ -18,6 +18,7 @@ import {
   type BackendRecipeReviewOverride,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
+  type BackendStyleProfile,
   type BatchJob,
   type BatchStage,
   type CullingDecision,
@@ -130,6 +131,25 @@ function signed(value: number, decimals = 1) {
   return `${value > 0 ? "+" : ""}${value.toFixed(decimals)}`;
 }
 
+function sameOptionalNumber(left: number | null, right: number | null) {
+  if (left == null || right == null) return left === right;
+  return Math.abs(left - right) <= 0.0001;
+}
+
+function sameVisualStyle(
+  left: BackendStyleProfile | undefined,
+  right: BackendStyleProfile | undefined,
+) {
+  if (!left || !right) return false;
+  return (
+    sameOptionalNumber(left.exposure_bias_ev, right.exposure_bias_ev) &&
+    sameOptionalNumber(left.temperature_bias, right.temperature_bias) &&
+    sameOptionalNumber(left.tint_bias, right.tint_bias) &&
+    sameOptionalNumber(left.contrast_preference, right.contrast_preference) &&
+    sameOptionalNumber(left.saturation_preference, right.saturation_preference)
+  );
+}
+
 function whiteBalanceEvidenceLabel(evidence: BackendRawMetadataEvidence | undefined) {
   const wb = evidence?.white_balance;
   if (!wb) return "WB evidence unavailable";
@@ -198,7 +218,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [recipeReviews, setRecipeReviews] = useState<Record<string, BackendRecipeReviewOverride>>({});
   const [editedPreviews, setEditedPreviews] = useState<Record<string, BackendReviewRenderResult>>({});
   const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
-  const [styleCopySources, setStyleCopySources] = useState<Record<string, string>>({});
+  const [styleBatchSource, setStyleBatchSource] = useState("");
+  const [styleBatchTargets, setStyleBatchTargets] = useState<string[]>([]);
+  const [styleBatchUpdating, setStyleBatchUpdating] = useState(false);
+  const [styleBatchNote, setStyleBatchNote] = useState<string | null>(null);
   const [reviewUpdating, setReviewUpdating] = useState<string | null>(null);
   const [reviewBatchUpdating, setReviewBatchUpdating] = useState(false);
   const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
@@ -974,21 +997,35 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     void saveReferenceStyle(groupId, 0, 0, 0);
   };
 
-  const copyReferenceStyle = async (
+  const copyReferenceStyleToSelected = async (
     sourceGroupId: string,
-    targetGroupId: string,
+    targetGroupIds: string[],
   ) => {
-    if (!bridge?.copyReferenceStyle || !sourceGroupId) return;
-    setStyleUpdating(targetGroupId);
+    if (!bridge?.copyReferenceStyleToGroups || !sourceGroupId || targetGroupIds.length === 0) {
+      return;
+    }
+
+    setStyleBatchUpdating(true);
+    setStyleBatchNote(null);
     try {
-      const style = await bridge.copyReferenceStyle(sourceGroupId, targetGroupId);
-      setReferenceStyles((current) => ({ ...current, [targetGroupId]: style }));
+      const result = await bridge.copyReferenceStyleToGroups(
+        sourceGroupId,
+        targetGroupIds,
+      );
+      setReferenceStyles((current) => ({
+        ...current,
+        ...Object.fromEntries(result.styles.map((style) => [style.group_id, style])),
+      }));
+      setStyleBatchTargets([]);
+      setStyleBatchNote(
+        `Synced this look to ${result.styles.length} groups; each target kept its own Reference and adaptive baseline.`,
+      );
       setEditedPreviews({});
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
     } finally {
-      setStyleUpdating(null);
+      setStyleBatchUpdating(false);
     }
   };
 
@@ -1519,12 +1556,164 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     </section>
   );
 
-  const renderReference = () => (
+  const renderReference = () => {
+    const lookGroups = (photoContext?.groups ?? []).filter(
+      (group) =>
+        referenceBindings[group.id] != null &&
+        referenceStyles[group.id] != null,
+    );
+    const selectedBatchSource =
+      lookGroups.some((group) => group.id === styleBatchSource)
+        ? styleBatchSource
+        : lookGroups[0]?.id ?? "";
+    const sourceProfile =
+      selectedBatchSource
+        ? referenceStyles[selectedBatchSource]?.style_profile
+        : undefined;
+    const eligibleLookTargets = lookGroups.filter(
+      (group) =>
+        group.id !== selectedBatchSource &&
+        !sameVisualStyle(
+          sourceProfile,
+          referenceStyles[group.id]?.style_profile,
+        ),
+    );
+    const eligibleTargetIds = new Set(
+      eligibleLookTargets.map((group) => group.id),
+    );
+    const selectedLookTargets = styleBatchTargets.filter((groupId) =>
+      eligibleTargetIds.has(groupId),
+    );
+    const alreadyMatchingCount = lookGroups.filter(
+      (group) =>
+        group.id !== selectedBatchSource &&
+        sameVisualStyle(
+          sourceProfile,
+          referenceStyles[group.id]?.style_profile,
+        ),
+    ).length;
+
+    const toggleLookTarget = (groupId: string) => {
+      setStyleBatchTargets((current) =>
+        current.includes(groupId)
+          ? current.filter((value) => value !== groupId)
+          : [...current, groupId],
+      );
+    };
+
+    return (
     <section className="queue-card">
       <div className="queue-title">
         <strong>Reference look</strong>
         <span>Cull decisions lead the shortlist; measured technical quality and group rank break ties. Selection stays explicit and saved.</span>
       </div>
+
+      {mode === "workstation" &&
+        lookGroups.length > 1 &&
+        bridge?.copyReferenceStyleToGroups && (
+          <div className="reference-batch-look">
+            <div className="reference-batch-look-head">
+              <div>
+                <span>Batch look sync</span>
+                <strong>Reference → selected groups → exception review</strong>
+              </div>
+              <small>
+                Same-look groups are skipped automatically. Targets keep their own Reference photos and scene-adaptive exposure baselines.
+              </small>
+            </div>
+            <div className="reference-batch-controls">
+              <label className="batch-look-source">
+                <span>Source look</span>
+                <select
+                  value={selectedBatchSource}
+                  disabled={styleBatchUpdating || styleUpdating != null}
+                  onChange={(event) => {
+                    setStyleBatchSource(event.target.value);
+                    setStyleBatchTargets([]);
+                    setStyleBatchNote(null);
+                  }}
+                >
+                  {lookGroups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      Group {(photoContext?.groups ?? []).findIndex((item) => item.id === group.id) + 1}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="batch-look-targets">
+                <div className="batch-look-target-head">
+                  <span>Sync to selected</span>
+                  <small>
+                    {eligibleLookTargets.length} eligible
+                    {alreadyMatchingCount ? ` · ${alreadyMatchingCount} already matching` : ""}
+                  </small>
+                </div>
+                <div className="batch-look-target-grid">
+                  {eligibleLookTargets.map((group) => (
+                    <label key={group.id}>
+                      <input
+                        type="checkbox"
+                        checked={selectedLookTargets.includes(group.id)}
+                        disabled={styleBatchUpdating || styleUpdating != null}
+                        onChange={() => toggleLookTarget(group.id)}
+                      />
+                      <span>
+                        Group {(photoContext?.groups ?? []).findIndex((item) => item.id === group.id) + 1}
+                        <small>{group.asset_ids.length} photos</small>
+                      </span>
+                    </label>
+                  ))}
+                  {eligibleLookTargets.length === 0 && (
+                    <small className="success-text">
+                      Every other referenced group already uses this visual look.
+                    </small>
+                  )}
+                </div>
+              </div>
+
+              <div className="batch-look-actions">
+                <button
+                  className="review-choice clear"
+                  disabled={styleBatchUpdating || eligibleLookTargets.length === 0}
+                  onClick={() =>
+                    setStyleBatchTargets(eligibleLookTargets.map((group) => group.id))
+                  }
+                >
+                  Select eligible
+                </button>
+                <button
+                  className="review-choice clear"
+                  disabled={styleBatchUpdating || selectedLookTargets.length === 0}
+                  onClick={() => setStyleBatchTargets([])}
+                >
+                  Clear
+                </button>
+                <button
+                  className="button primary"
+                  disabled={
+                    styleBatchUpdating ||
+                    styleUpdating != null ||
+                    !selectedBatchSource ||
+                    selectedLookTargets.length === 0
+                  }
+                  onClick={() =>
+                    void copyReferenceStyleToSelected(
+                      selectedBatchSource,
+                      selectedLookTargets,
+                    )
+                  }
+                >
+                  {styleBatchUpdating
+                    ? "Syncing look…"
+                    : `Sync look to selected (${selectedLookTargets.length})`}
+                </button>
+              </div>
+            </div>
+            {styleBatchNote && <small className="success-text">{styleBatchNote}</small>}
+          </div>
+        )}
+
       <div className="reference-groups">
         {photoContext?.groups.map((group, index) => {
           const binding = referenceBindings[group.id];
@@ -1547,15 +1736,6 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             (recipe) =>
               recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
           ) ?? false;
-          const reusableStyleGroups =
-            photoContext.groups.filter(
-              (candidate) =>
-                candidate.id !== group.id &&
-                referenceBindings[candidate.id] != null &&
-                referenceStyles[candidate.id] != null,
-            );
-          const selectedStyleSource =
-            styleCopySources[group.id] ?? reusableStyleGroups[0]?.id ?? "";
           return (
             <div className="reference-group" key={group.id}>
               <div className="reference-group-head">
@@ -1598,13 +1778,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     <div>
                       <button
                         className="style-step"
-                        disabled={styleUpdating != null}
+                        disabled={styleUpdating != null || styleBatchUpdating}
                         onClick={() => adjustReferenceStyle(group.id, "exposure", -0.1)}
                       >−</button>
                       <strong>{signed(style?.exposure_bias_ev ?? 0)} EV</strong>
                       <button
                         className="style-step"
-                        disabled={styleUpdating != null}
+                        disabled={styleUpdating != null || styleBatchUpdating}
                         onClick={() => adjustReferenceStyle(group.id, "exposure", 0.1)}
                       >+</button>
                     </div>
@@ -1614,13 +1794,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     <div>
                       <button
                         className="style-step"
-                        disabled={styleUpdating != null}
+                        disabled={styleUpdating != null || styleBatchUpdating}
                         onClick={() => adjustReferenceStyle(group.id, "contrast", -5)}
                       >−</button>
                       <strong>{signed(style?.contrast_preference ?? 0, 0)}</strong>
                       <button
                         className="style-step"
-                        disabled={styleUpdating != null}
+                        disabled={styleUpdating != null || styleBatchUpdating}
                         onClick={() => adjustReferenceStyle(group.id, "contrast", 5)}
                       >+</button>
                     </div>
@@ -1630,58 +1810,26 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     <div>
                       <button
                         className="style-step"
-                        disabled={styleUpdating != null}
+                        disabled={styleUpdating != null || styleBatchUpdating}
                         onClick={() => adjustReferenceStyle(group.id, "saturation", -5)}
                       >−</button>
                       <strong>{signed(style?.saturation_preference ?? 0, 0)}</strong>
                       <button
                         className="style-step"
-                        disabled={styleUpdating != null}
+                        disabled={styleUpdating != null || styleBatchUpdating}
                         onClick={() => adjustReferenceStyle(group.id, "saturation", 5)}
                       >+</button>
                     </div>
                   </div>
                   <button
                     className="review-choice clear"
-                    disabled={styleUpdating != null}
+                    disabled={styleUpdating != null || styleBatchUpdating}
                     onClick={() => resetReferenceStyle(group.id)}
                   >
                     Reset style
                   </button>
-                  {reusableStyleGroups.length > 0 && bridge?.copyReferenceStyle && (
-                    <div className="style-copy">
-                      <span>Reuse look</span>
-                      <div>
-                        <select
-                          value={selectedStyleSource}
-                          disabled={styleUpdating != null}
-                          onChange={(event) =>
-                            setStyleCopySources((current) => ({
-                              ...current,
-                              [group.id]: event.target.value,
-                            }))
-                          }
-                        >
-                          {reusableStyleGroups.map((sourceGroup) => (
-                            <option key={sourceGroup.id} value={sourceGroup.id}>
-                              Group {photoContext.groups.findIndex((item) => item.id === sourceGroup.id) + 1}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          className="review-choice keep"
-                          disabled={styleUpdating != null || !selectedStyleSource}
-                          onClick={() =>
-                            void copyReferenceStyle(selectedStyleSource, group.id)
-                          }
-                        >
-                          Copy look
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   <small>
-                    Copy look transfers shared style preferences only; this group keeps its own Reference and adaptive baseline. White balance controls remain locked until reliable RAW/metadata WB evidence exists.
+                    Shared look preferences stay separate from this group's Reference and adaptive baseline. Batch look sync above reuses the same StyleProfile path; white balance controls remain locked until reliable RAW/metadata WB evidence exists.
                   </small>
                 </div>
               )}
@@ -1760,7 +1908,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         )}
       </div>
     </section>
-  );
+    );
+  };
 
   const renderReview = () => (
     <section className="queue-card">

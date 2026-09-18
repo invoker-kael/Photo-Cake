@@ -325,3 +325,31 @@ Android does not require AnalysisCache parity for imported projects; it reuses t
 The Lightroom page is a delivery queue rather than a flat archive of groups. Its default `Needs action` mode orders groups by photographer intervention value: XMP conflicts first, unresolved Reference/evidence next, outstanding Recipe attention next, then missing XMP. Groups whose deliverable sidecars are current and whose review attention is clear are hidden until `All` is selected.
 
 A successful handoff result is session-scoped evidence only. The UI invalidates that result when canonical delivery inputs change (Cull deliverability, Reference binding/style, per-photo Recipe exception, grouping or active project), so an old “verified” badge cannot survive a material Recipe change.
+
+
+## Batch Reference Look Sync
+
+Large travel/family shoots often contain several related scene groups that should share a visual direction without sharing a fixed numeric exposure correction. The workstation therefore treats one referenced group as the source look and can transactionally copy its `StyleProfile` to multiple selected referenced groups.
+
+The operation validates the source plus every target before the first write, rejects duplicate/source-as-target selections, and updates all target ReferenceSets in one SQLite transaction. Each target keeps its own selected Reference photo and its own adaptive baseline; only the shared photographer preference layer is synchronized. The UI omits targets whose effective visual StyleProfile already matches the source.
+
+This follows the scalable editing pattern “establish a standard look -> synchronize selected similar contexts -> review exceptions” while keeping Photo-Cake's single canonical path:
+
+```text
+source Reference + StyleProfile
+          |
+          v
+selected target groups
+  keep target References
+          |
+          v
+regenerate adaptive Recipes
+          |
+          v
+exception-first Review
+          |
+          v
+verified Lightroom XMP
+```
+
+No preset-copy renderer or second color pipeline is introduced.

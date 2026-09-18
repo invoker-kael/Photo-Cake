@@ -1,6 +1,7 @@
 use crate::{ReferenceSet, StyleProfile};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
@@ -51,6 +52,10 @@ pub enum ReferenceStoreError {
     ReferenceSetNotFound(Uuid),
     #[error("photo group has no reference binding: {0}")]
     GroupBindingNotFound(Uuid),
+    #[error("source group cannot also be a batch look target: {0}")]
+    SourceGroupInTargets(Uuid),
+    #[error("duplicate batch look target group: {0}")]
+    DuplicateTargetGroup(Uuid),
     #[error("selected reference asset {asset_id} is not part of reference set {reference_set_id}")]
     SelectedAssetOutsideSet {
         reference_set_id: Uuid,
@@ -256,18 +261,122 @@ impl ReferenceStore {
         source_group_id: Uuid,
         target_group_id: Uuid,
     ) -> Result<ReferenceSet, ReferenceStoreError> {
-        let source_binding = self
-            .group_binding(source_group_id)?
-            .ok_or(ReferenceStoreError::GroupBindingNotFound(source_group_id))?;
-        let source = self
-            .get_set(source_binding.reference_set_id)?
+        let mut copied = self.copy_group_style_profile_many(
+            source_group_id,
+            std::slice::from_ref(&target_group_id),
+        )?;
+        Ok(copied
+            .pop()
+            .expect("single target look copy must produce one reference set")
+            .1)
+    }
+
+    /// Apply one source group's StyleProfile to multiple referenced groups in
+    /// one transaction. All group bindings/reference sets are validated before
+    /// the first style row is updated, so a stale or invalid target cannot
+    /// produce a partially unified shoot look.
+    pub fn copy_group_style_profile_many(
+        &self,
+        source_group_id: Uuid,
+        target_group_ids: &[Uuid],
+    ) -> Result<Vec<(Uuid, ReferenceSet)>, ReferenceStoreError> {
+        if target_group_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut seen = HashSet::with_capacity(target_group_ids.len());
+        for target_group_id in target_group_ids {
+            if *target_group_id == source_group_id {
+                return Err(ReferenceStoreError::SourceGroupInTargets(
+                    source_group_id,
+                ));
+            }
+            if !seen.insert(*target_group_id) {
+                return Err(ReferenceStoreError::DuplicateTargetGroup(
+                    *target_group_id,
+                ));
+            }
+        }
+
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+
+        let source_reference_set_id = tx
+            .query_row(
+                "SELECT reference_set_id FROM group_reference_bindings WHERE group_id = ?1",
+                [source_group_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .ok_or(ReferenceStoreError::GroupBindingNotFound(
+                source_group_id,
+            ))?;
+        let source_reference_set_id = Uuid::parse_str(&source_reference_set_id)?;
+        let source_style_json = tx
+            .query_row(
+                "SELECT style_profile_json FROM reference_sets WHERE id = ?1",
+                [source_reference_set_id.to_string()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
             .ok_or(ReferenceStoreError::ReferenceSetNotFound(
-                source_binding.reference_set_id,
+                source_reference_set_id,
             ))?;
 
-        self.update_group_style_profile(target_group_id, |profile| {
-            *profile = source.style_profile.clone();
-        })
+        let mut targets = Vec::with_capacity(target_group_ids.len());
+        for target_group_id in target_group_ids {
+            let reference_set_id = tx
+                .query_row(
+                    "SELECT reference_set_id FROM group_reference_bindings WHERE group_id = ?1",
+                    [target_group_id.to_string()],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .ok_or(ReferenceStoreError::GroupBindingNotFound(
+                    *target_group_id,
+                ))?;
+            let reference_set_id = Uuid::parse_str(&reference_set_id)?;
+            let exists = tx
+                .query_row(
+                    "SELECT 1 FROM reference_sets WHERE id = ?1",
+                    [reference_set_id.to_string()],
+                    |_| Ok(()),
+                )
+                .optional()?;
+            if exists.is_none() {
+                return Err(ReferenceStoreError::ReferenceSetNotFound(
+                    reference_set_id,
+                ));
+            }
+            targets.push((*target_group_id, reference_set_id));
+        }
+
+        let updated_at = unix_time_ms();
+        for (_, reference_set_id) in &targets {
+            tx.execute(
+                "UPDATE reference_sets
+                 SET style_profile_json = ?1, updated_at_unix_ms = ?2
+                 WHERE id = ?3",
+                params![
+                    source_style_json,
+                    updated_at,
+                    reference_set_id.to_string()
+                ],
+            )?;
+        }
+        tx.commit()?;
+
+        targets
+            .into_iter()
+            .map(|(group_id, reference_set_id)| {
+                let set = self
+                    .get_set(reference_set_id)?
+                    .ok_or(ReferenceStoreError::ReferenceSetNotFound(
+                        reference_set_id,
+                    ))?;
+                Ok((group_id, set))
+            })
+            .collect()
     }
 
     /// Persist the simple workstation action "use this photo as this group's reference"
@@ -401,6 +510,123 @@ mod tests {
             store.group_binding(target_group).unwrap().unwrap().selected_reference_asset_id,
             target_photo
         );
+    }
+
+    #[test]
+    fn batch_copy_style_updates_all_targets_and_preserves_references() {
+        let dir = tempdir().unwrap();
+        let store = ReferenceStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let source_group = Uuid::new_v4();
+        let first_group = Uuid::new_v4();
+        let second_group = Uuid::new_v4();
+        let source_photo = Uuid::new_v4();
+        let first_photo = Uuid::new_v4();
+        let second_photo = Uuid::new_v4();
+
+        store
+            .set_single_photo_reference(source_group, source_photo, "Source")
+            .unwrap();
+        store
+            .set_single_photo_reference(first_group, first_photo, "First")
+            .unwrap();
+        store
+            .set_single_photo_reference(second_group, second_photo, "Second")
+            .unwrap();
+        store
+            .update_group_style_profile(source_group, |profile| {
+                profile.exposure_bias_ev = Some(0.4);
+                profile.contrast_preference = Some(11.0);
+                profile.saturation_preference = Some(3.0);
+                profile.notes = Some("family trip".into());
+            })
+            .unwrap();
+
+        let copied = store
+            .copy_group_style_profile_many(source_group, &[first_group, second_group])
+            .unwrap();
+
+        assert_eq!(copied.len(), 2);
+        for (group_id, expected_photo) in [
+            (first_group, first_photo),
+            (second_group, second_photo),
+        ] {
+            let binding = store.group_binding(group_id).unwrap().unwrap();
+            assert_eq!(binding.selected_reference_asset_id, expected_photo);
+            let set = store.get_set(binding.reference_set_id).unwrap().unwrap();
+            assert_eq!(set.style_profile.exposure_bias_ev, Some(0.4));
+            assert_eq!(set.style_profile.contrast_preference, Some(11.0));
+            assert_eq!(set.style_profile.saturation_preference, Some(3.0));
+            assert_eq!(set.style_profile.notes.as_deref(), Some("family trip"));
+        }
+    }
+
+    #[test]
+    fn batch_copy_style_validates_every_target_before_writing() {
+        let dir = tempdir().unwrap();
+        let store = ReferenceStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let source_group = Uuid::new_v4();
+        let valid_target = Uuid::new_v4();
+        let missing_target = Uuid::new_v4();
+
+        store
+            .set_single_photo_reference(source_group, Uuid::new_v4(), "Source")
+            .unwrap();
+        store
+            .set_single_photo_reference(valid_target, Uuid::new_v4(), "Target")
+            .unwrap();
+        store
+            .update_group_style_profile(source_group, |profile| {
+                profile.contrast_preference = Some(18.0);
+            })
+            .unwrap();
+        store
+            .update_group_style_profile(valid_target, |profile| {
+                profile.contrast_preference = Some(-6.0);
+            })
+            .unwrap();
+
+        assert!(matches!(
+            store
+                .copy_group_style_profile_many(
+                    source_group,
+                    &[valid_target, missing_target],
+                )
+                .unwrap_err(),
+            ReferenceStoreError::GroupBindingNotFound(id) if id == missing_target
+        ));
+
+        let target = store.group_reference_set(valid_target).unwrap().unwrap();
+        assert_eq!(target.style_profile.contrast_preference, Some(-6.0));
+    }
+
+    #[test]
+    fn batch_copy_style_rejects_source_or_duplicate_targets() {
+        let dir = tempdir().unwrap();
+        let store = ReferenceStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let source_group = Uuid::new_v4();
+        let target_group = Uuid::new_v4();
+        store
+            .set_single_photo_reference(source_group, Uuid::new_v4(), "Source")
+            .unwrap();
+        store
+            .set_single_photo_reference(target_group, Uuid::new_v4(), "Target")
+            .unwrap();
+
+        assert!(matches!(
+            store
+                .copy_group_style_profile_many(source_group, &[source_group])
+                .unwrap_err(),
+            ReferenceStoreError::SourceGroupInTargets(id) if id == source_group
+        ));
+        assert!(matches!(
+            store
+                .copy_group_style_profile_many(
+                    source_group,
+                    &[target_group, target_group],
+                )
+                .unwrap_err(),
+            ReferenceStoreError::DuplicateTargetGroup(id) if id == target_group
+        ));
     }
 
     #[test]

@@ -9,6 +9,7 @@ import App, {
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
   type BackendGroupReferenceStyle,
+  type BackendGroupReferenceStyleBatchResult,
   type BackendLightroomBatchHandoffResult,
   type BackendLightroomHandoffPreflight,
   type BackendLightroomHandoffResult,
@@ -112,6 +113,11 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendGroupReferenceStyle>("copy_group_reference_style", {
       sourceGroupId,
       targetGroupId,
+    }),
+  copyReferenceStyleToGroups: (sourceGroupId, targetGroupIds) =>
+    invoke<BackendGroupReferenceStyleBatchResult>("copy_reference_style_to_groups", {
+      sourceGroupId,
+      targetGroupIds,
     }),
   loadReferencePreviews: (batchId) =>
     invoke<BackendGroupReferencePreview[]>("batch_reference_previews", { batchId }),

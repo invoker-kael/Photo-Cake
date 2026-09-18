@@ -287,3 +287,14 @@ A Lightroom handoff is successful only after the complete deliverable group is r
 The Lightroom page defaults to a `Needs action` delivery view for large shoots. It prioritizes XMP conflicts, unresolved groups, remaining Recipe attention and missing sidecars, while hiding groups that are already current and review-clear. `All` restores the complete group list. The summary exposes action groups, current groups, conflict groups and the number of XMP targets verified in the current session.
 
 A handoff result is invalidated whenever canonical delivery inputs change, including culling deliverability, group/reference state, StyleProfile, per-photo Recipe exceptions, grouping or active project. Review completion alone does not invalidate a verified XMP because it does not change the Recipe.
+
+
+### Batch Reference look synchronization
+
+For shoots with several related scenes, the photographer can choose one referenced group as the source look, multi-select other referenced groups, and explicitly `Sync look to selected`. Groups whose effective visual StyleProfile already matches the source are omitted from the selectable target list.
+
+The synchronization copies only the shared StyleProfile preference layer. Every target keeps its own selected Reference photo, scene evidence and adaptive Recipe baseline. This allows a family/travel set to feel consistent without blindly copying a source group's absolute exposure or target-specific edits.
+
+The backend validates the source and every target before writing and persists all selected target StyleProfiles in one transaction. Duplicate targets, the source group appearing as a target, an unknown group or a target without a Reference binding fails the whole operation before partial style changes are committed.
+
+After a successful sync, normal canonical recomputation applies: adaptive Recipes are regenerated from each target group's own Reference/evidence plus the shared look; stale Recipe-review confirmations naturally return to attention; Lightroom preflight and previous session verification are recalculated through the existing state dependencies. Per-photo Recipe exceptions remain separate and continue to override only their own photos.

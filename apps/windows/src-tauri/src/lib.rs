@@ -3,8 +3,8 @@ use photo_core::{
     write_group_sidecars, ClassificationRoutingExecutor, ClassificationStore, CullingReview,
     CullingReviewStore, CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus,
     ModelBundleManifest, ModelPlatform, PhotoGroup, PreviewArtifact, PreviewStore, RawAsset,
-    RawCatalog, RawImportResult, RawImporter, Recipe, ReferenceStore, ReferenceWorkflowError,
-    RunStep, StyleProfile,
+    RawCatalog, RawImportResult, RawImporter, Recipe, RecipeReviewOverride, RecipeReviewStore,
+    ReferenceStore, ReferenceWorkflowError, RunStep, StyleProfile,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
@@ -96,6 +96,7 @@ struct AppState {
     preview_store: PreviewStore,
     culling_reviews: CullingReviewStore,
     reference_store: ReferenceStore,
+    recipe_reviews: RecipeReviewStore,
     raw_importer: RawImporter,
     controls: Arc<Mutex<HashMap<Uuid, Arc<BatchControl>>>>,
 }
@@ -126,6 +127,26 @@ fn editable_group(
         asset_ids,
         manual_locked: group.manual_locked,
     })
+}
+
+fn apply_recipe_reviews(
+    recipes: &mut [Recipe],
+    reviews: &RecipeReviewStore,
+) -> Result<(), String> {
+    for recipe in recipes {
+        let Some(asset_id) = recipe.target_asset_id else {
+            continue;
+        };
+        if let Some(review) = reviews
+            .get(asset_id)
+            .map_err(|error| error.to_string())?
+        {
+            review
+                .apply_to_recipe(recipe)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn lock_runner<T>(
@@ -476,6 +497,61 @@ fn clear_group_reference(
 }
 
 #[tauri::command]
+fn batch_recipe_reviews(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<RecipeReviewOverride>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let batch = state
+        .store
+        .load_batch(batch_id)
+        .map_err(|error| error.to_string())?;
+    let asset_ids = batch
+        .items
+        .iter()
+        .filter_map(|item| item.asset_id)
+        .collect::<Vec<_>>();
+    state
+        .recipe_reviews
+        .list_for_assets(&asset_ids)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_recipe_review(
+    asset_id: String,
+    exposure_delta_ev: f32,
+    contrast_delta: f32,
+    saturation_delta: f32,
+    state: State<'_, AppState>,
+) -> Result<RecipeReviewOverride, String> {
+    let asset_id = Uuid::parse_str(&asset_id)
+        .map_err(|error| format!("invalid asset id: {error}"))?;
+    state
+        .recipe_reviews
+        .set(RecipeReviewOverride {
+            asset_id,
+            exposure_delta_ev,
+            contrast_delta,
+            saturation_delta,
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_recipe_review(
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let asset_id = Uuid::parse_str(&asset_id)
+        .map_err(|error| format!("invalid asset id: {error}"))?;
+    state
+        .recipe_reviews
+        .clear(asset_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn batch_reference_styles(
     batch_id: String,
     state: State<'_, AppState>,
@@ -590,12 +666,15 @@ fn batch_reference_previews(
             binding.selected_reference_asset_id,
             1,
         ) {
-            Ok(result) => previews.push(GroupReferencePreview {
-                group_id: group.id,
-                selected_reference_asset_id: binding.selected_reference_asset_id,
-                recipes: result.recipes,
-                pending_asset_id: None,
-            }),
+            Ok(mut result) => {
+                apply_recipe_reviews(&mut result.recipes, &state.recipe_reviews)?;
+                previews.push(GroupReferencePreview {
+                    group_id: group.id,
+                    selected_reference_asset_id: binding.selected_reference_asset_id,
+                    recipes: result.recipes,
+                    pending_asset_id: None,
+                });
+            }
             Err(ReferenceWorkflowError::MissingExposureAnalysis(asset_id)) => {
                 previews.push(GroupReferencePreview {
                     group_id: group.id,
@@ -649,7 +728,7 @@ fn write_group_reference_xmp(
         return Err("all photos in this group are explicitly rejected".to_string());
     }
 
-    let resolved = reference_set
+    let mut resolved = reference_set
         .resolve_group_from_cache(
             &state.analysis_cache,
             &editable,
@@ -657,6 +736,7 @@ fn write_group_reference_xmp(
             1,
         )
         .map_err(|error| error.to_string())?;
+    apply_recipe_reviews(&mut resolved.recipes, &state.recipe_reviews)?;
     let editable_ids = editable.asset_ids.iter().copied().collect::<HashSet<_>>();
     let assets = state
         .catalog
@@ -830,6 +910,7 @@ pub fn run() {
             let preview_store = PreviewStore::open(&database)?;
             let culling_reviews = CullingReviewStore::open(&database)?;
             let reference_store = ReferenceStore::open(&database)?;
+            let recipe_reviews = RecipeReviewStore::open(&database)?;
             let classification_store = ClassificationStore::open(&database)?;
             let analyze_executor = LocalAnalyzeExecutor::new(
                 &database,
@@ -850,6 +931,7 @@ pub fn run() {
                 preview_store,
                 culling_reviews,
                 reference_store,
+                recipe_reviews,
                 raw_importer,
                 controls: Arc::new(Mutex::new(HashMap::new())),
             });
@@ -864,6 +946,9 @@ pub fn run() {
             batch_reference_bindings,
             set_group_reference,
             clear_group_reference,
+            batch_recipe_reviews,
+            set_recipe_review,
+            clear_recipe_review,
             batch_reference_styles,
             update_group_reference_style,
             batch_reference_previews,

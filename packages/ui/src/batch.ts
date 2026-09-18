@@ -79,6 +79,21 @@ export interface BackendRawImportResult extends BackendPhotoContext {
   skipped_non_raw: string[];
 }
 
+export type CullingDecision = "KEEP" | "REVIEW" | "REJECT_SUGGESTION";
+
+export interface BackendCullingRecommendation {
+  asset_id: string;
+  quality_score: number;
+  decision: CullingDecision;
+  group_rank: number;
+}
+
+export interface BackendGroupCullingResult {
+  group_id: string;
+  recommendations: BackendCullingRecommendation[];
+  pending_asset_ids: string[];
+}
+
 export interface BatchWorkerEvent {
   batch: BackendBatch;
   step: unknown | null;
@@ -93,6 +108,7 @@ export interface PhotoCakeBridge {
   cancelBatch(batchId: string): Promise<BackendBatch>;
   importRawDirectory?(): Promise<BackendRawImportResult | null>;
   loadPhotoContext?(batchId: string): Promise<BackendPhotoContext>;
+  loadCulling?(batchId: string): Promise<BackendGroupCullingResult[]>;
   subscribeBatchUpdates(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }
 

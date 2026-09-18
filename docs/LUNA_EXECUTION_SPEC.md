@@ -94,7 +94,7 @@ Apply batch adjustments
 Important:
 
 - RAW remains unchanged.
-- XMP is the preferred Lightroom delivery format.
+- XMP is the preferred Lightroom delivery format and should remain tiny metadata beside the RAW.
 - Direct export remains available.
 - AI recommends; user controls final selection.
 

@@ -1,21 +1,28 @@
 //! Smart culling foundation for photographer workflow.
 //!
-//! This module does not delete photos. It provides analysis results that can
-//! help users review large RAW collections before editing.
+//! This module provides non-destructive review suggestions for RAW collections.
+//! It never deletes originals automatically.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CullingScore {
     pub sharpness: f32,
+    pub blur_penalty: f32,
     pub exposure: f32,
     pub expression: f32,
     pub duplicate_similarity: f32,
+    pub composition: f32,
 }
 
 impl CullingScore {
     pub fn review_score(&self) -> f32 {
-        (self.sharpness + self.exposure + self.expression) / 3.0
+        let technical = self.sharpness * (1.0 - self.blur_penalty);
+        (technical + self.exposure + self.expression + self.composition) / 4.0
+    }
+
+    pub fn is_burst_duplicate(&self) -> bool {
+        self.duplicate_similarity >= 0.95
     }
 }
 
@@ -27,11 +34,13 @@ pub enum CullingDecision {
 }
 
 pub fn suggest_decision(score: &CullingScore) -> CullingDecision {
-    if score.review_score() >= 0.85 {
-        CullingDecision::Keep
-    } else if score.review_score() >= 0.55 {
-        CullingDecision::Review
-    } else {
-        CullingDecision::RejectSuggestion
+    if score.is_burst_duplicate() {
+        return CullingDecision::Review;
+    }
+
+    match score.review_score() {
+        value if value >= 0.85 => CullingDecision::Keep,
+        value if value >= 0.55 => CullingDecision::Review,
+        _ => CullingDecision::RejectSuggestion,
     }
 }

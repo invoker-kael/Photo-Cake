@@ -25,6 +25,7 @@ RAW import
 - Original RAW bytes are immutable.
 - Existing source folders remain the photo source of truth.
 - Normal Lightroom handoff is the original RAW plus a small same-basename `.xmp`.
+- An existing XMP is treated as user-owned editing data and must not be silently overwritten.
 - Do not create full-size TIFF/JPEG working copies by default.
 - Preview/model/cache data belongs in managed application storage.
 - JPEG/TIFF output is generated only when direct export is requested.

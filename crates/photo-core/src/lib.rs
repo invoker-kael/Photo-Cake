@@ -26,6 +26,7 @@ pub use batch::{Batch, BatchItem, BatchStage, JobStatus};
 pub use batch_export::{BatchExportExecutor, BatchExportItem};
 pub use export_stage::{ExportStageError, ExportStageExecutor};
 pub use pipeline::BatchPipelineExecutor;
+pub use runner::{AutomationRunner, NoopStageExecutor, RunStep, RunnerError, StageExecutor};
 
 pub use analysis::{
     AnalysisArtifact, AnalysisCache, AnalysisCacheError, AnalysisCacheKey, InferenceBackend,

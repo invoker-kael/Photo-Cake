@@ -4,24 +4,28 @@
 
 Photo-Cake is a local-first semi-automatic photography workflow assistant.
 
-It is designed for photographers who process large RAW collections and want to reduce repetitive editing while keeping professional control.
+The goal is to reduce repetitive work in large RAW photo processing while preserving a professional Lightroom workflow.
 
-It is not:
+Photo-Cake is not:
 
 - a Lightroom replacement
-- a full RAW converter replacement
-- a cloud AI editing service
+- a full RAW engine replacement
+- a cloud editing service
 
-Primary workflow:
+The product follows a Pixel-Cake style workflow: automate repetitive selection and editing decisions while keeping photographer control.
+
+---
+
+# Main Photography Workflow
 
 ```text
-RAW Photos
+RAW Import
     |
     v
-Import / Catalog
+Catalog
     |
     v
-Metadata + Preview
+Preview + Metadata
     |
     v
 Smart Culling
@@ -41,55 +45,54 @@ Review
     +----------------+
     |                |
     v                v
-XMP to Lightroom   Direct Export
+XMP Lightroom    Direct Export
 ```
 
 ---
 
 # Core Principles
 
-- Preserve original RAW files.
-- RAW + XMP is the primary professional workflow.
-- Recipe is the single editing decision format.
-- Export is optional, not the source of truth.
-- Avoid unnecessary large intermediate files.
+- Original RAW files are never modified.
+- RAW + XMP is the primary workflow.
+- Recipe is the single source of editing decisions.
+- Export is optional and generated from Recipe.
+- Avoid unnecessary TIFF/JPEG intermediate storage.
 - Local-first operation.
-- Reuse existing core capabilities before creating new systems.
+- Existing code is extended before creating new systems.
 
 ---
 
 # Existing Code Alignment
 
-Photo-Cake should extend the current architecture instead of rebuilding it.
-
-Reusable foundations:
+Photo-Cake should evolve from the current implementation.
 
 ```text
 photo-core
-    |
-    +-- catalog
-    +-- importer
-    +-- raw
-    +-- grouping
-    +-- preview
-    +-- recipe/edit model
-    +-- export
+ |
+ +-- catalog
+ +-- importer
+ +-- raw
+ +-- metadata
+ +-- grouping
+ +-- preview
+ +-- recipe/edit model
+ +-- export
 
 photo-inference
-    |
-    +-- analysis
-    +-- similarity
-    +-- segmentation
-    +-- future culling/style models
+ |
+ +-- image analysis
+ +-- similarity
+ +-- segmentation
+ +-- future culling/style models
 ```
 
 ---
 
-# Photography Workflow
+# Photography Features
 
-## 1. Import and Catalog
+## Catalog and Import
 
-The system first understands the photo collection.
+Purpose: understand the user's photo collection.
 
 Required:
 
@@ -98,11 +101,9 @@ Required:
 - asset identity
 - preview generation
 
----
+## Smart Culling
 
-## 2. Smart Culling
-
-Before editing, reduce manual selection work.
+Purpose: reduce the number of photos requiring manual review.
 
 Analyze:
 
@@ -111,39 +112,27 @@ Analyze:
 - closed eyes
 - expression quality
 - duplicate burst photos
-- exposure problems
+- exposure issues
 
-Output:
+The system suggests decisions. It never deletes originals automatically.
 
-```text
-Keep
-Review
-Reject suggestion
-```
-
-Never delete originals automatically.
-
----
-
-## 3. Photo Grouping
+## Photo Grouping
 
 Photo Group is the main editing unit.
 
 Examples:
 
-- travel day
-- landscape
-- portrait
+- travel scenes
+- portraits
+- landscapes
 - indoor family photos
-- night scenes
+- night photos
 
-A recipe applies to a group instead of blindly applying one style to all photos.
+Different groups can have different Recipes.
 
----
+## Reference Style Workflow
 
-## 4. Reference Style Workflow
-
-Users select preferred photos as style references.
+The user provides preferred photos.
 
 ```text
 Reference Photos
@@ -155,45 +144,41 @@ Style Analysis
 Recipe
         |
         v
-Apply to Similar Group
+Apply to Group
 ```
 
-Analyze editing intent:
+The system learns:
 
-- exposure
-- white balance
+- color preference
+- exposure preference
 - contrast
-- color tone
-- skin tone preference
-- lighting style
+- white balance
+- skin tone style
+- lighting preference
 
----
-
-## 5. Output Workflow
+## Output
 
 Primary:
 
 ```text
-RAW + XMP
+RAW + XMP -> Lightroom
 ```
 
 Secondary:
 
 ```text
-RAW + Recipe + Direct Export
+Recipe -> Direct Export
 ```
-
-Lightroom remains the professional continuation workflow.
 
 ---
 
-# User Goal
+# User Success Criteria
 
-A user should be able to process hundreds of RAW photos:
+A photographer can process hundreds of RAW files by:
 
-1. Import photos
-2. Automatically analyze and group photos
-3. Select or learn preferred style
-4. Generate editing decisions
-5. Review results
-6. Continue in Lightroom or export
+1. Importing photos
+2. Automatically organizing and analyzing them
+3. Selecting a preferred style
+4. Generating editing decisions
+5. Reviewing results
+6. Continuing in Lightroom or exporting directly

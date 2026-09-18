@@ -228,3 +228,10 @@ Before applying a mobile patch, validate schema version, base snapshot ID, batch
 ## Companion Conflict Scope Rule
 
 Do not reject a mobile patch because unrelated project state changed after the snapshot. Compare concurrent culling state only for touched assets, reference state only for touched groups, and additionally the group of any selected reference whose culling decision is being changed. Preserve conflict rejection where the same photographer decision actually overlaps.
+
+
+## Companion Hydration / Patch Rule
+
+Hydrate a received snapshot into Android using synthetic `companion://` source references; never pretend the phone owns the workstation RAW path. Mark imported batch items prepared and reuse snapshot effective groups. Persist the original snapshot baseline and use its precomputed culling results on Android instead of rerunning desktop analysis.
+
+Generate the return patch by diffing current mobile CullingReviewStore / ReferenceStore against that baseline. Reject a different replacement snapshot for the same batch until the existing baseline has been synchronized or explicitly cleared. On workstation, retain the exported baseline, validate/apply the returned patch, then clear that baseline only after successful application.

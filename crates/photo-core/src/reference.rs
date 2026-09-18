@@ -1,5 +1,10 @@
-use crate::color_sync::{GroupColorIntent, PhotoColorAnalysis};
+use crate::color_sync::{
+    build_adaptive_group_plan, ColorSyncError, GroupColorIntent, GroupColorSyncPlan, GroupSyncMode,
+    PhotoColorAnalysis,
+};
+use crate::{PhotoGroup, Recipe};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +26,20 @@ pub struct StyleProfile {
     pub contrast_preference: Option<f32>,
     pub saturation_preference: Option<f32>,
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReferenceGroupResult {
+    pub plan: GroupColorSyncPlan,
+    pub recipes: Vec<Recipe>,
+}
+
+#[derive(Debug, Error)]
+pub enum ReferenceWorkflowError {
+    #[error("selected reference photo is not part of the reference set")]
+    ReferenceNotInSet,
+    #[error(transparent)]
+    ColorSync(#[from] ColorSyncError),
 }
 
 impl StyleProfile {
@@ -61,11 +80,44 @@ impl ReferenceSet {
         self.style_profile
             .to_group_color_intent(self.name.clone(), reference)
     }
+
+    /// Resolve one photographer-selected reference look against every photo in
+    /// a target group, producing independent target-bound Recipes.
+    ///
+    /// The reference may live outside the target group, which allows a good
+    /// edited image to be reused across similar groups without copying its
+    /// numeric settings blindly.
+    pub fn resolve_group(
+        &self,
+        group: &PhotoGroup,
+        reference: &PhotoColorAnalysis,
+        analyses: &[PhotoColorAnalysis],
+        revision: u64,
+    ) -> Result<ReferenceGroupResult, ReferenceWorkflowError> {
+        if !self.photo_ids.contains(&reference.asset_id) {
+            return Err(ReferenceWorkflowError::ReferenceNotInSet);
+        }
+
+        let intent = self.color_intent_from_reference(reference);
+        let plan = build_adaptive_group_plan(
+            group.id,
+            &group.asset_ids,
+            GroupSyncMode::ReferenceDriven,
+            Some(reference.asset_id),
+            intent,
+            analyses,
+            None,
+            revision,
+        )?;
+        let recipes = Recipe::materialize_group(&self.name, &self.photo_ids, &plan);
+        Ok(ReferenceGroupResult { plan, recipes })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{GroupingBasis, PhotoGroupKind};
 
     #[test]
     fn style_profile_builds_intent_from_reference_baseline() {
@@ -91,5 +143,60 @@ mod tests {
         assert_eq!(intent.target_tint, 4.0);
         assert_eq!(intent.contrast, 8.0);
         assert_eq!(intent.saturation, 4.0);
+    }
+
+    #[test]
+    fn external_reference_resolves_target_group_per_photo() {
+        let reference_id = Uuid::new_v4();
+        let dark = Uuid::new_v4();
+        let bright = Uuid::new_v4();
+        let mut references = ReferenceSet::from_photos("sea look", vec![reference_id]);
+        references.style_profile.exposure_bias_ev = Some(0.2);
+        references.style_profile.temperature_bias = Some(100.0);
+
+        let group = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Similar,
+            basis: GroupingBasis::SemanticSimilarity,
+            asset_ids: vec![dark, bright],
+            manual_locked: false,
+        };
+        let reference = PhotoColorAnalysis {
+            asset_id: reference_id,
+            exposure_ev: 0.0,
+            temperature_k: 5600.0,
+            tint: 2.0,
+            confidence: 1.0,
+        };
+        let analyses = vec![
+            PhotoColorAnalysis {
+                asset_id: dark,
+                exposure_ev: -0.8,
+                temperature_k: 5200.0,
+                tint: 0.0,
+                confidence: 1.0,
+            },
+            PhotoColorAnalysis {
+                asset_id: bright,
+                exposure_ev: 0.6,
+                temperature_k: 5900.0,
+                tint: 3.0,
+                confidence: 1.0,
+            },
+        ];
+
+        let result = references
+            .resolve_group(&group, &reference, &analyses, 1)
+            .unwrap();
+
+        assert_eq!(result.recipes.len(), 2);
+        assert_eq!(result.recipes[0].target_asset_id, Some(dark));
+        assert_eq!(result.recipes[1].target_asset_id, Some(bright));
+        assert_ne!(
+            result.recipes[0].adjustments.exposure,
+            result.recipes[1].adjustments.exposure
+        );
+        assert_eq!(result.recipes[0].adjustments.temperature, Some(5700.0));
+        assert_eq!(result.recipes[1].adjustments.temperature, Some(5700.0));
     }
 }

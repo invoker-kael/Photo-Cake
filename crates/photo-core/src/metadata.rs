@@ -1,12 +1,32 @@
-use exif::{In, Reader, Tag, Value};
+use exif::{Context, In, Reader, Tag, Value};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawRational {
+    pub num: u32,
+    pub denom: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawWhiteBalanceEvidence {
+    pub as_shot_neutral: Option<[RawRational; 3]>,
+    pub as_shot_white_xy: Option<[RawRational; 2]>,
+}
+
+impl RawWhiteBalanceEvidence {
+    pub fn is_empty(&self) -> bool {
+        self.as_shot_neutral.is_none() && self.as_shot_white_xy.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawMetadataEvidence {
     pub camera_id: Option<String>,
     pub capture_time_ms: Option<i64>,
+    pub white_balance: Option<RawWhiteBalanceEvidence>,
 }
 
 pub fn read_raw_metadata(path: impl AsRef<Path>) -> RawMetadataEvidence {
@@ -39,10 +59,35 @@ pub fn read_raw_metadata(path: impl AsRef<Path>) -> RawMetadataEvidence {
                 .and_then(|value| parse_exif_datetime_ms(&value))
         });
 
+    let white_balance = RawWhiteBalanceEvidence {
+        as_shot_neutral: rational_array::<3>(
+            exif.get_field(Tag(Context::Tiff, 0xC628), In::PRIMARY),
+        ),
+        as_shot_white_xy: rational_array::<2>(
+            exif.get_field(Tag(Context::Tiff, 0xC629), In::PRIMARY),
+        ),
+    };
+    let white_balance = (!white_balance.is_empty()).then_some(white_balance);
+
     RawMetadataEvidence {
         camera_id: combine_camera_id(make.as_deref(), model.as_deref()),
         capture_time_ms,
+        white_balance,
     }
+}
+
+fn rational_array<const N: usize>(field: Option<&exif::Field>) -> Option<[RawRational; N]> {
+    let Value::Rational(values) = &field?.value else {
+        return None;
+    };
+    if values.len() != N || values.iter().any(|value| value.denom == 0) {
+        return None;
+    }
+    std::array::from_fn(|index| RawRational {
+        num: values[index].num,
+        denom: values[index].denom,
+    })
+    .into()
 }
 
 fn ascii_field(field: &exif::Field) -> Option<String> {
@@ -176,6 +221,19 @@ mod tests {
         assert!(parse_exif_datetime_ms("2024:02:29 23:59:59").is_some());
         assert!(parse_exif_datetime_ms("2025:02:29 12:00:00").is_none());
         assert!(parse_exif_datetime_ms("2026:13:01 12:00:00").is_none());
+    }
+
+    #[test]
+    fn raw_white_balance_evidence_is_exact_and_never_implies_kelvin() {
+        let evidence = RawWhiteBalanceEvidence {
+            as_shot_neutral: Some([
+                RawRational { num: 1, denom: 2 },
+                RawRational { num: 1, denom: 1 },
+                RawRational { num: 3, denom: 5 },
+            ]),
+            as_shot_white_xy: None,
+        };
+        assert!(!evidence.is_empty());
     }
 
     #[test]

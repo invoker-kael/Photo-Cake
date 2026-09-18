@@ -27,7 +27,6 @@ pub enum ClassificationStoreError {
 }
 
 #[derive(Debug, Clone)]
-#[derive(Debug, Clone)]
 pub struct ClassificationStore {
     path: PathBuf,
 }

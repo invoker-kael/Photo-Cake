@@ -95,7 +95,7 @@ Keep graceful fallback: edits that cannot be represented in Lightroom XMP may be
 
 - fast before/after review;
 - exception-first Cull triage is implemented for unconfirmed Review/RejectSuggestion items and analysis-pending photos; future model-specific confidence can refine ordering when reliable confidence exists;
-- batch approve/reject;
+- explicit "Confirm visible" batch confirmation is implemented for currently surfaced AI suggestions; it writes photographer decisions transactionally, skips pending items/existing decisions and protects selected References from batch Reject; richer batch-scope controls can follow only if real shoots need them;
 - learn from accepted/rejected Recipes and user corrections;
 - keep personal style local and editable.
 

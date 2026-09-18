@@ -235,3 +235,8 @@ Do not reject a mobile patch because unrelated project state changed after the s
 Hydrate a received snapshot into Android using synthetic `companion://` source references; never pretend the phone owns the workstation RAW path. Mark imported batch items prepared and reuse snapshot effective groups. Persist the original snapshot baseline and use its precomputed culling results on Android instead of rerunning desktop analysis.
 
 Generate the return patch by diffing current mobile CullingReviewStore / ReferenceStore against that baseline. Reject a different replacement snapshot for the same batch until the existing baseline has been synchronized or explicitly cleared. On workstation, retain the exported baseline, validate/apply the returned patch, then clear that baseline only after successful application.
+
+
+## Exception-first Cull Triage Rule
+
+Keep triage as a UI projection over existing CullingRecommendation and CullingReviewStore state. In Triage mode surface unresolved Review / RejectSuggestion candidates and analysis-pending assets, hide already-confirmed items and obvious AI Keep items, and preserve original group identity/numbering. Do not manufacture a confidence score just to sort the page; use existing recommendation class, measured quality and group rank only. All mode must remain available as the complete evidence view.

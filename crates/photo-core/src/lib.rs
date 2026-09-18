@@ -11,6 +11,7 @@ pub mod color_sync_store;
 pub mod export;
 pub mod export_store;
 pub mod export_worker;
+pub mod renderer;
 pub mod grouping;
 pub mod handoff;
 pub mod handoff_store;
@@ -40,3 +41,4 @@ pub use export_store::{ExportCheckpoint, ExportStatus, ExportStore, ExportStoreE
 pub use export_worker::{
     recover_interrupted_export, ExportJob, ExportRenderer, ExportWorker, ExportWorkerError,
 };
+pub use renderer::ImageExportRenderer;

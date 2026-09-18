@@ -1,8 +1,9 @@
 use photo_core::{
     build_group_culling_result, AnalysisCache, AutomationRunner, Batch, BatchStore,
     ClassificationRoutingExecutor, ClassificationStore, CullingReview, CullingReviewStore,
-    CullingUserDecision, GroupCullingResult, JobStatus, ModelBundleManifest, ModelPlatform,
-    PhotoGroup, RawAsset, RawCatalog, RawImportResult, RawImporter, RunStep,
+    CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus, ModelBundleManifest,
+    ModelPlatform, PhotoGroup, RawAsset, RawCatalog, RawImportResult, RawImporter, ReferenceStore,
+    RunStep,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::Serialize;
@@ -70,6 +71,7 @@ struct AppState {
     catalog: RawCatalog,
     analysis_cache: AnalysisCache,
     culling_reviews: CullingReviewStore,
+    reference_store: ReferenceStore,
     raw_importer: RawImporter,
     controls: Arc<Mutex<HashMap<Uuid, Arc<BatchControl>>>>,
 }
@@ -345,6 +347,70 @@ fn set_culling_review(
 }
 
 #[tauri::command]
+fn batch_reference_bindings(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<GroupReferenceBinding>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let groups = state
+        .catalog
+        .list_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let mut bindings = Vec::new();
+    for group in groups {
+        if let Some(binding) = state
+            .reference_store
+            .group_binding(group.id)
+            .map_err(|error| error.to_string())?
+        {
+            bindings.push(binding);
+        }
+    }
+    Ok(bindings)
+}
+
+#[tauri::command]
+fn set_group_reference(
+    group_id: String,
+    asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<GroupReferenceBinding, String> {
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    let asset_id = Uuid::parse_str(&asset_id)
+        .map_err(|error| format!("invalid asset id: {error}"))?;
+    let group = state
+        .catalog
+        .list_groups()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|group| group.id == group_id)
+        .ok_or_else(|| format!("photo group not found: {group_id}"))?;
+    if !group.asset_ids.contains(&asset_id) {
+        return Err(format!("asset {asset_id} is not part of group {group_id}"));
+    }
+
+    state
+        .reference_store
+        .set_single_photo_reference(group_id, asset_id, format!("Group {group_id} reference"))
+        .map(|(_, binding)| binding)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn clear_group_reference(
+    group_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let group_id = Uuid::parse_str(&group_id)
+        .map_err(|error| format!("invalid group id: {error}"))?;
+    state
+        .reference_store
+        .clear_group_binding(group_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn create_batch(
     name: String,
     paths: Vec<String>,
@@ -495,6 +561,7 @@ pub fn run() {
             let catalog = RawCatalog::open(&database)?;
             let analysis_cache = AnalysisCache::open(&database)?;
             let culling_reviews = CullingReviewStore::open(&database)?;
+            let reference_store = ReferenceStore::open(&database)?;
             let classification_store = ClassificationStore::open(&database)?;
             let analyze_executor = LocalAnalyzeExecutor::new(
                 &database,
@@ -513,6 +580,7 @@ pub fn run() {
                 catalog,
                 analysis_cache,
                 culling_reviews,
+                reference_store,
                 raw_importer,
                 controls: Arc::new(Mutex::new(HashMap::new())),
             });
@@ -524,6 +592,9 @@ pub fn run() {
             batch_culling,
             batch_culling_reviews,
             set_culling_review,
+            batch_reference_bindings,
+            set_group_reference,
+            clear_group_reference,
             create_batch,
             import_raw_paths,
             import_raw_directory,

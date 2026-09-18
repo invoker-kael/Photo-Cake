@@ -207,3 +207,8 @@ The review is keyed by stable RAW asset ID so re-importing the same source keeps
 ## Review Preview Evaluator
 
 `edit_preview` is a lightweight review-only evaluator for cached embedded JPEGs. It currently approximates Recipe exposure, contrast and saturation at a bounded preview size. It must stay clearly separated from RAW demosaic/export and must not be treated as Lightroom rendering parity. The Windows command reconstructs the canonical reviewed Recipe server-side before generating the after-preview; the UI never supplies an arbitrary Recipe as authority.
+
+
+## Culling Semantic Evidence Boundary
+
+`build_group_culling_result` may attach cached segmentation-derived portrait evidence to each recommendation without changing the technical quality score. The UI can display people count, face count, primary-subject ratio and people confidence. Do not translate segmentation into eye-state or expression claims; those require dedicated evidence.

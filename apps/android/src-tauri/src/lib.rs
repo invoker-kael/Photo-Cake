@@ -190,6 +190,17 @@ fn set_culling_review(
 }
 
 #[tauri::command]
+fn set_culling_reviews(
+    reviews: Vec<CullingReview>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .culling_reviews
+        .set_many(&reviews)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn batch_reference_bindings(
     batch_id: String,
     state: State<'_, AppState>,
@@ -289,6 +300,7 @@ pub fn run() {
             batch_culling,
             batch_culling_reviews,
             set_culling_review,
+            set_culling_reviews,
             batch_reference_bindings,
             set_group_reference,
             clear_group_reference

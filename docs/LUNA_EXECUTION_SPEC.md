@@ -98,12 +98,11 @@ At every run inspect what is already implemented and take the smallest complete 
 
 1. compile/test/CI regressions;
 2. end-to-end wiring between existing core modules;
-3. strengthen Lightroom/Camera Raw compatibility and round-trip tests for the now-connected editable StyleProfile → Reference → ExposureAnalysis → Recipe → per-photo ReviewOverride → explicit XMP path;
-4. add reliable RAW/metadata white-balance evidence when available, without blocking exposure-only workflow;
-5. richer culling evidence (eyes/expression) and true before/after compare UX;
-6. persist/refine semantic grouping where current project behavior still depends on recomputation;
-7. shared/Android review/reference UX;
-8. direct export polish and richer local AI/edit controls.
+3. add reliable RAW/metadata white-balance evidence when available, without blocking exposure-only workflow;
+4. richer culling evidence (eyes/expression) and more accurate review-preview evaluation where evidence/rendering supports it;
+5. validate emitted XMP against real Lightroom/Camera Raw fixtures in addition to the implemented local parse-back gate;
+6. shared/Android review/reference UX;
+7. direct export polish and richer local AI/edit controls.
 
 Do not redo lower-numbered items that already pass.
 
@@ -160,3 +159,16 @@ Cull and Reference now display cached PreviewStore artifacts through the Windows
 ## Per-photo Review Override Rule
 
 Use `RecipeReviewStore` only for photographer exceptions after group-level Reference/StyleProfile adaptation. Store additive deltas by stable target asset ID, not a frozen copy of the whole Recipe. At preview and XMP handoff time regenerate the base Recipe first, then apply the override. Clearing the override must return the photo to the current group-derived Recipe; changing the reference/style must not erase intentional per-photo exceptions.
+
+
+## Semantic Group Persistence Rule
+
+Moment PhotoGroups are persisted parents. Semantic refinement must write child `SemanticPhotoGroup` records and expose them through effective-group reads; never destructively replace the parent just to show refined groups. Missing classification/embedding evidence leaves the current parent/refinement untouched. Photographer Cull decisions are asset-bound and survive refinement. Once a Reference is bound to an effective group, do not silently regenerate group IDs underneath it.
+
+## Before/After Preview Rule
+
+Use the shared `edit_preview` evaluator only on cached embedded previews and only as a clearly labeled approximation. Reconstruct the canonical Recipe in the backend from ReferenceSet + StyleProfile + evidence + RecipeReviewOverride before rendering. Do not accept a UI-supplied edit graph as authority and do not create full-size working images for comparison.
+
+## XMP Parse-back Gate
+
+Every newly written Photo-Cake XMP must parse back into the supported edit state and match Recipe ID, target asset ID and mapped numeric fields within serialization tolerance. On validation failure remove the new sidecar; on group-write failure roll back sidecars created by that operation. This local gate complements, but does not replace, real Lightroom/Camera Raw fixture testing.

@@ -98,10 +98,10 @@ At every run inspect what is already implemented and take the smallest complete 
 
 1. compile/test/CI regressions;
 2. end-to-end wiring between existing core modules;
-3. persist/edit StyleProfile and Recipe review state around the now-connected Reference → ExposureAnalysis → Recipe → explicit XMP path;
+3. persist per-photo Recipe review overrides around the now-connected editable StyleProfile → Reference → ExposureAnalysis → Recipe → explicit XMP path;
 4. strengthen Lightroom/Camera Raw compatibility and round-trip tests;
 5. add reliable RAW/metadata white-balance evidence when available, without blocking exposure-only workflow;
-6. richer culling evidence (eyes/expression) and preview/compare UX;
+6. richer culling evidence (eyes/expression) and before/after compare UX;
 7. shared/Android review/reference UX;
 8. direct export polish and richer local AI/edit controls.
 
@@ -150,3 +150,8 @@ The workstation already persists per-group reference selection through `Referenc
 ## Explicit Lightroom Handoff Rule
 
 The workstation now has an explicit per-group XMP write action. Keep it user-triggered. Build the target set from the Photo Group minus photographer-confirmed Reject items; AI RejectSuggestion alone must not silently exclude a source. Recompute Recipes from the persisted ReferenceSet and cached evidence at handoff time, then use the existing all-group XMP preflight. Never overwrite or partially replace an existing Lightroom sidecar.
+
+
+## Preview Reuse Rule
+
+Cull and Reference now display cached PreviewStore artifacts through the Windows local asset protocol. Reuse that cache. Do not add another preview extraction pipeline or full-size JPEG/TIFF working copies for review UI. Missing preview means placeholder/pending, not a second decode path.

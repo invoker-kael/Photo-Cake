@@ -217,3 +217,8 @@ The review is keyed by stable RAW asset ID so re-importing the same source keeps
 ## Metadata Transparency Surface
 
 Windows Library reads the persisted `RawAsset.camera_id` and `capture_time_ms` fields and shows them directly. This is an inspection surface only; it does not create a second metadata store. Missing capture metadata is presented as fallback/unavailable so grouping provenance remains understandable.
+
+
+## Semantic Group Identity Stability
+
+Repeated semantic refinement with the same parent, group kind and member asset set must reuse the persisted semantic child group ID. This keeps ReferenceSet/StyleProfile bindings stable across harmless re-runs. A new group ID is justified only when the actual semantic membership changes.

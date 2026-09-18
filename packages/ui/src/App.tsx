@@ -369,7 +369,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     return () => {
       disposed = true;
     };
-  }, [activeBatchId, analysisRevision, bridge, recipeReviews, referenceBindings, referenceStyles]);
+  }, [
+    activeBatchId,
+    analysisRevision,
+    bridge,
+    cullingReviews,
+    recipeReviews,
+    referenceBindings,
+    referenceStyles,
+  ]);
 
   const jobs = useMemo(
     () => (bridge ? activeBatch?.items.map(jobFromItem) ?? [] : demoState),
@@ -541,11 +549,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         else delete next[assetId];
         return next;
       });
-      setEditedPreviews((current) => {
-        const next = { ...current };
-        delete next[assetId];
-        return next;
-      });
+      setEditedPreviews({});
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));

@@ -131,6 +131,11 @@ export interface BackendGroupReferencePreview {
   pending_asset_id: string | null;
 }
 
+export interface BackendLightroomHandoffResult {
+  group_id: string;
+  written_sidecars: string[];
+}
+
 export interface BatchWorkerEvent {
   batch: BackendBatch;
   step: unknown | null;
@@ -152,6 +157,7 @@ export interface PhotoCakeBridge {
   setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
   clearGroupReference?(groupId: string): Promise<void>;
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
+  writeGroupXmp?(groupId: string): Promise<BackendLightroomHandoffResult>;
   subscribeBatchUpdates(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }
 

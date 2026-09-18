@@ -294,3 +294,27 @@ A patch cannot silently overwrite workstation decisions made after the snapshot.
 ## Companion Conflict Scope
 
 Concurrency checks are entity-scoped, not project-global. A mobile patch compares current workstation state only for assets/groups it changes, plus any currently selected Reference whose asset decision is being changed. Unrelated workstation edits must not block an otherwise valid patch.
+
+
+## Companion Hydration Flow
+
+```text
+Workstation build_companion_snapshot
+  -> persist exported baseline
+  -> transport
+  -> Android import_companion_snapshot
+       -> synthetic companion:// asset refs
+       -> effective groups
+       -> metadata + culling reviews + ReferenceSet state
+       -> snapshot baseline store
+       -> snapshot culling recommendations
+  -> mobile Cull / Reference changes
+  -> build_companion_decision_patch
+  -> transport back
+  -> workstation apply_companion_decision_patch
+       -> validate original baseline
+       -> apply only touched decisions
+       -> clear baseline after success
+```
+
+Android does not require AnalysisCache parity for imported projects; it reuses the workstation's portable culling results from the snapshot. Preview bytes remain a separate transport artifact and are not embedded into snapshot JSON.

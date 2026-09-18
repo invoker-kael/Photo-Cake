@@ -1,11 +1,12 @@
 use photo_core::{
     build_group_culling_result, refine_collection_semantic_groups, render_recipe_preview,
-    write_group_sidecars, AnalysisCache, AutomationRunner, Batch, BatchStore,
+    write_group_sidecars, AnalysisCache, AssetMetadataEvidence, AutomationRunner, Batch, BatchStore,
     ClassificationRoutingExecutor, ClassificationStore,
     CullingReview,
     CullingReviewStore, CullingUserDecision, GroupCullingResult, GroupReferenceBinding, JobStatus,
     ModelBundleManifest, ModelPlatform, PhotoGroup, PreviewArtifact, PreviewStore, RawAsset,
-    RawCatalog, RawImportResult, RawImporter, Recipe, RecipeReviewOverride, RecipeReviewStore,
+    RawCatalog, RawImportResult, RawImporter, RawMetadataStore, Recipe, RecipeReviewOverride,
+    RecipeReviewStore,
     ReferenceStore, ReferenceWorkflowError, RunStep, SemanticGroupingConfig,
     SemanticRefinementReport, StyleProfile,
 };
@@ -68,6 +69,7 @@ struct BatchPhotoContext {
     assets: Vec<RawAsset>,
     groups: Vec<PhotoGroup>,
     previews: Vec<PreviewArtifact>,
+    metadata: Vec<AssetMetadataEvidence>,
 }
 
 #[derive(Clone, Serialize)]
@@ -104,6 +106,7 @@ struct AppState {
     catalog: RawCatalog,
     analysis_cache: AnalysisCache,
     preview_store: PreviewStore,
+    metadata_store: RawMetadataStore,
     culling_reviews: CullingReviewStore,
     reference_store: ReferenceStore,
     classifications: ClassificationStore,
@@ -414,10 +417,15 @@ fn batch_photo_context(
         .preview_store
         .list_for_assets(&preview_ids)
         .map_err(|error| error.to_string())?;
+    let metadata = state
+        .metadata_store
+        .list_for_assets(&preview_ids)
+        .map_err(|error| error.to_string())?;
     Ok(BatchPhotoContext {
         assets,
         groups,
         previews,
+        metadata,
     })
 }
 
@@ -1040,6 +1048,7 @@ pub fn run() {
             let catalog = RawCatalog::open(&database)?;
             let analysis_cache = AnalysisCache::open(&database)?;
             let preview_store = PreviewStore::open(&database)?;
+            let metadata_store = RawMetadataStore::open(&database)?;
             let culling_reviews = CullingReviewStore::open(&database)?;
             let reference_store = ReferenceStore::open(&database)?;
             let recipe_reviews = RecipeReviewStore::open(&database)?;
@@ -1063,6 +1072,7 @@ pub fn run() {
                 catalog,
                 analysis_cache,
                 preview_store,
+                metadata_store,
                 culling_reviews,
                 reference_store,
                 classifications: classification_store,

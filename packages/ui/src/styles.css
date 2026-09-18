@@ -184,6 +184,52 @@ h2 { font-size: 19px; }
 .reference-group-head span, .reference-current small { color: #70787d; font-size: 10px; }
 .reference-group-head strong { font-size: 14px; }
 .reference-current { min-width: 180px; display: grid; justify-items: end; gap: 5px; }
+
+.reference-style {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) auto;
+  gap: 8px;
+  align-items: end;
+  padding: 12px 14px;
+  border-bottom: 1px solid #22272a;
+  background: #121618;
+}
+.reference-style > small {
+  grid-column: 1 / -1;
+  color: #6d757a;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.style-control { display: grid; gap: 6px; }
+.style-control > span { color: #70787d; font-size: 10px; }
+.style-control > div {
+  display: grid;
+  grid-template-columns: 28px minmax(72px, 1fr) 28px;
+  gap: 5px;
+  align-items: center;
+}
+.style-control strong {
+  min-height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #2c3235;
+  border-radius: 5px;
+  background: #171b1d;
+  color: #d7dcdf;
+  font-size: 11px;
+}
+.style-step {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #30363a;
+  border-radius: 5px;
+  background: #1b2022;
+  color: #b9c0c4;
+  cursor: pointer;
+}
+.style-step:hover:not(:disabled) { background: #262c2f; color: #fff; }
+.style-step:disabled { opacity: .45; cursor: default; }
+
 .reference-candidates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 12px; }
 .reference-candidate {
   min-width: 0;
@@ -247,6 +293,7 @@ h2 { font-size: 19px; }
   .automation-panel { display: none; }
   .photo-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .group-grid, .group-detail-grid, .reference-candidates { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reference-style { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
   .nav-item { padding: 0 8px; text-align: center; font-size: 11px; }
   .sidebar-foot { display: none; }
 }
@@ -266,7 +313,7 @@ h2 { font-size: 19px; }
   .queue-title span, .group-strip-head span { display: none; }
   .photo-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-card.wide { grid-column: 1 / -1; }
-  .group-grid, .group-detail-grid, .reference-candidates { grid-template-columns: 1fr; }
+  .group-grid, .group-detail-grid, .reference-candidates, .reference-style { grid-template-columns: 1fr; }
   .reference-group-head, .handoff-card { grid-template-columns: 1fr; }
   .handoff-actions { justify-items: start; text-align: left; }
   .reference-group-head { flex-direction: column; }

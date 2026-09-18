@@ -387,6 +387,26 @@ fn list_batches(state: State<'_, AppState>) -> Result<Vec<Batch>, String> {
 }
 
 #[tauri::command]
+fn build_companion_snapshot(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<CompanionSnapshot, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    build_companion_snapshot_core(
+        batch_id,
+        &state.store,
+        &state.catalog,
+        &state.analysis_cache,
+        &state.preview_store,
+        &state.metadata_store,
+        &state.culling_reviews,
+        &state.reference_store,
+        0.98,
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn batch_photo_context(
     batch_id: String,
     state: State<'_, AppState>,
@@ -1085,6 +1105,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_batches,
+            build_companion_snapshot,
             batch_photo_context,
             refine_batch_groups,
             batch_culling,

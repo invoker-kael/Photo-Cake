@@ -123,6 +123,8 @@ CI is verification, not the product. Do not create repeated CI-only commits unle
 
 Do not turn the per-photo `AutomationRunner` into the product workflow. New imports use it for import/analyze preparation only and then become ready for group-level review. Culling, grouping, reference selection, adaptive Recipe generation and XMP delivery are higher-level operations. Preserve legacy stage decoding only for compatibility.
 
+Tests or adapters that exercise legacy/direct `Export` must enter that stage explicitly. Never loop a new import waiting for `Export`: the current preparation path intentionally terminates at `Analyze -> Done`.
+
 The workstation import button must continue to call the existing `import_raw_directory` / `RawImporter` path; do not add a second importer. Android remains a companion and must reuse shared UI/core concepts.
 
 

@@ -43,22 +43,21 @@ fn automation_runner_completes_export_stage() {
     let export_store = ExportStore::open(dir.path().join("export.sqlite3")).unwrap();
     let runner_store = photo_core::BatchStore::open(dir.path().join("batch.sqlite3")).unwrap();
 
-    let batch_id = uuid::Uuid::new_v4();
-    export_store.set_recipe(batch_id, &recipe(output)).unwrap();
+    // Export is an explicit legacy/direct-export adapter now. New imports stop
+    // at Analyze -> Done, so this integration test must enter Export directly
+    // instead of waiting for the preparation workflow to reach it.
+    let mut batch = photo_core::Batch::new(
+        "export-test",
+        vec![source.to_string_lossy().to_string()],
+    );
+    batch.items[0].stage = BatchStage::Export;
+    runner_store.create_batch(&batch).unwrap();
+    export_store.set_recipe(batch.id, &recipe(output)).unwrap();
 
     let export = BatchExportExecutor::new(TestRenderer, export_store.clone());
-    let stage = ExportStageExecutor::new(batch_id, export);
+    let stage = ExportStageExecutor::new(batch.id, export);
     let pipeline = BatchPipelineExecutor::new(stage);
-
     let mut runner = AutomationRunner::new(runner_store, pipeline);
-    let mut batch = runner
-        .create_batch("export-test", vec![source.to_string_lossy().to_string()])
-        .unwrap();
-
-    while batch.items[0].stage != BatchStage::Export {
-        runner.run_next(batch.id).unwrap();
-        batch = runner.load_batch(batch.id).unwrap();
-    }
 
     runner.run_next(batch.id).unwrap();
     batch = runner.load_batch(batch.id).unwrap();
@@ -67,7 +66,7 @@ fn automation_runner_completes_export_stage() {
     assert_eq!(batch.items[0].status, photo_core::JobStatus::Done);
 
     let checkpoint = export_store
-        .load_checkpoint(batch_id, batch.items[0].id)
+        .load_checkpoint(batch.id, batch.items[0].id)
         .unwrap()
         .unwrap();
     assert_eq!(checkpoint.status, ExportStatus::Done);

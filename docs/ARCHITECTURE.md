@@ -252,3 +252,8 @@ Android Library / Cull / Groups / Reference
 The shared UI exposes platform capabilities rather than assuming every bridge implements workstation actions. Android does not expose RAW import/analyze controls, semantic-refine execution, StyleProfile editing, per-photo Recipe review or Lightroom/XMP handoff. It may display locally available cached previews through the app-data asset protocol.
 
 The remaining platform gap is project transport/synchronization between workstation and companion. That transport should move/share project state and preview context, not fork the domain model or introduce a second editing engine.
+
+
+## Culling Explanation Layer
+
+`CullingRecommendation.reasons` is derived from the same measured `CullingScore` and duplicate evidence that produced the recommendation. It is presentation evidence, not a second scoring engine. Reasons currently cover sharpness, blur, exposure, duplicate relation and overall technical weakness/strength. Unknown semantic factors remain absent.

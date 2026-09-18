@@ -37,6 +37,7 @@ RAW collection
 - Reuse `photo-core` and `photo-inference`; never create a parallel workflow engine.
 - Preserve RAW bytes and source filenames.
 - Prefer RAW + XMP; do not generate large intermediates by default.
+- Existing XMP is user data: never silently overwrite it; preserve the current batch preflight behavior.
 - Recipe is the editing source of truth. XMP and direct export are outputs.
 - A group shares visual intent, not identical numeric adjustments.
 - Reuse `color_sync` for per-photo resolution.

@@ -56,8 +56,8 @@ Acceptance: a target group can use a selected reference, produce different adapt
 
 Improve culling from a data model into a practical selection assistant:
 
-- measurable sharpness/blur evidence;
-- duplicate/burst ranking;
+- measurable sharpness/blur and exposure evidence cached during Analyze;
+- group-scoped duplicate/burst ranking from existing embeddings;
 - face/eye/expression evidence when available;
 - exposure-failure detection;
 - group-relative best-candidate ranking;
@@ -117,3 +117,6 @@ Not early priorities:
 - Lightroom database replacement;
 - a separate Lightroom plugin architecture;
 - destructive generative replacement as the default workflow.
+
+
+Current workstation status: RAW folder import, preparation progress, initial group overview, Groups view and evidence-backed Cull view are connected to the existing Rust core. Reference selection/apply and explicit Lightroom handoff are the next UI gaps; their core ReferenceSet/Recipe/XMP logic already exists.

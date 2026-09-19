@@ -591,3 +591,11 @@ The embedded-JPEG Review renderer remains an approximation, but its adjustment r
 Highlights/Shadows and Whites/Blacks now use smooth perceptual masks, reducing abrupt transitions between tonal zones. Vibrance and Saturation use chroma scaling with channel-headroom limits so strong positive color adjustments do not create artificial preview clipping simply because the embedded JPEG has less recoverable headroom than RAW.
 
 These changes improve exception-review direction and consistency with the XMP controls, but they do not claim Lightroom/Camera Raw parity. The final RAW renderer remains authoritative.
+
+## Midtone-aware Reference contrast
+
+Reference-relative Contrast now compares tonal separation on both sides of P50 instead of using only the raw P90-P10 span. Shadow-to-mid and mid-to-highlight separation are measured in log space, so ordinary exposure-only changes do not create a false contrast correction.
+
+Global Contrast is applied strongly only when both sides support the same direction. If one side is flatter while the other is already harder than the Reference, the global correction is damped and the existing Highlights/Shadows path remains responsible for the asymmetric difference. Positive Contrast is further reduced when P02/P98 show little endpoint headroom.
+
+This keeps group tonality closer to the selected Reference while avoiding a common batch-editing failure mode: fixing one tonal region by making the entire frame too hard or too flat.

@@ -381,36 +381,80 @@ pub fn reference_relative_exposure_correction(
     Some(correction.clamp(-0.60, 0.60))
 }
 
-/// Match the Reference's overall tonal separation after per-photo exposure
-/// alignment. Positive contrast backs off as clipping increases.
+fn midtone_log_separation(
+    shadow: f32,
+    median: f32,
+    highlight: f32,
+) -> Option<(f32, f32)> {
+    let floor = 1.0 / 255.0;
+    if median <= floor || shadow < 0.0 || highlight <= 0.0 {
+        return None;
+    }
+    let lower = (median / shadow.max(floor)).log2().max(0.0);
+    let upper = (highlight.max(floor) / median.max(floor)).log2().max(0.0);
+    Some((lower, upper))
+}
+
+/// Match the Reference's tonal separation around the midtone after per-photo
+/// exposure alignment.
+///
+/// Contrast is a global control, so it should react strongly only when both
+/// shadow-to-mid and mid-to-highlight structure support the same direction.
+/// If one side is flatter while the other is already harder than the
+/// Reference, Highlights/Shadows are the safer controls and global Contrast is
+/// deliberately damped. Log-space ratios also make the comparison stable for
+/// ordinary exposure-only differences.
 pub fn reference_relative_contrast_adjustment(
     reference: &PhotoExposureAnalysis,
     target: &PhotoExposureAnalysis,
-    exposure_delta_ev: f32,
+    _exposure_delta_ev: f32,
 ) -> Option<f32> {
+    let reference_median = reference.luminance_p50?;
+    let target_median = target.luminance_p50?;
     let (reference_shadow, reference_highlight) = reference.tone_percentiles()?;
     let (target_shadow, target_highlight) = target.tone_percentiles()?;
-    let exposure_factor = 2.0_f32.powf(exposure_delta_ev.clamp(-5.0, 5.0));
-    let projected_shadow = (target_shadow * exposure_factor).clamp(0.0, 1.0);
-    let projected_highlight = (target_highlight * exposure_factor).clamp(0.0, 1.0);
-    let reference_span = (reference_highlight - reference_shadow).max(0.0);
-    let target_span = (projected_highlight - projected_shadow).max(0.0);
+    let (reference_lower, reference_upper) =
+        midtone_log_separation(reference_shadow, reference_median, reference_highlight)?;
+    let (target_lower, target_upper) =
+        midtone_log_separation(target_shadow, target_median, target_highlight)?;
 
+    let lower_deficit = reference_lower - target_lower;
+    let upper_deficit = reference_upper - target_upper;
     let confidence = reference
         .confidence
         .min(target.confidence)
         .clamp(0.2, 1.0);
-    let clipping = target
-        .shadow_clip_ratio
-        .unwrap_or(0.0)
-        .max(target.highlight_clip_ratio.unwrap_or(0.0))
-        .clamp(0.0, 1.0);
-    let positive_headroom = (1.0 - clipping * 20.0).clamp(0.0, 1.0);
 
-    let mut correction = (reference_span - target_span) * 80.0 * confidence;
+    // Both sides agreeing means the entire frame is genuinely flatter/harder.
+    // Opposing signs describe asymmetric tone structure, where a global
+    // Contrast move would improve one side while worsening the other.
+    let direction_agreement = if lower_deficit * upper_deficit < 0.0 {
+        0.35
+    } else {
+        1.0
+    };
+    let mut correction =
+        (lower_deficit + upper_deficit) * 11.0 * confidence * direction_agreement;
+
     if correction > 0.0 {
+        let clipping = target
+            .shadow_clip_ratio
+            .unwrap_or(0.0)
+            .max(target.highlight_clip_ratio.unwrap_or(0.0))
+            .clamp(0.0, 1.0);
+        let positive_headroom = (1.0 - clipping * 20.0).clamp(0.0, 1.0);
         correction *= positive_headroom;
+
+        // Strong positive contrast is also a poor default when either endpoint
+        // is already crowded against the preview boundary.
+        if let Some((black, white)) = target.endpoint_percentiles() {
+            let endpoint_headroom =
+                ((black / 0.03).clamp(0.0, 1.0) * ((1.0 - white) / 0.04).clamp(0.0, 1.0))
+                    .sqrt();
+            correction *= (0.45 + endpoint_headroom * 0.55).clamp(0.45, 1.0);
+        }
     }
+
     if correction.abs() < 1.0 {
         correction = 0.0;
     }
@@ -1470,6 +1514,135 @@ mod tests {
         let correction =
             reference_relative_exposure_correction(&reference, &target, 0.5, 0.5).unwrap();
         assert_eq!(correction, 0.0);
+    }
+
+    #[test]
+    fn exposure_only_tone_shift_does_not_create_false_contrast_delta() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.03),
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.85),
+            luminance_p98: Some(0.96),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: -1.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.015),
+            luminance_p10: Some(0.075),
+            luminance_p50: Some(0.25),
+            luminance_p90: Some(0.425),
+            luminance_p98: Some(0.48),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+
+        assert_eq!(
+            reference_relative_contrast_adjustment(&reference, &target, 1.0),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn asymmetric_tone_shape_avoids_global_contrast_overcorrection() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.03),
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.85),
+            luminance_p98: Some(0.96),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.04),
+            luminance_p10: Some(0.30),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.95),
+            luminance_p98: Some(0.99),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+
+        let contrast =
+            reference_relative_contrast_adjustment(&reference, &target, 0.0).unwrap();
+        assert!(contrast > 0.0);
+        assert!(contrast < 5.0);
+    }
+
+    #[test]
+    fn endpoint_pressure_damps_positive_global_contrast() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.04),
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.85),
+            luminance_p98: Some(0.95),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.005),
+            luminance_p10: Some(0.30),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.70),
+            luminance_p98: Some(0.995),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+
+        let contrast =
+            reference_relative_contrast_adjustment(&reference, &target, 0.0).unwrap();
+        assert!(contrast > 0.0);
+        assert!(contrast < 8.0);
     }
 
     #[test]

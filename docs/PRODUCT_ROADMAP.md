@@ -263,3 +263,9 @@ The adaptive Vibrance path now tapers its own strength from preview evidence bef
 Completed after low-light color integrity: the Review renderer now better preserves colored-highlight relationships, applies contrast through luminance, smooths tonal-zone masks and prevents positive chroma edits from creating avoidable preview clipping.
 
 This does not replace RAW rendering. It makes the exception-review surface more trustworthy so the photographer can judge direction before the same canonical Recipe is serialized to Lightroom XMP.
+
+### Core editing quality: midtone structure consistency
+
+Completed after preview perceptual fidelity: Reference-driven Contrast now follows both sides of the midtone in exposure-invariant log space. This improves batch consistency when images have similar brightness but different local tonal shape.
+
+Asymmetric scenes no longer receive an unnecessarily strong global Contrast move simply because one tonal side differs from the Reference, and endpoint pressure further limits positive hardening near black/white boundaries.

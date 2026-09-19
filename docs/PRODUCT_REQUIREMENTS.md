@@ -541,3 +541,12 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Highlights/Shadows and Whites/Blacks SHOULD use smooth overlapping tonal masks rather than hard tonal boundaries.
 - Positive Vibrance/Saturation MUST respect available channel headroom so the embedded-JPEG preview does not invent clipping that is not part of the Recipe intent.
 - Preview behavior MUST remain explicitly approximate; Lightroom/Camera Raw is the authority for RAW rendering and final appearance.
+
+### Midtone-aware Reference contrast
+
+- Reference-relative Contrast MUST compare shadow-to-mid and mid-to-highlight tonal separation around P50 rather than relying only on absolute P90-P10 span.
+- The comparison SHOULD be invariant to ordinary exposure-only scaling.
+- When lower- and upper-tone structure request opposing Contrast directions, the global Contrast correction MUST be materially attenuated and the asymmetric correction left to Highlights/Shadows.
+- Positive Contrast MUST back off when clipping is present.
+- Positive Contrast SHOULD also back off when P02/P98 indicate limited endpoint headroom.
+- The existing per-photo Reference adaptation strength remains authoritative over the final adaptive correction magnitude.

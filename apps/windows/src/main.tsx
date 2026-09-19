@@ -23,6 +23,7 @@ import App, {
   type BackendReferenceReadinessPlan,
   type BackendRecipeReviewBatchItem,
   type BackendRecipeReviewBatchResult,
+  type BackendRecipeReviewGroupPreflight,
   type BackendRecipeReviewGroupBatchResult,
   type BackendRecipeReviewOverride,
   type BackendRecipeReviewSyncFields,
@@ -119,6 +120,8 @@ const bridge: PhotoCakeBridge = {
     invoke<void>("clear_group_reference", { groupId }),
   loadRecipeReviews: (batchId) =>
     invoke<BackendRecipeReviewOverride[]>("batch_recipe_reviews", { batchId }),
+  loadRecipeReviewPreflight: (batchId) =>
+    invoke<BackendRecipeReviewGroupPreflight[]>("batch_recipe_review_preflight", { batchId }),
   setRecipeReview: (
     assetId,
     exposureDeltaEv,

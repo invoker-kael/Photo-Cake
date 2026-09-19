@@ -387,6 +387,38 @@ export interface BackendRecipeReviewOverride {
   saturation_delta: number;
 }
 
+export type RecipeReviewAttentionReason =
+  | "SAVED_EXCEPTION"
+  | "PHOTOGRAPHER_REVIEW"
+  | "AI_REJECT_SUGGESTION"
+  | "AI_REVIEW"
+  | "EVIDENCE_PENDING";
+
+export type RecipeReviewDisposition =
+  | "CONFIRMED"
+  | "NEEDS_REVIEW"
+  | "CLEAR"
+  | "PENDING";
+
+export interface BackendRecipeReviewAssetPreflight {
+  asset_id: string;
+  disposition: RecipeReviewDisposition;
+  reason: RecipeReviewAttentionReason | null;
+}
+
+export interface BackendRecipeReviewGroupPreflight {
+  group_id: string;
+  assets: BackendRecipeReviewAssetPreflight[];
+  attention_asset_ids: string[];
+  clear_asset_ids: string[];
+  confirmed_asset_ids: string[];
+  pending_asset_ids: string[];
+  can_confirm_clear_group: boolean;
+  contains_people: boolean;
+  scene_tags: BackendSceneTag[];
+  hdr_source_asset_ids: string[];
+}
+
 export interface BackendRecipeReviewBatchItem {
   group_id: string;
   asset_id: string;
@@ -468,6 +500,7 @@ export interface PhotoCakeBridge {
   ): Promise<BackendReferenceBatchResult>;
   clearGroupReference?(groupId: string): Promise<void>;
   loadRecipeReviews?(batchId: string): Promise<BackendRecipeReviewOverride[]>;
+  loadRecipeReviewPreflight?(batchId: string): Promise<BackendRecipeReviewGroupPreflight[]>;
   setRecipeReview?(
     assetId: string,
     exposureDeltaEv: number,

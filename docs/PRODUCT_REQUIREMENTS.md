@@ -418,3 +418,14 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Review targets MUST remain manually selectable so photographer intent remains authoritative.
 - Photographer Rejects and unoverridden AI Reject suggestions MUST NOT define the group scene context used for look-sync recommendations.
 - Every target MUST preserve its own Reference photo and adaptive baseline after StyleProfile sync, then continue through the normal Recipe exception-review path.
+
+
+### Canonical exception-first Recipe Review
+
+- Recipe Review MUST have one backend preflight that is authoritative for Triage visibility and clear-group batch confirmation.
+- The preflight MUST classify editable Recipes as Confirmed, Needs Review, Clear, or Pending and MUST expose the reason for attention.
+- Saved per-photo exceptions and photographer Review decisions MUST appear before AI Review/Reject suggestions in exception-first ordering.
+- Missing Recipe/exposure evidence MUST be Pending and MUST never be batch-confirmable, even when the photo was explicitly kept during Cull.
+- Clear-group batch confirmation MUST revalidate the current preflight immediately before writing confirmation fingerprints.
+- Landscape, architecture, night, food and people/family context MAY be displayed in Review, but MUST NOT create a second Recipe engine or portrait-only workflow.
+- Exposure-bracket source RAWs MUST remain outside ordinary adaptive Recipe confirmation. Mixed groups MAY continue reviewing non-HDR peers while HDR sources route separately to Lightroom/Camera Raw.

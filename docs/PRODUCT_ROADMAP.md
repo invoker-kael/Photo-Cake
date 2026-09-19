@@ -194,3 +194,10 @@ This follows the useful part of the PixCake-style workflow pattern—establish a
 Completed: Reference look reuse now has scene-aware preflight for mixed travel shoots. The default batch selection favors people/family-to-people/family and scenic groups that share existing scene evidence, while landscape↔food, portrait↔pure scenery, or incomplete-evidence pairs remain visible as explicit Review targets instead of being auto-selected.
 
 This extends the useful “standard image → synchronize shared look → review exceptions” workflow pattern without making Photo-Cake portrait-only. StyleProfile stays shared, each group keeps an independent Reference/adaptive exposure baseline, and Recipe Review remains the place for single-photo exceptions.
+
+
+### Canonical exception-first Recipe Review
+
+Completed: Recipe Review triage and clear-group confirmation now consume the same backend preflight instead of duplicating Cull/exception logic in the UI. Saved exceptions and uncertain photos rise first, straightforward Recipes form safe clear cohorts, missing evidence stays Pending, and current confirmations remain fingerprint-bound.
+
+Mixed travel sets remain first-class: scene context is visible for landscape/architecture/night/people groups, while HDR bracket sources are reported separately and never flattened into ordinary Recipes. This keeps the workflow on the existing Reference → adaptive Recipe → exception Review → Lightroom path.

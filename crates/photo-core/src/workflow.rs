@@ -1,6 +1,8 @@
 use crate::culling::CullingDecision;
 use crate::culling_store::CullingUserDecision;
+use crate::classification::SceneTag;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -69,6 +71,134 @@ pub fn recipe_review_group_can_confirm(signals: &[RecipeReviewSignal]) -> bool {
             signal.confirmed
                 || (!signal.evidence_pending && !recipe_review_requires_attention(signal))
         })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RecipeReviewAttentionReason {
+    SavedException,
+    PhotographerReview,
+    AiRejectSuggestion,
+    AiReview,
+    EvidencePending,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RecipeReviewDisposition {
+    Confirmed,
+    NeedsReview,
+    Clear,
+    Pending,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecipeReviewAssetPreflight {
+    pub asset_id: Uuid,
+    pub disposition: RecipeReviewDisposition,
+    pub reason: Option<RecipeReviewAttentionReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecipeReviewGroupPreflight {
+    pub group_id: Uuid,
+    #[serde(default)]
+    pub assets: Vec<RecipeReviewAssetPreflight>,
+    #[serde(default)]
+    pub attention_asset_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub clear_asset_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub confirmed_asset_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub pending_asset_ids: Vec<Uuid>,
+    pub can_confirm_clear_group: bool,
+    pub contains_people: bool,
+    #[serde(default)]
+    pub scene_tags: Vec<SceneTag>,
+    #[serde(default)]
+    pub hdr_source_asset_ids: Vec<Uuid>,
+}
+
+pub fn recipe_review_attention_reason(
+    signal: &RecipeReviewSignal,
+) -> Option<RecipeReviewAttentionReason> {
+    if signal.confirmed {
+        return None;
+    }
+    if signal.has_exception {
+        return Some(RecipeReviewAttentionReason::SavedException);
+    }
+    match signal.user_decision {
+        Some(CullingUserDecision::Review) => {
+            return Some(RecipeReviewAttentionReason::PhotographerReview)
+        }
+        Some(CullingUserDecision::Keep | CullingUserDecision::Reject) => return None,
+        None => {}
+    }
+    if signal.evidence_pending {
+        return Some(RecipeReviewAttentionReason::EvidencePending);
+    }
+    match signal.ai_decision {
+        Some(CullingDecision::RejectSuggestion) => {
+            Some(RecipeReviewAttentionReason::AiRejectSuggestion)
+        }
+        Some(CullingDecision::Review) => Some(RecipeReviewAttentionReason::AiReview),
+        _ => None,
+    }
+}
+
+pub fn build_recipe_review_group_preflight(
+    group_id: Uuid,
+    signals: &[(Uuid, RecipeReviewSignal)],
+    contains_people: bool,
+    scene_tags: Vec<SceneTag>,
+    hdr_source_asset_ids: Vec<Uuid>,
+) -> RecipeReviewGroupPreflight {
+    let mut assets = Vec::with_capacity(signals.len());
+    let mut attention_asset_ids = Vec::new();
+    let mut clear_asset_ids = Vec::new();
+    let mut confirmed_asset_ids = Vec::new();
+    let mut pending_asset_ids = Vec::new();
+
+    for (asset_id, signal) in signals {
+        let reason = recipe_review_attention_reason(signal);
+        let disposition = if signal.confirmed {
+            confirmed_asset_ids.push(*asset_id);
+            RecipeReviewDisposition::Confirmed
+        } else if matches!(reason, Some(RecipeReviewAttentionReason::EvidencePending)) {
+            pending_asset_ids.push(*asset_id);
+            RecipeReviewDisposition::Pending
+        } else if reason.is_some() {
+            attention_asset_ids.push(*asset_id);
+            RecipeReviewDisposition::NeedsReview
+        } else {
+            clear_asset_ids.push(*asset_id);
+            RecipeReviewDisposition::Clear
+        };
+        assets.push(RecipeReviewAssetPreflight {
+            asset_id: *asset_id,
+            disposition,
+            reason,
+        });
+    }
+
+    let can_confirm_clear_group = !clear_asset_ids.is_empty()
+        && attention_asset_ids.is_empty()
+        && pending_asset_ids.is_empty();
+
+    RecipeReviewGroupPreflight {
+        group_id,
+        assets,
+        attention_asset_ids,
+        clear_asset_ids,
+        confirmed_asset_ids,
+        pending_asset_ids,
+        can_confirm_clear_group,
+        contains_people,
+        scene_tags,
+        hdr_source_asset_ids,
+    }
 }
 
 pub fn derive_workflow_status(facts: WorkflowFacts) -> WorkflowStatus {
@@ -219,6 +349,86 @@ mod tests {
                 ..clear
             }
         ]));
+    }
+
+    #[test]
+    fn recipe_preflight_prioritizes_exception_and_blocks_clear_group() {
+        let exception_id = Uuid::new_v4();
+        let clear_id = Uuid::new_v4();
+        let plan = build_recipe_review_group_preflight(
+            Uuid::new_v4(),
+            &[
+                (
+                    exception_id,
+                    RecipeReviewSignal {
+                        has_exception: true,
+                        ai_decision: Some(CullingDecision::Keep),
+                        ..RecipeReviewSignal::default()
+                    },
+                ),
+                (
+                    clear_id,
+                    RecipeReviewSignal {
+                        ai_decision: Some(CullingDecision::Keep),
+                        ..RecipeReviewSignal::default()
+                    },
+                ),
+            ],
+            false,
+            vec![SceneTag::Landscape],
+            Vec::new(),
+        );
+        assert_eq!(plan.attention_asset_ids, vec![exception_id]);
+        assert_eq!(plan.clear_asset_ids, vec![clear_id]);
+        assert!(!plan.can_confirm_clear_group);
+        assert_eq!(plan.scene_tags, vec![SceneTag::Landscape]);
+    }
+
+    #[test]
+    fn pending_evidence_is_not_silently_batch_confirmed() {
+        let pending_id = Uuid::new_v4();
+        let plan = build_recipe_review_group_preflight(
+            Uuid::new_v4(),
+            &[(
+                pending_id,
+                RecipeReviewSignal {
+                    evidence_pending: true,
+                    ..RecipeReviewSignal::default()
+                },
+            )],
+            false,
+            Vec::new(),
+            Vec::new(),
+        );
+        assert_eq!(plan.pending_asset_ids, vec![pending_id]);
+        assert!(!plan.can_confirm_clear_group);
+        assert_eq!(
+            plan.assets[0].reason,
+            Some(RecipeReviewAttentionReason::EvidencePending)
+        );
+    }
+
+    #[test]
+    fn fully_clear_group_is_batch_confirmable_and_keeps_hdr_context_separate() {
+        let clear_id = Uuid::new_v4();
+        let hdr_id = Uuid::new_v4();
+        let plan = build_recipe_review_group_preflight(
+            Uuid::new_v4(),
+            &[(
+                clear_id,
+                RecipeReviewSignal {
+                    ai_decision: Some(CullingDecision::Keep),
+                    ..RecipeReviewSignal::default()
+                },
+            )],
+            true,
+            vec![SceneTag::Night],
+            vec![hdr_id],
+        );
+        assert!(plan.can_confirm_clear_group);
+        assert_eq!(plan.clear_asset_ids, vec![clear_id]);
+        assert_eq!(plan.hdr_source_asset_ids, vec![hdr_id]);
+        assert!(plan.contains_people);
     }
 
     #[test]

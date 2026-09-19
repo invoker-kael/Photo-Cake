@@ -146,6 +146,8 @@ pub use xmp::{
 };
 
 pub use workflow::{
-    derive_workflow_status, recipe_review_group_can_confirm, recipe_review_requires_attention,
-    RecipeReviewSignal, WorkflowFacts, WorkflowFocus, WorkflowStatus,
+    build_recipe_review_group_preflight, derive_workflow_status, recipe_review_attention_reason,
+    recipe_review_group_can_confirm, recipe_review_requires_attention,
+    RecipeReviewAssetPreflight, RecipeReviewAttentionReason, RecipeReviewDisposition,
+    RecipeReviewGroupPreflight, RecipeReviewSignal, WorkflowFacts, WorkflowFocus, WorkflowStatus,
 };

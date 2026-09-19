@@ -481,3 +481,12 @@ The same `ReferenceReadinessPlan` is returned to the workstation and revalidated
 Batch look sync continues to copy the existing `StyleProfile`; there is no second preset or scene-rendering engine. Before the UI proposes targets, the backend summarizes each referenced group from existing Cull evidence after excluding photographer Rejects and unoverridden AI Reject suggestions.
 
 Compatibility is advisory, not a hard gate. People/family groups are recommended with other people/family groups. Non-people groups are recommended when they share scene evidence such as Landscape, Architecture, Food, Night or Document. People-to-scene, disjoint-scene and incomplete-evidence pairs are marked Review. The photographer can still explicitly select Review targets; each group keeps its own Reference and adaptive exposure baseline, and downstream Recipe Review remains the exception check.
+
+
+## Canonical Recipe Review preflight
+
+Recipe Review now has one backend authority for exception-first triage and clear-group batch confirmation. The planner combines the current adaptive Recipe fingerprint, saved per-photo exception, photographer Cull decision, AI Cull recommendation, evidence readiness, scene context, and HDR source routing into a per-group preflight.
+
+Each editable asset is classified as `CONFIRMED`, `NEEDS_REVIEW`, `CLEAR`, or `PENDING`. Attention reasons are explicit: saved exception, photographer Review, AI Reject suggestion, AI Review, or incomplete evidence. The UI uses these dispositions for Triage and ordering; it no longer re-derives review eligibility from raw Cull state.
+
+Clear-group confirmation re-runs the same backend planner immediately before persistence. A group can be batch-confirmed only when it has at least one current clear Recipe and no attention or pending Recipes. HDR bracket source RAWs remain outside ordinary adaptive Recipe review and are surfaced as separate routing context, so mixed groups can still review non-HDR peers without treating bracket EV differences as edit errors.

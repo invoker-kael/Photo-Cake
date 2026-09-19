@@ -1,9 +1,8 @@
 use photo_core::{
     apply_companion_patch as apply_companion_patch_core,
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
-    build_reference_readiness_plan, build_style_sync_group_context, build_style_sync_preflight,
-    derive_workflow_status, recipe_review_group_can_confirm,
-    recipe_review_requires_attention,
+    build_recipe_review_group_preflight, build_reference_readiness_plan,
+    build_style_sync_group_context, build_style_sync_preflight, derive_workflow_status,
     preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
     route_exposure_bracket_sources, write_group_sidecars, write_sidecar_batch, AnalysisCache,
     AssetMetadataEvidence, AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor,
@@ -13,8 +12,9 @@ use photo_core::{
     MomentQuickCullOperation, MomentQuickCullPlan,
     JobStatus, ModelBundleManifest, ModelPlatform,
     PhotoGroup, PreviewArtifact, PreviewStore, RawAsset, RawCatalog, RawImportResult, RawImporter,
-    RawMetadataStore, Recipe, RecipeReviewOverride, RecipeReviewSignal, RecipeReviewStore,
-    RecipeReviewSyncFields, ReferenceReadinessPlan, ReferenceReadinessStatus, ReferenceStore,
+    RawMetadataStore, Recipe, RecipeReviewGroupPreflight, RecipeReviewOverride, RecipeReviewSignal,
+    RecipeReviewStore, RecipeReviewSyncFields, ReferenceReadinessPlan, ReferenceReadinessStatus,
+    ReferenceStore,
     ReferenceWorkflowError, RunStep, SemanticGroupingConfig, SemanticRefinementReport,
     StyleProfile, StyleSyncGroupContext, StyleSyncPreflight, WorkflowFacts, WorkflowStatus,
 };
@@ -335,6 +335,142 @@ fn resolve_reviewed_group_recipes(
         .map_err(|error| error.to_string())?;
     apply_recipe_reviews(&mut resolved.recipes, &state.recipe_reviews)?;
     Ok((editable, resolved.recipes))
+}
+
+fn recipe_review_preflight_for_group(
+    group_id: Uuid,
+    state: &AppState,
+) -> Result<(RecipeReviewGroupPreflight, Vec<Recipe>), String> {
+    let group = state
+        .catalog
+        .find_group(group_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("photo group not found: {group_id}"))?;
+    let binding = state
+        .reference_store
+        .group_binding(group_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "select a reference photo before reviewing edits".to_string())?;
+
+    if state
+        .culling_reviews
+        .get(binding.selected_reference_asset_id)
+        .map_err(|error| error.to_string())?
+        .is_some_and(|review| review.decision == CullingUserDecision::Reject)
+    {
+        return Err("selected reference is explicitly rejected; choose another reference".to_string());
+    }
+
+    let culling = build_group_culling_result(&state.analysis_cache, &group, 0.98)
+        .map_err(|error| error.to_string())?;
+    let culling_reviews = state
+        .culling_reviews
+        .list_for_assets(&group.asset_ids)
+        .map_err(|error| error.to_string())?;
+    let context = build_style_sync_group_context(
+        group.id,
+        &culling.recommendations,
+        &culling.pending_asset_ids,
+        &culling_reviews,
+    );
+    let reviews_by_asset = culling_reviews
+        .iter()
+        .map(|review| (review.asset_id, review.decision))
+        .collect::<HashMap<_, _>>();
+    let recommendations_by_asset = culling
+        .recommendations
+        .iter()
+        .map(|recommendation| (recommendation.asset_id, recommendation))
+        .collect::<HashMap<_, _>>();
+
+    let reference_set = state
+        .reference_store
+        .get_set(binding.reference_set_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("reference set not found: {}", binding.reference_set_id))?;
+    let (editable, _, hdr_source_asset_ids) = delivery_group(&group, state)?;
+
+    let mut recipes = if editable.asset_ids.is_empty() {
+        Vec::new()
+    } else {
+        match reference_set.resolve_group_from_cache(
+            &state.analysis_cache,
+            &editable,
+            binding.selected_reference_asset_id,
+            1,
+        ) {
+            Ok(mut resolved) => {
+                apply_recipe_reviews(&mut resolved.recipes, &state.recipe_reviews)?;
+                resolved.recipes
+            }
+            Err(ReferenceWorkflowError::MissingExposureAnalysis(_)) => Vec::new(),
+            Err(error) => return Err(error.to_string()),
+        }
+    };
+
+    let recipes_by_asset = recipes
+        .iter()
+        .filter_map(|recipe| recipe.target_asset_id.map(|asset_id| (asset_id, recipe)))
+        .collect::<HashMap<_, _>>();
+    let mut signals = Vec::with_capacity(editable.asset_ids.len());
+    for asset_id in &editable.asset_ids {
+        let recipe = recipes_by_asset.get(asset_id).copied();
+        let confirmed = recipe
+            .map(|recipe| {
+                state
+                    .recipe_reviews
+                    .is_recipe_confirmed(recipe)
+                    .map_err(|error| error.to_string())
+            })
+            .transpose()?
+            .unwrap_or(false);
+        let user_decision = recipe
+            .and_then(|_| reviews_by_asset.get(asset_id).copied());
+        let ai_decision = recipe.and_then(|_| {
+            recommendations_by_asset
+                .get(asset_id)
+                .map(|recommendation| recommendation.decision)
+        });
+        let evidence_pending = recipe.is_none()
+            || (!confirmed
+                && user_decision.is_none()
+                && (culling.pending_asset_ids.contains(asset_id) || ai_decision.is_none()));
+        let has_exception = if recipe.is_some() {
+            state
+                .recipe_reviews
+                .get(*asset_id)
+                .map_err(|error| error.to_string())?
+                .is_some()
+        } else {
+            false
+        };
+
+        signals.push((
+            *asset_id,
+            RecipeReviewSignal {
+                confirmed,
+                has_exception,
+                user_decision,
+                ai_decision,
+                evidence_pending,
+            },
+        ));
+    }
+
+    let plan = build_recipe_review_group_preflight(
+        group.id,
+        &signals,
+        context.contains_people,
+        context.scene_tags,
+        hdr_source_asset_ids,
+    );
+    recipes.sort_by_key(|recipe| {
+        recipe
+            .target_asset_id
+            .and_then(|asset_id| editable.asset_ids.iter().position(|value| *value == asset_id))
+            .unwrap_or(usize::MAX)
+    });
+    Ok((plan, recipes))
 }
 
 fn lock_runner<T>(
@@ -838,6 +974,12 @@ fn batch_workflow_status(
             continue;
         }
 
+        let (review_plan, _) = recipe_review_preflight_for_group(group.id, &state)?;
+        facts.review_attention += review_plan.attention_asset_ids.len();
+        if !review_plan.pending_asset_ids.is_empty() {
+            facts.review_pending_groups += 1;
+        }
+
         let reference_set = state
             .reference_store
             .get_set(binding.reference_set_id)
@@ -852,49 +994,12 @@ fn batch_workflow_status(
         ) {
             Ok(value) => value,
             Err(ReferenceWorkflowError::MissingExposureAnalysis(_)) => {
-                facts.review_pending_groups += 1;
                 facts.lightroom_unresolved_groups += 1;
                 continue;
             }
             Err(error) => return Err(error.to_string()),
         };
         apply_recipe_reviews(&mut resolved.recipes, &state.recipe_reviews)?;
-
-        for recipe in &resolved.recipes {
-            let Some(asset_id) = recipe.target_asset_id else {
-                continue;
-            };
-            if state
-                .recipe_reviews
-                .is_recipe_confirmed(recipe)
-                .map_err(|error| error.to_string())?
-            {
-                continue;
-            }
-
-            let user_review = state
-                .culling_reviews
-                .get(asset_id)
-                .map_err(|error| error.to_string())?;
-            let signal = RecipeReviewSignal {
-                confirmed: false,
-                has_exception: state
-                    .recipe_reviews
-                    .get(asset_id)
-                    .map_err(|error| error.to_string())?
-                    .is_some(),
-                user_decision: user_review.as_ref().map(|review| review.decision),
-                ai_decision: culling
-                    .recommendations
-                    .iter()
-                    .find(|candidate| candidate.asset_id == asset_id)
-                    .map(|candidate| candidate.decision),
-                evidence_pending: false,
-            };
-            if recipe_review_requires_attention(&signal) {
-                facts.review_attention += 1;
-            }
-        }
 
         if resolved.recipes.is_empty() {
             facts.lightroom_unresolved_groups += 1;
@@ -1764,6 +1869,33 @@ fn copy_reference_style_to_groups(
 }
 
 #[tauri::command]
+fn batch_recipe_review_preflight(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<RecipeReviewGroupPreflight>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let groups = state
+        .catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let mut plans = Vec::new();
+
+    for group in groups {
+        if state
+            .reference_store
+            .group_binding(group.id)
+            .map_err(|error| error.to_string())?
+            .is_none()
+        {
+            continue;
+        }
+        let (plan, _) = recipe_review_preflight_for_group(group.id, &state)?;
+        plans.push(plan);
+    }
+    Ok(plans)
+}
+
+#[tauri::command]
 fn batch_reference_previews(
     batch_id: String,
     state: State<'_, AppState>,
@@ -1952,62 +2084,33 @@ fn confirm_recipe_review_groups(
     let mut recipes_to_confirm = Vec::new();
     let mut changed_groups = Vec::new();
     for group_id in parsed_group_ids {
-        let group = state
-            .catalog
-            .find_group(group_id)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("photo group not found: {group_id}"))?;
-        let culling = build_group_culling_result(&state.analysis_cache, &group, 0.98)
-            .map_err(|error| error.to_string())?;
-        let (_, recipes) = resolve_reviewed_group_recipes(group_id, &state)?;
-
-        let mut signals = Vec::with_capacity(recipes.len());
-        let mut current_unconfirmed = Vec::new();
-        for recipe in recipes {
-            let Some(asset_id) = recipe.target_asset_id else { continue; };
-            let confirmed = state
-                .recipe_reviews
-                .is_recipe_confirmed(&recipe)
-                .map_err(|error| error.to_string())?;
-            let user_review = state
-                .culling_reviews
-                .get(asset_id)
-                .map_err(|error| error.to_string())?;
-            let ai_decision = culling
-                .recommendations
-                .iter()
-                .find(|candidate| candidate.asset_id == asset_id)
-                .map(|candidate| candidate.decision);
-            let evidence_pending = !confirmed
-                && user_review.is_none()
-                && (culling.pending_asset_ids.contains(&asset_id) || ai_decision.is_none());
-
-            signals.push(RecipeReviewSignal {
-                confirmed,
-                has_exception: state
-                    .recipe_reviews
-                    .get(asset_id)
-                    .map_err(|error| error.to_string())?
-                    .is_some(),
-                user_decision: user_review.as_ref().map(|review| review.decision),
-                ai_decision,
-                evidence_pending,
-            });
-            if !confirmed {
-                current_unconfirmed.push(recipe);
-            }
-        }
-
-        if current_unconfirmed.is_empty() {
+        let (plan, recipes) = recipe_review_preflight_for_group(group_id, &state)?;
+        if plan.clear_asset_ids.is_empty()
+            && plan.attention_asset_ids.is_empty()
+            && plan.pending_asset_ids.is_empty()
+        {
             continue;
         }
-        if !recipe_review_group_can_confirm(&signals) {
+        if !plan.can_confirm_clear_group {
             return Err(format!(
-                "group {group_id} still has Recipe attention or pending culling evidence"
+                "group {group_id} still has Recipe attention or pending evidence"
             ));
         }
+
+        let clear_ids = plan.clear_asset_ids.iter().copied().collect::<HashSet<_>>();
+        let current_clear = recipes
+            .into_iter()
+            .filter(|recipe| {
+                recipe
+                    .target_asset_id
+                    .is_some_and(|asset_id| clear_ids.contains(&asset_id))
+            })
+            .collect::<Vec<_>>();
+        if current_clear.is_empty() {
+            continue;
+        }
         changed_groups.push(group_id);
-        recipes_to_confirm.extend(current_unconfirmed);
+        recipes_to_confirm.extend(current_clear);
     }
 
     let confirmations = state
@@ -2557,6 +2660,7 @@ pub fn run() {
             update_group_reference_style,
             copy_group_reference_style,
             copy_reference_style_to_groups,
+            batch_recipe_review_preflight,
             batch_reference_previews,
             set_recipe_reviewed,
             confirm_recipe_reviews,

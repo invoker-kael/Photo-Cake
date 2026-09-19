@@ -19,8 +19,10 @@ import {
   type BackendReferenceBinding,
   type BackendReferenceCandidateSource,
   type BackendReferenceReadinessPlan,
+  type BackendRecipeReviewAssetPreflight,
   type BackendRecipeReviewBatchItem,
   type BackendRecipeReviewBatchResult,
+  type BackendRecipeReviewGroupPreflight,
   type BackendRecipeReviewGroupBatchResult,
   type BackendRecipeReviewOverride,
   type BackendRecipeReviewSyncFields,
@@ -31,6 +33,7 @@ import {
   type BackendStyleProfile,
   type BackendStyleSyncPreflight,
   type BackendSceneTag,
+  type RecipeReviewAttentionReason,
   type StyleSyncReason,
   type BatchJob,
   type BatchStage,
@@ -60,8 +63,10 @@ export type {
   BackendReferenceBinding,
   BackendReferenceCandidateSource,
   BackendReferenceReadinessPlan,
+  BackendRecipeReviewAssetPreflight,
   BackendRecipeReviewBatchItem,
   BackendRecipeReviewBatchResult,
+  BackendRecipeReviewGroupPreflight,
   BackendRecipeReviewGroupBatchResult,
   BackendRecipeReviewOverride,
   BackendRecipeReviewSyncFields,
@@ -353,6 +358,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [referenceStyles, setReferenceStyles] = useState<Record<string, BackendGroupReferenceStyle>>({});
   const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
   const [recipeReviews, setRecipeReviews] = useState<Record<string, BackendRecipeReviewOverride>>({});
+  const [recipeReviewPreflights, setRecipeReviewPreflights] =
+    useState<Record<string, BackendRecipeReviewGroupPreflight>>({});
+  const [reviewRevision, setReviewRevision] = useState(0);
   const [editedPreviews, setEditedPreviews] = useState<Record<string, BackendReviewRenderResult>>({});
   const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
   const [styleBatchSource, setStyleBatchSource] = useState("");
@@ -689,6 +697,40 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   }, [activeBatchId, bridge]);
 
   useEffect(() => {
+    if (!bridge?.loadRecipeReviewPreflight || !activeBatchId) {
+      setRecipeReviewPreflights({});
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadRecipeReviewPreflight(activeBatchId)
+      .then((plans) => {
+        if (disposed) return;
+        setRecipeReviewPreflights(
+          Object.fromEntries(plans.map((plan) => [plan.group_id, plan])),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    activeBatchId,
+    analysisRevision,
+    bridge,
+    cullingReviews,
+    groupRevision,
+    recipeReviews,
+    referenceBindings,
+    referenceStyles,
+    reviewRevision,
+  ]);
+
+  useEffect(() => {
     if (!bridge?.loadReferencePreviews || !activeBatchId) {
       setReferencePreviews({});
       return;
@@ -926,34 +968,46 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     [referencePreviews],
   );
 
-  const recipeReviewPriority = (assetId: string) => {
-    const userDecision = cullingReviews[assetId];
-    if (userDecision === "REJECT") return 99;
-    if (reviewedRecipeAssetIds.has(assetId)) return 90;
-    if (recipeReviews[assetId]) return 0;
-    if (userDecision === "REVIEW") return 1;
+  const recipeReviewPlansByAsset = useMemo(
+    () =>
+      new Map(
+        Object.values(recipeReviewPreflights).flatMap((group) =>
+          group.assets.map((asset) => [asset.asset_id, asset] as const),
+        ),
+      ),
+    [recipeReviewPreflights],
+  );
 
-    const recommendation = cullingRecommendations.get(assetId);
-    if (!userDecision && recommendation?.decision === "REJECT_SUGGESTION") return 2;
-    if (!userDecision && recommendation?.decision === "REVIEW") return 3;
-    return 10;
+  const recipeReviewPriority = (assetId: string) => {
+    const plan = recipeReviewPlansByAsset.get(assetId);
+    if (!plan) return 80;
+    if (plan.disposition === "CONFIRMED") return 90;
+    if (plan.disposition === "PENDING") return 70;
+    if (plan.disposition === "CLEAR") return 20;
+    const order: Record<RecipeReviewAttentionReason, number> = {
+      SAVED_EXCEPTION: 0,
+      PHOTOGRAPHER_REVIEW: 1,
+      AI_REJECT_SUGGESTION: 2,
+      AI_REVIEW: 3,
+      EVIDENCE_PENDING: 4,
+    };
+    return plan.reason ? order[plan.reason] : 10;
   };
 
   const recipeReviewLabel = (assetId: string) => {
-    const userDecision = cullingReviews[assetId];
-    if (userDecision === "REJECT") return "Photographer Reject · excluded from Lightroom";
-    if (reviewedRecipeAssetIds.has(assetId)) return "Reviewed · current Recipe looks good";
-    if (recipeReviews[assetId]) return "Saved per-photo exception";
-    if (userDecision === "REVIEW") return "Photographer marked Review";
-
-    const recommendation = cullingRecommendations.get(assetId);
-    if (!userDecision && recommendation?.decision === "REJECT_SUGGESTION") {
-      return "AI cull: Reject suggestion";
-    }
-    if (!userDecision && recommendation?.decision === "REVIEW") {
-      return "AI cull: Review";
-    }
-    return "Adaptive Recipe";
+    const plan = recipeReviewPlansByAsset.get(assetId);
+    if (!plan) return "Recipe preflight loading";
+    if (plan.disposition === "CONFIRMED") return "Reviewed · current Recipe looks good";
+    if (plan.disposition === "PENDING") return "Waiting for complete local evidence";
+    if (plan.disposition === "CLEAR") return "Adaptive Recipe · clear for batch confirmation";
+    const labels: Record<RecipeReviewAttentionReason, string> = {
+      SAVED_EXCEPTION: "Saved per-photo exception",
+      PHOTOGRAPHER_REVIEW: "Photographer marked Review",
+      AI_REJECT_SUGGESTION: "AI cull: Reject suggestion",
+      AI_REVIEW: "AI cull: Review",
+      EVIDENCE_PENDING: "Waiting for complete local evidence",
+    };
+    return plan.reason ? labels[plan.reason] : "Recipe needs review";
   };
 
   const recipeReviewItems = (photoContext?.groups ?? []).flatMap((group) => {
@@ -961,13 +1015,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     if (!preview || preview.pending_asset_id) return [];
     return preview.recipes.flatMap((recipe) => {
       const assetId = recipe.target_asset_id;
-      if (!assetId || cullingReviews[assetId] === "REJECT") return [];
+      if (!assetId) return [];
+      const plan = recipeReviewPlansByAsset.get(assetId);
+      if (!plan) return [];
       return [{
         group_id: group.id,
         asset_id: assetId,
-        reviewed: reviewedRecipeAssetIds.has(assetId),
-        attention: recipeReviewPriority(assetId) < 10,
-        exception: recipeReviews[assetId] != null,
+        reviewed: plan.disposition === "CONFIRMED",
+        attention: plan.disposition === "NEEDS_REVIEW",
+        exception: plan.reason === "SAVED_EXCEPTION",
       }];
     });
   });
@@ -986,40 +1042,25 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     ),
   ).size;
 
+  const reviewPlans = Object.values(recipeReviewPreflights);
   const recipeReviewSummary = {
-    total: recipeReviewItems.length,
-    attention: recipeReviewItems.filter((item) => item.attention).length,
-    confirmed: recipeReviewItems.filter((item) => item.reviewed).length,
-    exceptions: recipeReviewItems.filter((item) => item.exception).length,
+    total: reviewPlans.reduce((total, plan) => total + plan.assets.length, 0),
+    attention: reviewPlans.reduce((total, plan) => total + plan.attention_asset_ids.length, 0),
+    clear: reviewPlans.reduce((total, plan) => total + plan.clear_asset_ids.length, 0),
+    confirmed: reviewPlans.reduce((total, plan) => total + plan.confirmed_asset_ids.length, 0),
+    pending: reviewPlans.reduce((total, plan) => total + plan.pending_asset_ids.length, 0),
+    exceptions: reviewPlans.reduce(
+      (total, plan) =>
+        total + plan.assets.filter((asset) => asset.reason === "SAVED_EXCEPTION").length,
+      0,
+    ),
+    hdrSources: new Set(reviewPlans.flatMap((plan) => plan.hdr_source_asset_ids)).size,
     rejected: rejectedReviewCount,
   };
 
-  const clearRecipeReviewGroups = (photoContext?.groups ?? []).flatMap((group) => {
-    const preview = referencePreviews[group.id];
-    const cullingGroup = culling.find((value) => value.group_id === group.id);
-    if (!preview || preview.pending_asset_id || !cullingGroup) return [];
-
-    const pending = new Set(cullingGroup.pending_asset_ids);
-    const assetIds = preview.recipes.flatMap((recipe) => {
-      const assetId = recipe.target_asset_id;
-      if (
-        !assetId ||
-        cullingReviews[assetId] === "REJECT" ||
-        reviewedRecipeAssetIds.has(assetId)
-      ) return [];
-      return [assetId];
-    });
-    if (assetIds.length === 0) return [];
-
-    const clear = assetIds.every((assetId) => {
-      const userDecision = cullingReviews[assetId];
-      if (!userDecision && (pending.has(assetId) || !cullingRecommendations.has(assetId))) {
-        return false;
-      }
-      return recipeReviewPriority(assetId) >= 10;
-    });
-    return clear ? [{ group_id: group.id, asset_ids: assetIds }] : [];
-  });
+  const clearRecipeReviewGroups = reviewPlans
+    .filter((plan) => plan.can_confirm_clear_group)
+    .map((plan) => ({ group_id: plan.group_id, asset_ids: plan.clear_asset_ids }));
   const clearRecipeReviewAssetCount = clearRecipeReviewGroups.reduce(
     (total, group) => total + group.asset_ids.length,
     0,
@@ -1801,6 +1842,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           },
         };
       });
+      setReviewRevision((value) => value + 1);
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -1839,6 +1881,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       const result: BackendRecipeReviewBatchResult =
         await bridge.confirmRecipeReviews(visibleRecipeReviewItems);
       applyConfirmedRecipeAssets(result.asset_ids);
+      setReviewRevision((value) => value + 1);
       setReviewBatchNote(`Confirmed ${result.asset_ids.length} visible Recipes.`);
       setBackendError(null);
     } catch (error) {
@@ -1856,6 +1899,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       const result: BackendRecipeReviewGroupBatchResult =
         await bridge.confirmRecipeReviewGroups(groupIds);
       applyConfirmedRecipeAssets(result.asset_ids);
+      setReviewRevision((value) => value + 1);
       setReviewBatchNote(
         `Confirmed ${result.asset_ids.length} straightforward Recipes across ${result.group_ids.length} clear groups.`,
       );
@@ -3241,8 +3285,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       </div>
       <div className="review-summary">
         <div><span>Attention</span><strong>{recipeReviewSummary.attention}</strong></div>
+        <div><span>Clear</span><strong>{recipeReviewSummary.clear}</strong></div>
         <div><span>Confirmed</span><strong>{recipeReviewSummary.confirmed}</strong></div>
+        <div><span>Pending</span><strong>{recipeReviewSummary.pending}</strong></div>
         <div><span>Exceptions</span><strong>{recipeReviewSummary.exceptions}</strong></div>
+        <div><span>HDR sources</span><strong>{recipeReviewSummary.hdrSources}</strong></div>
         <div><span>Reject skipped</span><strong>{recipeReviewSummary.rejected}</strong></div>
       </div>
       {culling.some((group) => (group.exposure_brackets?.length ?? 0) > 0) && (
@@ -3253,7 +3300,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       <div className="cull-toolbar">
         <span>
           {reviewViewMode === "TRIAGE"
-            ? "Triage reuses Cull decisions and saved per-photo exceptions so attention goes to uncertain photos first."
+            ? "Triage follows the backend Recipe preflight: saved exceptions and Cull uncertainty first; clear, pending and already-confirmed Recipes stay out of the attention queue."
             : "All shows every adaptive Recipe, including photos already considered straightforward."}
         </span>
         <div className="cull-toolbar-actions">
@@ -3330,6 +3377,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             );
           }
 
+          const preflight = recipeReviewPreflights[group.id];
           const recipesWithTargets = preview.recipes.filter(
             (recipe) => recipe.target_asset_id != null,
           );
@@ -3338,7 +3386,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             reviewViewMode === "ALL" || syncingThisGroup
               ? recipesWithTargets
               : recipesWithTargets
-                  .filter((recipe) => recipeReviewPriority(recipe.target_asset_id!) < 10)
+                  .filter(
+                    (recipe) =>
+                      recipeReviewPlansByAsset.get(recipe.target_asset_id!)?.disposition ===
+                      "NEEDS_REVIEW",
+                  )
                   .slice()
                   .sort((left, right) => {
                     const leftId = left.target_asset_id!;
@@ -3359,21 +3411,20 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         Number.MAX_SAFE_INTEGER)
                     );
                   });
-          const groupAttentionCount = recipesWithTargets.filter(
-            (recipe) =>
-              recipe.target_asset_id != null &&
-              recipeReviewPriority(recipe.target_asset_id) < 10,
-          ).length;
-          const groupConfirmedCount = recipesWithTargets.filter(
-            (recipe) =>
-              recipe.target_asset_id != null &&
-              reviewedRecipeAssetIds.has(recipe.target_asset_id),
-          ).length;
-          const groupExceptionCount = recipesWithTargets.filter(
-            (recipe) =>
-              recipe.target_asset_id != null &&
-              recipeReviews[recipe.target_asset_id] != null,
-          ).length;
+          const groupAttentionCount = preflight?.attention_asset_ids.length ?? 0;
+          const groupConfirmedCount = preflight?.confirmed_asset_ids.length ?? 0;
+          const groupPendingCount = preflight?.pending_asset_ids.length ?? 0;
+          const groupExceptionCount =
+            preflight?.assets.filter((asset) => asset.reason === "SAVED_EXCEPTION").length ?? 0;
+          const groupContext = preflight
+            ? [
+                preflight.contains_people ? "people/family" : null,
+                ...preflight.scene_tags.map(sceneTagLabel),
+                preflight.hdr_source_asset_ids.length
+                  ? `${preflight.hdr_source_asset_ids.length} HDR sources routed separately`
+                  : null,
+              ].filter(Boolean).join(" · ")
+            : "Recipe preflight loading";
           const clearGroup = clearRecipeReviewGroups.find(
             (value) => value.group_id === group.id,
           );
@@ -3384,8 +3435,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <strong>Group {groupIndex + 1}</strong>
                 <div className="recipe-review-head-actions">
                   <span>
-                    {`${groupAttentionCount} attention · ${groupConfirmedCount} confirmed · ${groupExceptionCount} exceptions · ${recipesWithTargets.length} total`}
+                    {`${groupAttentionCount} attention · ${groupPendingCount} pending · ${groupConfirmedCount} confirmed · ${groupExceptionCount} exceptions · ${recipesWithTargets.length} editable`}
                   </span>
+                  <small>{groupContext}</small>
                   {clearGroup && (
                     <button
                       className="cull-batch-action"

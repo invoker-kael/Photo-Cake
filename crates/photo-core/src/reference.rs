@@ -2,7 +2,8 @@ use crate::bracketing::ExposureBracketSet;
 use crate::classification::SceneTag;
 use crate::color_sync::{
     build_adaptive_group_plan, reference_relative_contrast_adjustment,
-    reference_relative_exposure_correction, reference_relative_saturation_adjustment,
+    reference_relative_endpoint_adjustments, reference_relative_exposure_correction,
+    reference_relative_saturation_adjustment,
     reference_relative_tone_adjustments, ColorSyncError,
     GroupColorIntent, GroupColorSyncPlan, GroupSyncMode, PhotoColorAnalysis,
     PhotoExposureAnalysis,
@@ -519,6 +520,14 @@ impl ReferenceSet {
                 recipe.adjustments.highlights = Some(highlights);
                 recipe.adjustments.shadows = Some(shadows);
             }
+            if let Some((whites, blacks)) = reference_relative_endpoint_adjustments(
+                &reference_evidence,
+                target,
+                exposure_delta,
+            ) {
+                recipe.adjustments.whites = Some(whites);
+                recipe.adjustments.blacks = Some(blacks);
+            }
             if let Some(contrast_delta) = reference_relative_contrast_adjustment(
                 &reference_evidence,
                 target,
@@ -946,9 +955,11 @@ mod tests {
                     temperature_k: analysis.temperature_k,
                     tint: analysis.tint,
                     confidence: analysis.confidence,
+                    luminance_p02: None,
                     luminance_p10: None,
                     luminance_p50: None,
                     luminance_p90: None,
+                    luminance_p98: None,
                     shadow_clip_ratio: None,
                     highlight_clip_ratio: None,
                     colorfulness: None,
@@ -1027,9 +1038,11 @@ mod tests {
                 temperature_k: None,
                 tint: None,
                 confidence: 1.0,
+                luminance_p02: None,
                 luminance_p10: Some(0.18),
                 luminance_p50: Some(0.48),
                 luminance_p90: Some(0.78),
+                luminance_p98: None,
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: None,
@@ -1040,9 +1053,11 @@ mod tests {
                 temperature_k: None,
                 tint: None,
                 confidence: 1.0,
+                luminance_p02: None,
                 luminance_p10: Some(0.05),
                 luminance_p50: Some(0.50),
                 luminance_p90: Some(0.96),
+                luminance_p98: None,
                 shadow_clip_ratio: Some(0.03),
                 highlight_clip_ratio: Some(0.04),
                 colorfulness: None,
@@ -1094,9 +1109,11 @@ mod tests {
                 temperature_k: None,
                 tint: None,
                 confidence: 1.0,
+                luminance_p02: None,
                 luminance_p10: Some(0.15),
                 luminance_p50: Some(0.50),
                 luminance_p90: Some(0.85),
+                luminance_p98: None,
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: Some(0.20),
@@ -1107,9 +1124,11 @@ mod tests {
                 temperature_k: None,
                 tint: None,
                 confidence: 1.0,
+                luminance_p02: None,
                 luminance_p10: Some(0.08),
                 luminance_p50: Some(0.25),
                 luminance_p90: Some(0.45),
+                luminance_p98: None,
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: Some(0.20),
@@ -1159,9 +1178,11 @@ mod tests {
                 temperature_k: None,
                 tint: None,
                 confidence: 1.0,
+                luminance_p02: None,
                 luminance_p10: Some(0.15),
                 luminance_p50: Some(0.50),
                 luminance_p90: Some(0.85),
+                luminance_p98: None,
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: Some(0.30),
@@ -1172,9 +1193,11 @@ mod tests {
                 temperature_k: None,
                 tint: None,
                 confidence: 1.0,
+                luminance_p02: None,
                 luminance_p10: Some(0.30),
                 luminance_p50: Some(0.50),
                 luminance_p90: Some(0.70),
+                luminance_p98: None,
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: Some(0.10),
@@ -1212,6 +1235,77 @@ mod tests {
         let recipe = &result.recipes[0];
         assert!(recipe.adjustments.contrast.unwrap() > 15.0);
         assert!(recipe.adjustments.saturation.unwrap() > 13.0);
+    }
+
+    #[test]
+    fn cached_reference_generates_per_photo_whites_and_blacks() {
+        let dir = tempdir().unwrap();
+        let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
+        let reference_id = Uuid::new_v4();
+        let target = Uuid::new_v4();
+
+        for evidence in [
+            PhotoExposureAnalysis {
+                asset_id: reference_id,
+                exposure_ev: 0.0,
+                temperature_k: None,
+                tint: None,
+                confidence: 1.0,
+                luminance_p02: Some(0.03),
+                luminance_p10: Some(0.15),
+                luminance_p50: Some(0.50),
+                luminance_p90: Some(0.82),
+                luminance_p98: Some(0.96),
+                shadow_clip_ratio: Some(0.0),
+                highlight_clip_ratio: Some(0.0),
+                colorfulness: Some(0.2),
+            },
+            PhotoExposureAnalysis {
+                asset_id: target,
+                exposure_ev: 0.0,
+                temperature_k: None,
+                tint: None,
+                confidence: 1.0,
+                luminance_p02: Some(0.12),
+                luminance_p10: Some(0.18),
+                luminance_p50: Some(0.50),
+                luminance_p90: Some(0.85),
+                luminance_p98: Some(1.0),
+                shadow_clip_ratio: Some(0.0),
+                highlight_clip_ratio: Some(0.02),
+                colorfulness: Some(0.2),
+            },
+        ] {
+            cache
+                .put(&AnalysisArtifact {
+                    key: AnalysisCacheKey {
+                        asset_id: evidence.asset_id,
+                        source_fingerprint: "raw-v5".into(),
+                        preview_revision: "preview-v1".into(),
+                        task: InferenceTask::ExposureAnalysis,
+                        model_id: "preview-relative-exposure".into(),
+                        model_version: "5".into(),
+                        config_hash: "trimmed-luma-rgb-clipping-endpoints-color-relative-v5".into(),
+                    },
+                    payload_json: serde_json::to_value(evidence).unwrap(),
+                })
+                .unwrap();
+        }
+
+        let group = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Similar,
+            basis: GroupingBasis::SemanticSimilarity,
+            asset_ids: vec![target],
+            manual_locked: false,
+        };
+        let references = ReferenceSet::from_photos("reference", vec![reference_id]);
+        let result = references
+            .resolve_group_from_cache(&cache, &group, reference_id, 1)
+            .unwrap();
+        let recipe = &result.recipes[0];
+        assert!(recipe.adjustments.whites.unwrap() < -10.0);
+        assert!(recipe.adjustments.blacks.unwrap() < -10.0);
     }
 
     #[test]

@@ -524,3 +524,12 @@ ExposureAnalysis v4 keeps the existing luminance percentiles but changes clippin
 Reference-relative Highlights, Exposure refinement and positive Contrast correction all consume this clipping evidence. Excess target highlight clipping versus the selected Reference pushes Highlights down and suppresses automatic brightening; existing clipped targets also receive less automatic positive Contrast.
 
 Edited preview tone recovery now remaps luminance toward white or black while preserving channel relationships instead of adding the same RGB offset to every channel. This reduces hue/chroma washout in colored highlights and shadows while remaining a lightweight preview approximation.
+
+
+### Reference-relative white and black endpoints
+
+ExposureAnalysis v5 extends the preview-relative tonal evidence with P02 and P98. P10/P90 continue to drive broad Shadows/Highlights matching, while P02/P98 independently describe the black/white endpoints. This separation prevents Highlights/Shadows from doing all tonal work and gives the adaptive Recipe a more photographic four-region tone model: Blacks, Shadows, Highlights and Whites.
+
+Reference-relative endpoint matching runs after the final per-photo exposure correction. Whites and Blacks are bounded to ±60 and incorporate excess RGB clipping versus the selected Reference. Old cached evidence without P02/P98 remains valid and simply skips endpoint matching.
+
+Whites/Blacks are first-class Recipe fields. The lightweight Review preview approximates them with narrow luminance masks, Recipe Review supports additive per-photo exceptions and selective same-group synchronization, and Lightroom handoff serializes them as crs:Whites2012 / crs:Blacks2012.

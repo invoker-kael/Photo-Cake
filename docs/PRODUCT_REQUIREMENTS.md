@@ -472,3 +472,13 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Adaptive Highlights SHOULD compensate for excess target clipping even when luminance percentiles alone look similar.
 - Positive adaptive Contrast MUST remain conservative on clipped targets.
 - Edited preview Highlights/Shadows SHOULD preserve colored-region channel relationships better than an equal RGB offset.
+
+
+### Adaptive white and black points
+
+- Analyze SHOULD record P02 and P98 preview-relative luminance evidence in addition to P10/P50/P90.
+- Adaptive Recipe generation SHOULD use P02/P98 for white/black endpoint matching and reserve P10/P90 for broader Highlights/Shadows matching.
+- Automatic Whites/Blacks MUST be bounded and MUST incorporate channel-aware clipping evidence conservatively.
+- Legacy analysis payloads without endpoint percentiles MUST remain readable and MUST skip endpoint matching rather than synthesize evidence.
+- Whites/Blacks MUST be represented in Recipe, Review preview, per-photo exception editing, selective exception synchronization and Lightroom XMP delivery.
+- Lightroom handoff MUST use Whites2012 and Blacks2012 for these controls.

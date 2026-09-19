@@ -223,3 +223,8 @@ Prepared in the same batch: P50 now acts as a conservative secondary exposure re
 ### Core editing quality: channel-aware highlight protection
 
 Prepared as the next quality batch: ExposureAnalysis v4 makes clipping RGB-channel-aware, then feeds that evidence into adaptive Exposure, Highlights and Contrast. Review preview tone recovery also moves from equal RGB offsets to hue-friendlier luminance remapping. This specifically improves saturated sunsets, neon, stage lighting, colored architecture and skin/specular highlights.
+
+
+### Core editing quality: independent white/black points
+
+Prepared after channel-aware clipping protection: ExposureAnalysis v5 adds P02/P98 endpoint evidence and adaptive Recipe gains independent Whites/Blacks instead of forcing Highlights/Shadows to control the entire tonal range. The controls are carried through Review exceptions, preview rendering and Lightroom XMP.

@@ -44,6 +44,8 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
     let contrast = recipe.adjustments.contrast.unwrap_or(0.0).clamp(-100.0, 100.0);
     let highlights = recipe.adjustments.highlights.unwrap_or(0.0).clamp(-100.0, 100.0);
     let shadows = recipe.adjustments.shadows.unwrap_or(0.0).clamp(-100.0, 100.0);
+    let whites = recipe.adjustments.whites.unwrap_or(0.0).clamp(-100.0, 100.0);
+    let blacks = recipe.adjustments.blacks.unwrap_or(0.0).clamp(-100.0, 100.0);
     let saturation = recipe
         .adjustments
         .saturation
@@ -54,6 +56,8 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
         && contrast.abs() < 0.0001
         && highlights.abs() < 0.0001
         && shadows.abs() < 0.0001
+        && whites.abs() < 0.0001
+        && blacks.abs() < 0.0001
         && saturation.abs() < 0.0001
     {
         return image;
@@ -86,6 +90,15 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
             (shadows / 100.0) * shadow_mask * 0.28
             + (highlights / 100.0) * highlight_mask * 0.28;
         remap_luminance_preserving_hue(&mut rgb, luminance, tone_delta);
+
+        let post_tone_luminance =
+            (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
+        let black_mask = (1.0 - post_tone_luminance).powi(4);
+        let white_mask = post_tone_luminance.powi(4);
+        let endpoint_delta =
+            (blacks / 100.0) * black_mask * 0.18
+            + (whites / 100.0) * white_mask * 0.18;
+        remap_luminance_preserving_hue(&mut rgb, post_tone_luminance, endpoint_delta);
 
         let toned_luminance = (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
         for channel in &mut rgb {
@@ -187,6 +200,8 @@ mod tests {
                 contrast: Some(contrast),
                 highlights: Some(highlights),
                 shadows: Some(shadows),
+                whites: None,
+                blacks: None,
                 temperature: None,
                 tint: None,
                 saturation: Some(saturation),
@@ -196,6 +211,13 @@ mod tests {
 
     fn recipe(exposure: f32, contrast: f32, saturation: f32) -> Recipe {
         recipe_with_tone(exposure, contrast, 0.0, 0.0, saturation)
+    }
+
+    fn recipe_with_endpoints(whites: f32, blacks: f32) -> Recipe {
+        let mut recipe = recipe_with_tone(0.0, 0.0, 0.0, 0.0, 0.0);
+        recipe.adjustments.whites = Some(whites);
+        recipe.adjustments.blacks = Some(blacks);
+        recipe
     }
 
     #[test]
@@ -301,6 +323,30 @@ mod tests {
         .to_rgb8();
         let pixel = edited.get_pixel(0, 0).0;
         assert!(pixel[0] > pixel[1] && pixel[1] > pixel[2]);
+    }
+
+    #[test]
+    fn whites_target_bright_pixels_more_than_midtones() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_fn(2, 1, |x, _| {
+            if x == 0 { Rgb([128, 128, 128]) } else { Rgb([230, 230, 230]) }
+        }));
+        let edited = apply_preview_adjustments(source, &recipe_with_endpoints(50.0, 0.0))
+            .to_rgb8();
+        let mid_gain = i16::from(edited.get_pixel(0, 0)[0]) - 128;
+        let bright_gain = i16::from(edited.get_pixel(1, 0)[0]) - 230;
+        assert!(bright_gain > mid_gain);
+    }
+
+    #[test]
+    fn blacks_target_dark_pixels_more_than_midtones() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_fn(2, 1, |x, _| {
+            if x == 0 { Rgb([25, 25, 25]) } else { Rgb([128, 128, 128]) }
+        }));
+        let edited = apply_preview_adjustments(source, &recipe_with_endpoints(0.0, 50.0))
+            .to_rgb8();
+        let dark_gain = i16::from(edited.get_pixel(0, 0)[0]) - 25;
+        let mid_gain = i16::from(edited.get_pixel(1, 0)[0]) - 128;
+        assert!(dark_gain > mid_gain);
     }
 
     #[test]

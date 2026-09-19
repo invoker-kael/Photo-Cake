@@ -23,9 +23,11 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
             temperature_k: None,
             tint: None,
             confidence: 0.0,
+            luminance_p02: None,
             luminance_p10: None,
             luminance_p50: None,
             luminance_p90: None,
+            luminance_p98: None,
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
             colorfulness: None,
@@ -85,9 +87,11 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
         temperature_k: None,
         tint: None,
         confidence,
+        luminance_p02: Some(percentile(0.02)),
         luminance_p10: Some(percentile(0.10)),
         luminance_p50: Some(percentile(0.50)),
         luminance_p90: Some(percentile(0.90)),
+        luminance_p98: Some(percentile(0.98)),
         shadow_clip_ratio: Some(shadow_clip_ratio),
         highlight_clip_ratio: Some(highlight_clip_ratio),
         colorfulness,
@@ -122,8 +126,10 @@ mod tests {
         }
         let analysis =
             analyze_preview_exposure(Uuid::new_v4(), &DynamicImage::ImageLuma8(image));
+        assert!(analysis.luminance_p02.unwrap() <= analysis.luminance_p10.unwrap());
         assert!(analysis.luminance_p10.unwrap() < analysis.luminance_p50.unwrap());
         assert!(analysis.luminance_p90.unwrap() > analysis.luminance_p50.unwrap());
+        assert!(analysis.luminance_p98.unwrap() >= analysis.luminance_p90.unwrap());
     }
 
     #[test]

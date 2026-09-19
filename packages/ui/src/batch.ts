@@ -337,6 +337,8 @@ export interface BackendEditAdjustments {
   contrast: number | null;
   highlights: number | null;
   shadows: number | null;
+  whites: number | null;
+  blacks: number | null;
   temperature: number | null;
   tint: number | null;
   saturation: number | null;
@@ -385,6 +387,8 @@ export interface BackendRecipeReviewOverride {
   exposure_delta_ev: number;
   highlights_delta: number;
   shadows_delta: number;
+  whites_delta: number;
+  blacks_delta: number;
   contrast_delta: number;
   saturation_delta: number;
 }
@@ -434,6 +438,8 @@ export interface BackendRecipeReviewSyncFields {
   exposure: boolean;
   highlights: boolean;
   shadows: boolean;
+  whites: boolean;
+  blacks: boolean;
   contrast: boolean;
   saturation: boolean;
 }
@@ -510,6 +516,8 @@ export interface PhotoCakeBridge {
     exposureDeltaEv: number,
     highlightsDelta: number,
     shadowsDelta: number,
+    whitesDelta: number,
+    blacksDelta: number,
     contrastDelta: number,
     saturationDelta: number,
   ): Promise<BackendRecipeReviewOverride>;

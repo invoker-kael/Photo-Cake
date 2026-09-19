@@ -127,6 +127,8 @@ const bridge: PhotoCakeBridge = {
     exposureDeltaEv,
     highlightsDelta,
     shadowsDelta,
+    whitesDelta,
+    blacksDelta,
     contrastDelta,
     saturationDelta,
   ) =>
@@ -135,6 +137,8 @@ const bridge: PhotoCakeBridge = {
       exposureDeltaEv,
       highlightsDelta,
       shadowsDelta,
+      whitesDelta,
+      blacksDelta,
       contrastDelta,
       saturationDelta,
     }),

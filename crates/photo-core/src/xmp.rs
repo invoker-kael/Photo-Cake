@@ -20,6 +20,8 @@ pub struct XmpEditState {
     pub contrast: Option<f32>,
     pub highlights: Option<f32>,
     pub shadows: Option<f32>,
+    pub whites: Option<f32>,
+    pub blacks: Option<f32>,
     pub temperature: Option<f32>,
     pub tint: Option<f32>,
     pub saturation: Option<f32>,
@@ -96,6 +98,8 @@ impl XmpEditState {
             contrast: recipe.adjustments.contrast,
             highlights: recipe.adjustments.highlights,
             shadows: recipe.adjustments.shadows,
+            whites: recipe.adjustments.whites,
+            blacks: recipe.adjustments.blacks,
             temperature,
             tint,
             saturation: recipe.adjustments.saturation,
@@ -119,6 +123,8 @@ impl XmpEditState {
         push_attr(&mut attributes, "crs:Contrast2012", self.contrast);
         push_attr(&mut attributes, "crs:Highlights2012", self.highlights);
         push_attr(&mut attributes, "crs:Shadows2012", self.shadows);
+        push_attr(&mut attributes, "crs:Whites2012", self.whites);
+        push_attr(&mut attributes, "crs:Blacks2012", self.blacks);
         push_attr(&mut attributes, "crs:Temperature", self.temperature);
         push_attr(&mut attributes, "crs:Tint", self.tint);
         push_attr(&mut attributes, "crs:Saturation", self.saturation);
@@ -146,6 +152,8 @@ impl XmpEditState {
             contrast: None,
             highlights: None,
             shadows: None,
+            whites: None,
+            blacks: None,
             temperature: None,
             tint: None,
             saturation: None,
@@ -195,6 +203,8 @@ fn assign_xmp_attribute(
         "Contrast2012" => state.contrast = Some(parse_xmp_number(name, value)?),
         "Highlights2012" => state.highlights = Some(parse_xmp_number(name, value)?),
         "Shadows2012" => state.shadows = Some(parse_xmp_number(name, value)?),
+        "Whites2012" => state.whites = Some(parse_xmp_number(name, value)?),
+        "Blacks2012" => state.blacks = Some(parse_xmp_number(name, value)?),
         "Temperature" => state.temperature = Some(parse_xmp_number(name, value)?),
         "Tint" => state.tint = Some(parse_xmp_number(name, value)?),
         "Saturation" => state.saturation = Some(parse_xmp_number(name, value)?),
@@ -225,6 +235,8 @@ pub fn validate_recipe_xmp(recipe: &Recipe, document: &str) -> Result<(), XmpPar
         ("contrast", expected.contrast, actual.contrast),
         ("highlights", expected.highlights, actual.highlights),
         ("shadows", expected.shadows, actual.shadows),
+        ("whites", expected.whites, actual.whites),
+        ("blacks", expected.blacks, actual.blacks),
         ("temperature", expected.temperature, actual.temperature),
         ("tint", expected.tint, actual.tint),
         ("saturation", expected.saturation, actual.saturation),
@@ -251,6 +263,8 @@ pub fn xmp_document_matches_recipe_state(recipe: &Recipe, document: &str) -> boo
         (expected.contrast, actual.contrast),
         (expected.highlights, actual.highlights),
         (expected.shadows, actual.shadows),
+        (expected.whites, actual.whites),
+        (expected.blacks, actual.blacks),
         (expected.temperature, actual.temperature),
         (expected.tint, actual.tint),
         (expected.saturation, actual.saturation),
@@ -519,6 +533,8 @@ mod tests {
                 contrast: None,
                 highlights: Some(-40.0),
                 shadows: Some(25.0),
+                whites: Some(-12.0),
+                blacks: Some(8.0),
                 temperature: None,
                 tint: None,
                 saturation: None,
@@ -532,6 +548,8 @@ mod tests {
         assert!(xmp.contains(r#"pc:TargetAssetId="00000000-0000-0000-0000-000000000000""#));
         assert!(xmp.contains(r#"crs:Exposure2012="0.35""#));
         assert!(xmp.contains(r#"crs:Highlights2012="-40""#));
+        assert!(xmp.contains(r#"crs:Whites2012="-12""#));
+        assert!(xmp.contains(r#"crs:Blacks2012="8""#));
         assert!(!xmp.contains("crs:Contrast2012"));
         assert!(!xmp.contains("crs:Temperature"));
         assert!(!xmp.contains("crs:Tint"));

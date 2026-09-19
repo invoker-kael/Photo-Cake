@@ -91,11 +91,15 @@ pub struct PhotoExposureAnalysis {
     pub tint: Option<f32>,
     pub confidence: f32,
     #[serde(default)]
+    pub luminance_p02: Option<f32>,
+    #[serde(default)]
     pub luminance_p10: Option<f32>,
     #[serde(default)]
     pub luminance_p50: Option<f32>,
     #[serde(default)]
     pub luminance_p90: Option<f32>,
+    #[serde(default)]
+    pub luminance_p98: Option<f32>,
     #[serde(default)]
     pub shadow_clip_ratio: Option<f32>,
     #[serde(default)]
@@ -117,6 +121,10 @@ impl PhotoExposureAnalysis {
 
     pub fn tone_percentiles(&self) -> Option<(f32, f32)> {
         self.luminance_p10.zip(self.luminance_p90)
+    }
+
+    pub fn endpoint_percentiles(&self) -> Option<(f32, f32)> {
+        self.luminance_p02.zip(self.luminance_p98)
     }
 }
 
@@ -164,6 +172,52 @@ pub fn reference_relative_tone_adjustments(
         highlights.clamp(-70.0, 70.0),
         shadows.clamp(-70.0, 70.0),
     ))
+}
+
+/// Resolve white/black endpoint corrections independently from the broader
+/// Highlights/Shadows match. P02/P98 target the tonal endpoints while P10/P90
+/// remain responsible for the wider shadow/highlight regions.
+pub fn reference_relative_endpoint_adjustments(
+    reference: &PhotoExposureAnalysis,
+    target: &PhotoExposureAnalysis,
+    exposure_delta_ev: f32,
+) -> Option<(f32, f32)> {
+    let (reference_black, reference_white) = reference.endpoint_percentiles()?;
+    let (target_black, target_white) = target.endpoint_percentiles()?;
+    let exposure_factor = 2.0_f32.powf(exposure_delta_ev.clamp(-5.0, 5.0));
+    let projected_black = (target_black * exposure_factor).clamp(0.0, 1.0);
+    let projected_white = (target_white * exposure_factor).clamp(0.0, 1.0);
+    let confidence = reference
+        .confidence
+        .min(target.confidence)
+        .clamp(0.2, 1.0);
+
+    let excess_shadow_clip = (
+        target.shadow_clip_ratio.unwrap_or(0.0)
+            - reference.shadow_clip_ratio.unwrap_or(0.0)
+    )
+    .max(0.0);
+    let excess_highlight_clip = (
+        target.highlight_clip_ratio.unwrap_or(0.0)
+            - reference.highlight_clip_ratio.unwrap_or(0.0)
+    )
+    .max(0.0);
+
+    let mut blacks =
+        (reference_black - projected_black) * 220.0 * confidence
+        + excess_shadow_clip * 350.0 * confidence;
+    let mut whites =
+        (reference_white - projected_white) * 220.0 * confidence
+        - excess_highlight_clip * 350.0 * confidence;
+
+    if blacks.abs() < 1.5 {
+        blacks = 0.0;
+    }
+    if whites.abs() < 1.5 {
+        whites = 0.0;
+    }
+
+    Some((whites.clamp(-60.0, 60.0), blacks.clamp(-60.0, 60.0)))
 }
 
 /// Refine the base preview-relative exposure match with median luminance while
@@ -673,9 +727,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.18),
             luminance_p50: Some(0.48),
             luminance_p90: Some(0.78),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -686,9 +742,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.05),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.96),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.04),
             highlight_clip_ratio: Some(0.05),
             colorfulness: None,
@@ -708,9 +766,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.20),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.80),
+            luminance_p98: None,
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
             colorfulness: None,
@@ -721,9 +781,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.10),
             luminance_p50: Some(0.25),
             luminance_p90: Some(0.40),
+            luminance_p98: None,
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
             colorfulness: None,
@@ -736,6 +798,67 @@ mod tests {
     }
 
     #[test]
+    fn endpoint_matching_deepens_raised_blacks_and_recovers_hot_whites() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.03),
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.82),
+            luminance_p98: Some(0.96),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.12),
+            luminance_p10: Some(0.18),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.85),
+            luminance_p98: Some(1.0),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.02),
+            colorfulness: None,
+        };
+
+        let (whites, blacks) =
+            reference_relative_endpoint_adjustments(&reference, &target, 0.0).unwrap();
+        assert!(whites < -10.0);
+        assert!(blacks < -10.0);
+    }
+
+    #[test]
+    fn old_endpoint_evidence_skips_whites_blacks_matching() {
+        let evidence = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: None,
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.85),
+            luminance_p98: None,
+            shadow_clip_ratio: None,
+            highlight_clip_ratio: None,
+            colorfulness: None,
+        };
+        assert!(
+            reference_relative_endpoint_adjustments(&evidence, &evidence, 0.0).is_none()
+        );
+    }
+
+    #[test]
     fn channel_clip_excess_pushes_highlights_down_even_with_similar_luma_percentiles() {
         let reference = PhotoExposureAnalysis {
             asset_id: Uuid::new_v4(),
@@ -743,9 +866,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.15),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.80),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: Some(0.2),
@@ -756,9 +881,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.15),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.80),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.05),
             colorfulness: Some(0.2),
@@ -778,9 +905,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.15),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.90),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: Some(0.2),
@@ -791,9 +920,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.08),
             luminance_p50: Some(0.25),
             luminance_p90: Some(0.45),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.05),
             colorfulness: Some(0.2),
@@ -812,9 +943,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.15),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.85),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -825,9 +958,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.08),
             luminance_p50: Some(0.25),
             luminance_p90: Some(0.45),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -847,9 +982,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.15),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.85),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -860,9 +997,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.05),
             luminance_p50: Some(0.25),
             luminance_p90: Some(0.95),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -881,9 +1020,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.15),
             luminance_p50: Some(0.40),
             luminance_p90: Some(0.70),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -894,9 +1035,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.15),
             luminance_p50: Some(0.40),
             luminance_p90: Some(0.70),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -917,9 +1060,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.15),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.85),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -930,9 +1075,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.30),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.70),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -951,9 +1098,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.10),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.90),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -964,9 +1113,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.30),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.70),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.04),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -985,9 +1136,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.20),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.80),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -998,9 +1151,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: Some(0.02),
             luminance_p50: Some(0.50),
             luminance_p90: Some(0.98),
+            luminance_p98: None,
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
             colorfulness: None,
@@ -1018,9 +1173,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: None,
             luminance_p50: None,
             luminance_p90: None,
+            luminance_p98: None,
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
             colorfulness: Some(0.30),
@@ -1031,9 +1188,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: None,
             luminance_p50: None,
             luminance_p90: None,
+            luminance_p98: None,
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
             colorfulness: Some(0.10),
@@ -1052,9 +1211,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: None,
             luminance_p50: None,
             luminance_p90: None,
+            luminance_p98: None,
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
             colorfulness: None,
@@ -1070,9 +1231,11 @@ mod tests {
             temperature_k: None,
             tint: None,
             confidence: 1.0,
+            luminance_p02: None,
             luminance_p10: None,
             luminance_p50: None,
             luminance_p90: None,
+            luminance_p98: None,
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
             colorfulness: None,

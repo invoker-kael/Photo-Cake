@@ -1548,6 +1548,8 @@ fn set_recipe_review(
     exposure_delta_ev: f32,
     highlights_delta: f32,
     shadows_delta: f32,
+    whites_delta: f32,
+    blacks_delta: f32,
     contrast_delta: f32,
     saturation_delta: f32,
     state: State<'_, AppState>,
@@ -1561,6 +1563,8 @@ fn set_recipe_review(
             exposure_delta_ev,
             highlights_delta,
             shadows_delta,
+            whites_delta,
+            blacks_delta,
             contrast_delta,
             saturation_delta,
         })

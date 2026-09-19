@@ -57,13 +57,23 @@ pub struct RecipeReviewSyncFields {
     pub highlights: bool,
     #[serde(default)]
     pub shadows: bool,
+    #[serde(default)]
+    pub whites: bool,
+    #[serde(default)]
+    pub blacks: bool,
     pub contrast: bool,
     pub saturation: bool,
 }
 
 impl RecipeReviewSyncFields {
     pub fn any(self) -> bool {
-        self.exposure || self.highlights || self.shadows || self.contrast || self.saturation
+        self.exposure
+            || self.highlights
+            || self.shadows
+            || self.whites
+            || self.blacks
+            || self.contrast
+            || self.saturation
     }
 }
 
@@ -75,6 +85,10 @@ pub struct RecipeReviewOverride {
     pub highlights_delta: f32,
     #[serde(default)]
     pub shadows_delta: f32,
+    #[serde(default)]
+    pub whites_delta: f32,
+    #[serde(default)]
+    pub blacks_delta: f32,
     pub contrast_delta: f32,
     pub saturation_delta: f32,
 }
@@ -86,6 +100,8 @@ impl RecipeReviewOverride {
             exposure_delta_ev: 0.0,
             highlights_delta: 0.0,
             shadows_delta: 0.0,
+            whites_delta: 0.0,
+            blacks_delta: 0.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
         }
@@ -95,6 +111,8 @@ impl RecipeReviewOverride {
         self.exposure_delta_ev.abs() <= NEUTRAL_EPSILON
             && self.highlights_delta.abs() <= NEUTRAL_EPSILON
             && self.shadows_delta.abs() <= NEUTRAL_EPSILON
+            && self.whites_delta.abs() <= NEUTRAL_EPSILON
+            && self.blacks_delta.abs() <= NEUTRAL_EPSILON
             && self.contrast_delta.abs() <= NEUTRAL_EPSILON
             && self.saturation_delta.abs() <= NEUTRAL_EPSILON
     }
@@ -120,6 +138,16 @@ impl RecipeReviewOverride {
                 self.shadows_delta
             } else {
                 target.shadows_delta
+            },
+            whites_delta: if fields.whites {
+                self.whites_delta
+            } else {
+                target.whites_delta
+            },
+            blacks_delta: if fields.blacks {
+                self.blacks_delta
+            } else {
+                target.blacks_delta
             },
             contrast_delta: if fields.contrast {
                 self.contrast_delta
@@ -161,6 +189,18 @@ impl RecipeReviewOverride {
         recipe.adjustments.shadows = add_delta(
             recipe.adjustments.shadows,
             self.shadows_delta,
+            -100.0,
+            100.0,
+        );
+        recipe.adjustments.whites = add_delta(
+            recipe.adjustments.whites,
+            self.whites_delta,
+            -100.0,
+            100.0,
+        );
+        recipe.adjustments.blacks = add_delta(
+            recipe.adjustments.blacks,
+            self.blacks_delta,
             -100.0,
             100.0,
         );
@@ -256,6 +296,8 @@ impl RecipeReviewStore {
             normalized.exposure_delta_ev = normalized.exposure_delta_ev.clamp(-3.0, 3.0);
             normalized.highlights_delta = normalized.highlights_delta.clamp(-100.0, 100.0);
             normalized.shadows_delta = normalized.shadows_delta.clamp(-100.0, 100.0);
+            normalized.whites_delta = normalized.whites_delta.clamp(-100.0, 100.0);
+            normalized.blacks_delta = normalized.blacks_delta.clamp(-100.0, 100.0);
             normalized.contrast_delta = normalized.contrast_delta.clamp(-100.0, 100.0);
             normalized.saturation_delta = normalized.saturation_delta.clamp(-100.0, 100.0);
             let json = if normalized.is_neutral() {
@@ -459,6 +501,8 @@ mod tests {
                 contrast: Some(10.0),
                 highlights: None,
                 shadows: None,
+                whites: None,
+                blacks: None,
                 temperature: None,
                 tint: None,
                 saturation: Some(3.0),
@@ -475,6 +519,8 @@ mod tests {
         let value: RecipeReviewOverride = serde_json::from_str(&json).unwrap();
         assert_eq!(value.highlights_delta, 0.0);
         assert_eq!(value.shadows_delta, 0.0);
+        assert_eq!(value.whites_delta, 0.0);
+        assert_eq!(value.blacks_delta, 0.0);
     }
 
     #[test]
@@ -487,6 +533,8 @@ mod tests {
             exposure_delta_ev: 0.25,
             highlights_delta: 0.0,
             shadows_delta: 0.0,
+            whites_delta: 0.0,
+            blacks_delta: 0.0,
             contrast_delta: 5.0,
             saturation_delta: -2.0,
         };
@@ -504,6 +552,8 @@ mod tests {
             exposure_delta_ev: 0.2,
             highlights_delta: 0.0,
             shadows_delta: 0.0,
+            whites_delta: 0.0,
+            blacks_delta: 0.0,
             contrast_delta: -4.0,
             saturation_delta: 2.0,
         }
@@ -523,11 +573,15 @@ mod tests {
         let mut target = recipe(asset_id);
         target.adjustments.highlights = Some(-25.0);
         target.adjustments.shadows = Some(20.0);
+        target.adjustments.whites = Some(-10.0);
+        target.adjustments.blacks = Some(6.0);
         RecipeReviewOverride {
             asset_id,
             exposure_delta_ev: 0.0,
             highlights_delta: -10.0,
             shadows_delta: 15.0,
+            whites_delta: -5.0,
+            blacks_delta: 4.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
         }
@@ -535,6 +589,8 @@ mod tests {
         .unwrap();
         assert_eq!(target.adjustments.highlights, Some(-35.0));
         assert_eq!(target.adjustments.shadows, Some(35.0));
+        assert_eq!(target.adjustments.whites, Some(-15.0));
+        assert_eq!(target.adjustments.blacks, Some(10.0));
     }
 
     #[test]
@@ -549,6 +605,8 @@ mod tests {
                 exposure_delta_ev: 0.2,
                 highlights_delta: 0.0,
                 shadows_delta: 0.0,
+                whites_delta: 0.0,
+                blacks_delta: 0.0,
                 contrast_delta: 0.0,
                 saturation_delta: 0.0,
             })
@@ -567,6 +625,8 @@ mod tests {
             exposure_delta_ev: 0.35,
             highlights_delta: 0.0,
             shadows_delta: 0.0,
+            whites_delta: 8.0,
+            blacks_delta: -6.0,
             contrast_delta: 10.0,
             saturation_delta: -4.0,
         };
@@ -576,6 +636,8 @@ mod tests {
             exposure_delta_ev: -0.1,
             highlights_delta: 0.0,
             shadows_delta: 0.0,
+            whites_delta: 2.0,
+            blacks_delta: 1.0,
             contrast_delta: 3.0,
             saturation_delta: 7.0,
         };
@@ -586,6 +648,8 @@ mod tests {
                 exposure: true,
                 highlights: true,
                 shadows: false,
+                whites: true,
+                blacks: false,
                 contrast: false,
                 saturation: true,
             },
@@ -593,6 +657,8 @@ mod tests {
 
         assert_eq!(copied.asset_id, target_id);
         assert_eq!(copied.exposure_delta_ev, 0.35);
+        assert_eq!(copied.whites_delta, 8.0);
+        assert_eq!(copied.blacks_delta, 1.0);
         assert_eq!(copied.contrast_delta, 3.0);
         assert_eq!(copied.saturation_delta, -4.0);
     }
@@ -610,6 +676,8 @@ mod tests {
                 exposure_delta_ev: 0.2,
                 highlights_delta: 0.0,
                 shadows_delta: 0.0,
+                whites_delta: 0.0,
+                blacks_delta: 0.0,
                 contrast_delta: 0.0,
                 saturation_delta: 0.0,
             })
@@ -622,6 +690,8 @@ mod tests {
                     exposure_delta_ev: 0.3,
                     highlights_delta: 0.0,
                     shadows_delta: 0.0,
+                    whites_delta: 0.0,
+                    blacks_delta: 0.0,
                     contrast_delta: 5.0,
                     saturation_delta: 0.0,
                 },
@@ -644,6 +714,8 @@ mod tests {
             exposure_delta_ev: 0.25,
             highlights_delta: 0.0,
             shadows_delta: 0.0,
+            whites_delta: 0.0,
+            blacks_delta: 0.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
         };
@@ -733,6 +805,8 @@ mod tests {
             exposure_delta_ev: 0.1,
             highlights_delta: 0.0,
             shadows_delta: 0.0,
+            whites_delta: 0.0,
+            blacks_delta: 0.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
         }

@@ -124,7 +124,11 @@ pub use recipe_review_store::{
     recipe_review_fingerprint, RecipeReviewConfirmation, RecipeReviewOverride,
     RecipeReviewStore, RecipeReviewStoreError, RecipeReviewSyncFields,
 };
-pub use reference::{ReferenceGroupResult, ReferenceSet, ReferenceWorkflowError, StyleProfile};
+pub use reference::{
+    build_reference_readiness_plan, ReferenceCandidateSource, ReferenceGroupResult,
+    ReferenceReadinessPlan, ReferenceReadinessStatus, ReferenceSet, ReferenceWorkflowError,
+    StyleProfile,
+};
 pub use reference_store::{GroupReferenceBinding, ReferenceStore, ReferenceStoreError};
 pub use renderer::ImageExportRenderer;
 pub use runner::{AutomationRunner, NoopStageExecutor, RunStep, RunnerError, StageExecutor};

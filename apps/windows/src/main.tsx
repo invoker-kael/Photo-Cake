@@ -20,6 +20,7 @@ import App, {
   type BackendReferenceBatchItem,
   type BackendReferenceBatchResult,
   type BackendReferenceBinding,
+  type BackendReferenceReadinessPlan,
   type BackendRecipeReviewBatchItem,
   type BackendRecipeReviewBatchResult,
   type BackendRecipeReviewGroupBatchResult,
@@ -104,6 +105,8 @@ const bridge: PhotoCakeBridge = {
     }),
   loadReferenceBindings: (batchId) =>
     invoke<BackendReferenceBinding[]>("batch_reference_bindings", { batchId }),
+  loadReferenceReadiness: (batchId) =>
+    invoke<BackendReferenceReadinessPlan[]>("batch_reference_readiness", { batchId }),
   setGroupReference: (groupId, assetId) =>
     invoke<BackendReferenceBinding>("set_group_reference", { groupId, assetId }),
   setGroupReferences: (batchId, items: BackendReferenceBatchItem[]) =>

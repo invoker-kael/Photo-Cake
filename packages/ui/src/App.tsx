@@ -17,6 +17,8 @@ import {
   type BackendReferenceBatchItem,
   type BackendReferenceBatchResult,
   type BackendReferenceBinding,
+  type BackendReferenceCandidateSource,
+  type BackendReferenceReadinessPlan,
   type BackendRecipeReviewBatchItem,
   type BackendRecipeReviewBatchResult,
   type BackendRecipeReviewGroupBatchResult,
@@ -54,6 +56,8 @@ export type {
   BackendReferenceBatchItem,
   BackendReferenceBatchResult,
   BackendReferenceBinding,
+  BackendReferenceCandidateSource,
+  BackendReferenceReadinessPlan,
   BackendRecipeReviewBatchItem,
   BackendRecipeReviewBatchResult,
   BackendRecipeReviewGroupBatchResult,
@@ -205,6 +209,21 @@ function cullingReasonLabel(reason: CullingReason) {
   return labels[reason];
 }
 
+function referenceCandidateSourceLabel(source: BackendReferenceCandidateSource | null) {
+  switch (source) {
+    case "PHOTOGRAPHER_KEEP":
+      return "Your Keep";
+    case "AI_KEEP":
+      return "AI Keep";
+    case "PHOTOGRAPHER_REVIEW":
+      return "Your Review";
+    case "AI_REVIEW":
+      return "AI Review";
+    default:
+      return "No candidate";
+  }
+}
+
 function sceneTagLabel(tag: BackendSceneTag) {
   const labels: Record<BackendSceneTag, string> = {
     LANDSCAPE: "Landscape",
@@ -313,6 +332,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [groupMergeSelection, setGroupMergeSelection] = useState<string[]>([]);
   const [groupSplitPoints, setGroupSplitPoints] = useState<Record<string, string>>({});
   const [referenceBindings, setReferenceBindings] = useState<Record<string, BackendReferenceBinding>>({});
+  const [referenceReadiness, setReferenceReadiness] = useState<Record<string, BackendReferenceReadinessPlan>>({});
   const [referenceBatchTargets, setReferenceBatchTargets] = useState<string[]>([]);
   const [referenceBatchUpdating, setReferenceBatchUpdating] = useState(false);
   const [referenceBatchNote, setReferenceBatchNote] = useState<string | null>(null);
@@ -535,6 +555,37 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       disposed = true;
     };
   }, [activeBatchId, bridge, groupRevision]);
+
+  useEffect(() => {
+    if (!bridge?.loadReferenceReadiness || !activeBatchId) {
+      setReferenceReadiness({});
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadReferenceReadiness(activeBatchId)
+      .then((plans) => {
+        if (disposed) return;
+        setReferenceReadiness(
+          Object.fromEntries(plans.map((plan) => [plan.group_id, plan])),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    activeBatchId,
+    analysisRevision,
+    bridge,
+    cullingReviews,
+    groupRevision,
+    referenceBindings,
+  ]);
 
   useEffect(() => {
     if (!bridge?.loadReferenceStyles || !activeBatchId) {
@@ -1069,35 +1120,6 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           (cullingRecommendations.get(right)?.group_rank ?? Number.MAX_SAFE_INTEGER)
         );
       });
-  };
-
-  const batchReferenceCandidateForGroup = (groupId: string, assetIds: string[]) => {
-    const candidates = referenceCandidatesForGroup(groupId, assetIds);
-    const explicitKeep = candidates.find(
-      (assetId) => cullingReviews[assetId] === "KEEP",
-    );
-    if (explicitKeep) return explicitKeep;
-
-    const bracketCenters = new Set(
-      bracketSetsForGroup(groupId).map((set) => set.center_asset_id),
-    );
-    const bracketCenter = candidates.find((assetId) => {
-      if (!bracketCenters.has(assetId)) return false;
-      const recommendation = cullingRecommendations.get(assetId);
-      return recommendation != null && recommendation.decision !== "REJECT_SUGGESTION";
-    });
-    if (bracketCenter) return bracketCenter;
-
-    return candidates.find((assetId) => {
-      const user = cullingReviews[assetId];
-      if (user === "KEEP" || user === "REVIEW") return true;
-      if (user === "REJECT") return false;
-      const recommendation = cullingRecommendations.get(assetId);
-      return (
-        recommendation != null &&
-        recommendation.decision !== "REJECT_SUGGESTION"
-      );
-    });
   };
 
   const isPaused = bridge
@@ -2607,25 +2629,38 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     const missingReferenceGroups = groups.filter(
       (group) => referenceBindings[group.id] == null,
     );
-    const hdrReferenceGroups = missingReferenceGroups.filter(
-      (group) => bracketSetsForGroup(group.id).length > 0,
-    );
-    const standardReferenceGroups = missingReferenceGroups.filter(
-      (group) => bracketSetsForGroup(group.id).length === 0,
-    );
+    const readinessPlans = missingReferenceGroups.flatMap((group) => {
+      const plan = referenceReadiness[group.id];
+      return plan ? [plan] : [];
+    });
     const eligibleReferenceItems: BackendReferenceBatchItem[] =
-      standardReferenceGroups.flatMap((group) => {
-        const assetId = batchReferenceCandidateForGroup(group.id, group.asset_ids);
-        return assetId ? [{ group_id: group.id, asset_id: assetId }] : [];
-      });
+      readinessPlans.flatMap((plan) =>
+        plan.status === "READY" && plan.suggested_asset_id
+          ? [{ group_id: plan.group_id, asset_id: plan.suggested_asset_id }]
+          : [],
+      );
     const eligibleReferenceGroupIds = new Set(
       eligibleReferenceItems.map((item) => item.group_id),
     );
     const selectedReferenceItems = eligibleReferenceItems.filter((item) =>
       referenceBatchTargets.includes(item.group_id),
     );
-    const blockedReferenceGroupCount =
-      standardReferenceGroups.length - eligibleReferenceItems.length;
+    const blockedReferenceGroupCount = readinessPlans.filter(
+      (plan) => plan.status === "NEEDS_CULL_REVIEW",
+    ).length;
+    const hdrReferenceGroupCount = readinessPlans.filter(
+      (plan) => plan.status === "HDR_MERGE_FIRST",
+    ).length;
+    const landscapeReadyCount = readinessPlans.filter(
+      (plan) =>
+        plan.status === "READY" &&
+        plan.candidate_scene_tags.includes("LANDSCAPE"),
+    ).length;
+    const peopleReadyCount = readinessPlans.filter(
+      (plan) => plan.status === "READY" && plan.contains_people,
+    ).length;
+    const readinessPendingCount =
+      missingReferenceGroups.length - readinessPlans.length;
 
     const toggleReferenceBatchTarget = (groupId: string) => {
       setReferenceBatchTargets((current) =>
@@ -2696,15 +2731,20 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <strong>Suggested candidate → selected groups</strong>
               </div>
               <small>
-                Uses the existing per-group shortlist only. Exposure-bracket groups are intentionally excluded from batch Reference setup because their RAWs must preserve capture exposure for HDR merge. AI Reject suggestions and evidence-pending candidates remain individual-review work.
+                Canonical preflight reuses Cull evidence and photographer decisions. Your Keep is authoritative and may advance a group even while sibling analysis is pending; AI-only suggestions wait for complete Cull evidence. HDR brackets still route to merge first. Landscape, architecture and other scene tags are context, not portrait-only rules.
               </small>
             </div>
             <div className="reference-batch-setup-status">
               <span>{missingReferenceGroups.length} missing</span>
-              <span>{eligibleReferenceItems.length} eligible</span>
+              <span>{eligibleReferenceItems.length} ready</span>
+              {landscapeReadyCount > 0 && <span>{landscapeReadyCount} landscape</span>}
+              {peopleReadyCount > 0 && <span>{peopleReadyCount} people/family</span>}
               <span>{blockedReferenceGroupCount} need Cull review</span>
-              {hdrReferenceGroups.length > 0 && (
-                <span>{hdrReferenceGroups.length} HDR merge first</span>
+              {hdrReferenceGroupCount > 0 && (
+                <span>{hdrReferenceGroupCount} HDR merge first</span>
+              )}
+              {readinessPendingCount > 0 && (
+                <span>{readinessPendingCount} preflight loading</span>
               )}
             </div>
             <div className="batch-look-actions reference-batch-actions">
@@ -2856,14 +2896,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           const binding = referenceBindings[group.id];
           const style = referenceStyles[group.id]?.style_profile;
           const preview = referencePreviews[group.id];
+          const readiness = referenceReadiness[group.id];
           const candidates = referenceCandidatesForGroup(group.id, group.asset_ids);
           const recommendedReferenceAssetId =
+            readiness?.eligible_candidate_ids[0] ??
             candidates.find((assetId) => {
               const user = cullingReviews[assetId];
               if (user === "KEEP" || user === "REVIEW") return true;
               const recommendation = cullingRecommendations.get(assetId);
               return recommendation?.decision !== "REJECT_SUGGESTION";
-            }) ?? candidates[0];
+            }) ??
+            candidates[0];
           const exposureValues = preview?.recipes
             .map((recipe) => recipe.adjustments.exposure)
             .filter((value): value is number => value != null) ?? [];
@@ -2889,6 +2932,28 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       />
                       <span>Batch suggested Reference</span>
                     </label>
+                  )}
+                  {!binding && readiness && (
+                    <small className="reference-preview-status">
+                      {readiness.status === "READY"
+                        ? [
+                            "Batch ready",
+                            referenceCandidateSourceLabel(readiness.candidate_source),
+                            readiness.candidate_scene_tags.length
+                              ? readiness.candidate_scene_tags.map(sceneTagLabel).join(" / ")
+                              : readiness.contains_people
+                                ? "people/family"
+                                : null,
+                          ].filter(Boolean).join(" · ")
+                        : readiness.status === "HDR_MERGE_FIRST"
+                          ? "HDR bracket · merge before batch Reference"
+                          : [
+                              "Needs Cull review",
+                              readiness.pending_asset_ids.length
+                                ? readiness.pending_asset_ids.length + " pending"
+                                : null,
+                            ].filter(Boolean).join(" · ")}
+                    </small>
                   )}
                 </div>
                 <div className="reference-current">
@@ -3003,6 +3068,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     .map(cullingReasonLabel)
                     .join(" · ");
                   const portraitEvidence = recommendation?.portrait_evidence;
+                  const sceneEvidence = recommendation?.scene_tags?.length
+                    ? recommendation.scene_tags.map(sceneTagLabel).join(" / ")
+                    : null;
                   const peopleEvidence =
                     portraitEvidence && (portraitEvidence.person_count > 0 || portraitEvidence.face_count > 0)
                       ? `${portraitEvidence.person_count} people · ${portraitEvidence.face_count} faces`
@@ -3027,9 +3095,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       <div className="reference-candidate-badges">
                         {recommended && <em>Best starting point</em>}
                         {!binding &&
-                          bracketSetsForGroup(group.id).length === 0 &&
-                          batchReferenceCandidateForGroup(group.id, group.asset_ids) === assetId && (
-                            <em>Batch eligible</em>
+                          readiness?.status === "READY" &&
+                          readiness.suggested_asset_id === assetId && (
+                            <em>Batch ready</em>
                           )}
                         {selected && <em>Selected</em>}
                       </div>
@@ -3040,9 +3108,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           {technicalEvidence}{reasonEvidence ? ` · ${reasonEvidence}` : ""}
                         </small>
                       )}
-                      {peopleEvidence && (
+                      {(peopleEvidence || sceneEvidence) && (
                         <small className="reference-candidate-context">
-                          {peopleEvidence} · context only
+                          {[peopleEvidence, sceneEvidence].filter(Boolean).join(" · ")} · context only
                         </small>
                       )}
                     </button>

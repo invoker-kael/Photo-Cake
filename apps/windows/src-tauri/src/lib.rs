@@ -1,7 +1,8 @@
 use photo_core::{
     apply_companion_patch as apply_companion_patch_core,
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
-    derive_workflow_status, recipe_review_group_can_confirm, recipe_review_requires_attention,
+    build_reference_readiness_plan, derive_workflow_status, recipe_review_group_can_confirm,
+    recipe_review_requires_attention,
     preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
     route_exposure_bracket_sources, write_group_sidecars, write_sidecar_batch, AnalysisCache,
     AssetMetadataEvidence, AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor,
@@ -12,7 +13,7 @@ use photo_core::{
     JobStatus, ModelBundleManifest, ModelPlatform,
     PhotoGroup, PreviewArtifact, PreviewStore, RawAsset, RawCatalog, RawImportResult, RawImporter,
     RawMetadataStore, Recipe, RecipeReviewOverride, RecipeReviewSignal, RecipeReviewStore,
-    RecipeReviewSyncFields, ReferenceStore,
+    RecipeReviewSyncFields, ReferenceReadinessPlan, ReferenceReadinessStatus, ReferenceStore,
     ReferenceWorkflowError, RunStep, SemanticGroupingConfig, SemanticRefinementReport,
     StyleProfile, WorkflowFacts, WorkflowStatus,
 };
@@ -1203,6 +1204,47 @@ fn undo_moment_quick_cull(
 }
 
 #[tauri::command]
+fn batch_reference_readiness(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ReferenceReadinessPlan>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let groups = state
+        .catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let mut plans = Vec::new();
+
+    for group in groups {
+        if state
+            .reference_store
+            .group_binding(group.id)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            continue;
+        }
+
+        let culling = build_group_culling_result(&state.analysis_cache, &group, 0.98)
+            .map_err(|error| error.to_string())?;
+        let reviews = state
+            .culling_reviews
+            .list_for_assets(&group.asset_ids)
+            .map_err(|error| error.to_string())?;
+        plans.push(build_reference_readiness_plan(
+            group.id,
+            &group.asset_ids,
+            &culling.recommendations,
+            &culling.pending_asset_ids,
+            &culling.exposure_brackets,
+            &reviews,
+        ));
+    }
+
+    Ok(plans)
+}
+
+#[tauri::command]
 fn set_group_references(
     batch_id: String,
     items: Vec<ReferenceBatchItem>,
@@ -1239,13 +1281,6 @@ fn set_group_references(
         if !group.asset_ids.contains(&asset_id) {
             return Err(format!("asset {asset_id} is not part of group {group_id}"));
         }
-        let bracket_routing = route_exposure_bracket_sources(&state.analysis_cache, group)
-            .map_err(|error| error.to_string())?;
-        if !bracket_routing.sets.is_empty() {
-            return Err(format!(
-                "group {group_id} contains exposure-bracket sources; merge HDR first or choose a Reference individually"
-            ));
-        }
         if state
             .reference_store
             .group_binding(group_id)
@@ -1257,35 +1292,37 @@ fn set_group_references(
             ));
         }
 
-        match state
+        let culling = build_group_culling_result(&state.analysis_cache, group, 0.98)
+            .map_err(|error| error.to_string())?;
+        let reviews = state
             .culling_reviews
-            .get(asset_id)
-            .map_err(|error| error.to_string())?
-        {
-            Some(review) if review.decision == CullingUserDecision::Reject => {
+            .list_for_assets(&group.asset_ids)
+            .map_err(|error| error.to_string())?;
+        let readiness = build_reference_readiness_plan(
+            group_id,
+            &group.asset_ids,
+            &culling.recommendations,
+            &culling.pending_asset_ids,
+            &culling.exposure_brackets,
+            &reviews,
+        );
+        match readiness.status {
+            ReferenceReadinessStatus::HdrMergeFirst => {
                 return Err(format!(
-                    "asset {asset_id} is explicitly rejected and cannot become a Reference"
+                    "group {group_id} contains exposure-bracket sources; merge HDR before batch Reference setup"
                 ));
             }
-            Some(_) => {}
-            None => {
-                let culling = build_group_culling_result(&state.analysis_cache, group, 0.98)
-                    .map_err(|error| error.to_string())?;
-                let recommendation = culling
-                    .recommendations
-                    .iter()
-                    .find(|candidate| candidate.asset_id == asset_id)
-                    .ok_or_else(|| {
-                        format!(
-                            "asset {asset_id} lacks completed culling evidence; choose it individually after review"
-                        )
-                    })?;
-                if recommendation.decision == CullingDecision::RejectSuggestion {
-                    return Err(format!(
-                        "asset {asset_id} is an AI Reject suggestion; review it individually before using it as Reference"
-                    ));
-                }
+            ReferenceReadinessStatus::NeedsCullReview => {
+                return Err(format!(
+                    "group {group_id} still needs Cull review before batch Reference setup"
+                ));
             }
+            ReferenceReadinessStatus::Ready => {}
+        }
+        if readiness.suggested_asset_id != Some(asset_id) {
+            return Err(format!(
+                "group {group_id} suggested Reference changed; refresh Reference preflight before applying the batch"
+            ));
         }
 
         requests.push((
@@ -2438,6 +2475,7 @@ pub fn run() {
             confirm_moment_quick_cull,
             undo_moment_quick_cull,
             batch_reference_bindings,
+            batch_reference_readiness,
             set_group_references,
             set_group_reference,
             clear_group_reference,

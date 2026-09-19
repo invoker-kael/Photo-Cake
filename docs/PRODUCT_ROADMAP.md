@@ -180,3 +180,10 @@ Moment-level Quick Cull now closes another large-shoot efficiency gap: groups wi
 
 
 Quick Cull safety now covers scenic work as well as people photography. Cull recommendations expose measured duplicate similarity plus existing scene tags; people alternates remain protected, while landscape/architecture/other non-people frames can only enter the Quick Cull Reject cohort when scene evidence is complete and consistent, similarity is at least 98.5%, and the primary has a material quality lead. Selected batches show projected Keep/Review/Reject counts and persist an atomic operation record with guarded Undo. Undo refuses changed decisions, changed group topology or downstream References instead of erasing later photographer intent. This keeps the PixelCake-style efficiency principle—standardize the obvious batch, then review exceptions—without turning Photo-Cake into a portrait-only or destructive workflow.
+
+
+### Reference readiness for mixed travel shoots
+
+Completed: Cull → Reference handoff now uses a canonical, scene-visible readiness preflight. Large travel/family/scenery sessions can select all groups that are genuinely ready, see which groups are blocked by pending Cull evidence or HDR merge, and keep photographer Keep decisions authoritative. The UI and backend share the same suggested candidate instead of maintaining separate ranking rules.
+
+This follows the useful part of the PixCake-style workflow pattern—establish a trusted standard image, synchronize the shared look in batches, then spend attention on exceptions—while retaining Photo-Cake's own adaptive Reference → Recipe model. It does not clone proprietary algorithms, does not make landscape work behave like portrait work, and does not introduce fake Direct Export.

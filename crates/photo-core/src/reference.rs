@@ -1,9 +1,14 @@
+use crate::bracketing::ExposureBracketSet;
+use crate::classification::SceneTag;
 use crate::color_sync::{
     build_adaptive_group_plan, ColorSyncError, GroupColorIntent, GroupColorSyncPlan, GroupSyncMode,
     PhotoColorAnalysis,
 };
+use crate::culling::{CullingDecision, CullingRecommendation};
+use crate::culling_store::{CullingReview, CullingUserDecision};
 use crate::{AnalysisCache, AnalysisCacheError, InferenceTask, PhotoGroup, Recipe};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -26,6 +31,192 @@ pub struct StyleProfile {
     pub contrast_preference: Option<f32>,
     pub saturation_preference: Option<f32>,
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReferenceReadinessStatus {
+    Ready,
+    NeedsCullReview,
+    HdrMergeFirst,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReferenceCandidateSource {
+    PhotographerKeep,
+    AiKeep,
+    PhotographerReview,
+    AiReview,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReferenceReadinessPlan {
+    pub group_id: Uuid,
+    pub status: ReferenceReadinessStatus,
+    pub suggested_asset_id: Option<Uuid>,
+    pub candidate_source: Option<ReferenceCandidateSource>,
+    pub candidate_quality_score: Option<f32>,
+    #[serde(default)]
+    pub candidate_scene_tags: Vec<SceneTag>,
+    pub contains_people: bool,
+    #[serde(default)]
+    pub pending_asset_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub excluded_asset_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub eligible_candidate_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Clone)]
+struct RankedReferenceCandidate {
+    asset_id: Uuid,
+    source: ReferenceCandidateSource,
+    quality_score: Option<f32>,
+    group_rank: usize,
+    position: usize,
+    scene_tags: Vec<SceneTag>,
+}
+
+fn reference_candidate_priority(source: ReferenceCandidateSource) -> u8 {
+    match source {
+        ReferenceCandidateSource::PhotographerKeep => 0,
+        ReferenceCandidateSource::AiKeep => 1,
+        ReferenceCandidateSource::PhotographerReview => 2,
+        ReferenceCandidateSource::AiReview => 3,
+    }
+}
+
+/// Build one canonical batch-Reference preflight from evidence already produced by Cull.
+///
+/// Photographer decisions remain authoritative. A photographer Keep can advance even
+/// while sibling photos are still pending, but an AI-only suggestion waits until the
+/// group's Cull evidence is complete. Exposure brackets always route to HDR merge first.
+pub fn build_reference_readiness_plan(
+    group_id: Uuid,
+    asset_ids: &[Uuid],
+    recommendations: &[CullingRecommendation],
+    pending_asset_ids: &[Uuid],
+    exposure_brackets: &[ExposureBracketSet],
+    reviews: &[CullingReview],
+) -> ReferenceReadinessPlan {
+    let recommendations_by_asset = recommendations
+        .iter()
+        .map(|item| (item.asset_id, item))
+        .collect::<HashMap<_, _>>();
+    let reviews_by_asset = reviews
+        .iter()
+        .map(|item| (item.asset_id, item.decision))
+        .collect::<HashMap<_, _>>();
+
+    let contains_people = recommendations.iter().any(|item| {
+        item.portrait_evidence.as_ref().is_some_and(|evidence| {
+            evidence.person_count > 0 || evidence.face_count > 0
+        })
+    });
+
+    let mut candidates = Vec::new();
+    let mut excluded_asset_ids = Vec::new();
+    for (position, asset_id) in asset_ids.iter().copied().enumerate() {
+        let recommendation = recommendations_by_asset.get(&asset_id).copied();
+        let user_decision = reviews_by_asset.get(&asset_id).copied();
+        let source = match user_decision {
+            Some(CullingUserDecision::Reject) => {
+                excluded_asset_ids.push(asset_id);
+                None
+            }
+            Some(CullingUserDecision::Keep) => Some(ReferenceCandidateSource::PhotographerKeep),
+            Some(CullingUserDecision::Review) => {
+                Some(ReferenceCandidateSource::PhotographerReview)
+            }
+            None => match recommendation.map(|item| item.decision) {
+                Some(CullingDecision::Keep) => Some(ReferenceCandidateSource::AiKeep),
+                Some(CullingDecision::Review) => Some(ReferenceCandidateSource::AiReview),
+                Some(CullingDecision::RejectSuggestion) => {
+                    excluded_asset_ids.push(asset_id);
+                    None
+                }
+                None => None,
+            },
+        };
+        let Some(source) = source else {
+            continue;
+        };
+        candidates.push(RankedReferenceCandidate {
+            asset_id,
+            source,
+            quality_score: recommendation.map(|item| item.quality_score),
+            group_rank: recommendation
+                .map(|item| item.group_rank)
+                .unwrap_or(usize::MAX),
+            position,
+            scene_tags: recommendation
+                .map(|item| item.scene_tags.clone())
+                .unwrap_or_default(),
+        });
+    }
+
+    candidates.sort_by(|left, right| {
+        reference_candidate_priority(left.source)
+            .cmp(&reference_candidate_priority(right.source))
+            .then_with(|| {
+                right
+                    .quality_score
+                    .unwrap_or(-1.0)
+                    .total_cmp(&left.quality_score.unwrap_or(-1.0))
+            })
+            .then_with(|| left.group_rank.cmp(&right.group_rank))
+            .then_with(|| left.position.cmp(&right.position))
+    });
+
+    let eligible_candidate_ids = candidates
+        .iter()
+        .map(|candidate| candidate.asset_id)
+        .collect::<Vec<_>>();
+    let leading = candidates.first();
+
+    if !exposure_brackets.is_empty() {
+        return ReferenceReadinessPlan {
+            group_id,
+            status: ReferenceReadinessStatus::HdrMergeFirst,
+            suggested_asset_id: None,
+            candidate_source: leading.map(|candidate| candidate.source),
+            candidate_quality_score: leading.and_then(|candidate| candidate.quality_score),
+            candidate_scene_tags: leading
+                .map(|candidate| candidate.scene_tags.clone())
+                .unwrap_or_default(),
+            contains_people,
+            pending_asset_ids: pending_asset_ids.to_vec(),
+            excluded_asset_ids,
+            eligible_candidate_ids,
+        };
+    }
+
+    let ready = leading.is_some()
+        && (pending_asset_ids.is_empty()
+            || leading.is_some_and(|candidate| {
+                candidate.source == ReferenceCandidateSource::PhotographerKeep
+            }));
+    let status = if ready {
+        ReferenceReadinessStatus::Ready
+    } else {
+        ReferenceReadinessStatus::NeedsCullReview
+    };
+
+    ReferenceReadinessPlan {
+        group_id,
+        status,
+        suggested_asset_id: ready.then(|| leading.expect("ready requires a candidate").asset_id),
+        candidate_source: leading.map(|candidate| candidate.source),
+        candidate_quality_score: leading.and_then(|candidate| candidate.quality_score),
+        candidate_scene_tags: leading
+            .map(|candidate| candidate.scene_tags.clone())
+            .unwrap_or_default(),
+        contains_people,
+        pending_asset_ids: pending_asset_ids.to_vec(),
+        excluded_asset_ids,
+        eligible_candidate_ids,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +366,152 @@ mod tests {
     use super::*;
     use crate::{AnalysisArtifact, AnalysisCacheKey, GroupingBasis, PhotoGroupKind};
     use tempfile::tempdir;
+
+    fn readiness_candidate(
+        asset_id: Uuid,
+        decision: CullingDecision,
+        quality_score: f32,
+        group_rank: usize,
+        scene_tags: Vec<SceneTag>,
+    ) -> CullingRecommendation {
+        CullingRecommendation {
+            asset_id,
+            quality_score,
+            decision,
+            group_rank,
+            reasons: Vec::new(),
+            portrait_evidence: None,
+            duplicate_similarity: None,
+            scene_tags,
+        }
+    }
+
+    #[test]
+    fn scenic_ai_keep_is_ready_when_cull_evidence_is_complete() {
+        let group_id = Uuid::new_v4();
+        let landscape = Uuid::new_v4();
+        let alternate = Uuid::new_v4();
+        let plan = build_reference_readiness_plan(
+            group_id,
+            &[landscape, alternate],
+            &[
+                readiness_candidate(
+                    landscape,
+                    CullingDecision::Keep,
+                    0.93,
+                    1,
+                    vec![SceneTag::Landscape],
+                ),
+                readiness_candidate(
+                    alternate,
+                    CullingDecision::Review,
+                    0.82,
+                    2,
+                    vec![SceneTag::Landscape],
+                ),
+            ],
+            &[],
+            &[],
+            &[],
+        );
+
+        assert_eq!(plan.status, ReferenceReadinessStatus::Ready);
+        assert_eq!(plan.suggested_asset_id, Some(landscape));
+        assert_eq!(plan.candidate_source, Some(ReferenceCandidateSource::AiKeep));
+        assert_eq!(plan.candidate_scene_tags, vec![SceneTag::Landscape]);
+        assert_eq!(plan.eligible_candidate_ids, vec![landscape, alternate]);
+    }
+
+    #[test]
+    fn ai_reference_waits_for_pending_cull_evidence() {
+        let group_id = Uuid::new_v4();
+        let first = Uuid::new_v4();
+        let pending = Uuid::new_v4();
+        let plan = build_reference_readiness_plan(
+            group_id,
+            &[first, pending],
+            &[readiness_candidate(
+                first,
+                CullingDecision::Keep,
+                0.91,
+                1,
+                vec![SceneTag::Architecture],
+            )],
+            &[pending],
+            &[],
+            &[],
+        );
+
+        assert_eq!(plan.status, ReferenceReadinessStatus::NeedsCullReview);
+        assert_eq!(plan.suggested_asset_id, None);
+        assert_eq!(plan.candidate_source, Some(ReferenceCandidateSource::AiKeep));
+        assert_eq!(plan.pending_asset_ids, vec![pending]);
+    }
+
+    #[test]
+    fn photographer_keep_can_advance_a_pending_group() {
+        let group_id = Uuid::new_v4();
+        let analyzed = Uuid::new_v4();
+        let photographer_keep = Uuid::new_v4();
+        let plan = build_reference_readiness_plan(
+            group_id,
+            &[analyzed, photographer_keep],
+            &[readiness_candidate(
+                analyzed,
+                CullingDecision::Keep,
+                0.97,
+                1,
+                vec![SceneTag::Landscape],
+            )],
+            &[photographer_keep],
+            &[],
+            &[CullingReview {
+                asset_id: photographer_keep,
+                decision: CullingUserDecision::Keep,
+            }],
+        );
+
+        assert_eq!(plan.status, ReferenceReadinessStatus::Ready);
+        assert_eq!(plan.suggested_asset_id, Some(photographer_keep));
+        assert_eq!(
+            plan.candidate_source,
+            Some(ReferenceCandidateSource::PhotographerKeep)
+        );
+        assert_eq!(plan.candidate_quality_score, None);
+    }
+
+    #[test]
+    fn hdr_bracket_blocks_batch_reference_even_with_photographer_keep() {
+        let group_id = Uuid::new_v4();
+        let first = Uuid::new_v4();
+        let bracket = ExposureBracketSet {
+            group_id,
+            center_asset_id: first,
+            members: Vec::new(),
+            span_ev: 2.0,
+            minimum_embedding_similarity: 0.99,
+        };
+        let plan = build_reference_readiness_plan(
+            group_id,
+            &[first],
+            &[readiness_candidate(
+                first,
+                CullingDecision::Keep,
+                0.95,
+                1,
+                vec![SceneTag::Landscape],
+            )],
+            &[],
+            &[bracket],
+            &[CullingReview {
+                asset_id: first,
+                decision: CullingUserDecision::Keep,
+            }],
+        );
+
+        assert_eq!(plan.status, ReferenceReadinessStatus::HdrMergeFirst);
+        assert_eq!(plan.suggested_asset_id, None);
+    }
 
     #[test]
     fn style_profile_builds_intent_from_reference_baseline() {

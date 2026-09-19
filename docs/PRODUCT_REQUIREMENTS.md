@@ -396,3 +396,14 @@ The photographer must explicitly choose which eligible groups to apply. The back
 Quick Cull is selection acceleration, not deletion. Source RAW files remain untouched, Review alternates remain available to Reference/Recipe workflows, and subsequent photographer decisions stay authoritative.
 
 The selected Quick Cull batch must expose its projected Keep/Review/Reject counts before application. The resulting write must create a persistent operation record in the same transaction as the Cull decisions. The latest operation may be undone only while its exact group membership, decision values and write revisions remain unchanged and before any affected group establishes a Reference. If any photographer decision or downstream lineage has changed, Undo must fail rather than erase newer intent.
+
+
+### Reference readiness preflight
+
+- Batch Reference setup MUST use one backend-generated readiness plan derived from existing Cull evidence and saved photographer decisions; UI heuristics MUST NOT be an independent authority.
+- Photographer Keep is authoritative and MAY be used as the suggested Reference even when sibling assets are still analysis-pending. AI-only candidates MUST wait until pending Cull evidence is cleared.
+- Candidate precedence is photographer Keep, AI Keep, photographer Review, AI Review, with existing technical quality/group rank used only as tie-break evidence.
+- Photographer Reject and unoverridden AI Reject suggestions MUST NOT become batch References.
+- HDR bracket groups MUST remain routed to Lightroom/Camera Raw merge before batch Reference setup.
+- The Reference UI MUST expose useful people and scene context, including landscape/architecture/food/night/document tags when available, without requiring a portrait-specific workflow.
+- Batch apply MUST revalidate the current readiness plan and reject stale suggested asset IDs rather than silently choosing a replacement.

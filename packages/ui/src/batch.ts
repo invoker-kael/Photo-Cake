@@ -260,6 +260,30 @@ export interface BackendReferenceBatchResult {
   bindings: BackendReferenceBinding[];
 }
 
+export type ReferenceReadinessStatus =
+  | "READY"
+  | "NEEDS_CULL_REVIEW"
+  | "HDR_MERGE_FIRST";
+
+export type BackendReferenceCandidateSource =
+  | "PHOTOGRAPHER_KEEP"
+  | "AI_KEEP"
+  | "PHOTOGRAPHER_REVIEW"
+  | "AI_REVIEW";
+
+export interface BackendReferenceReadinessPlan {
+  group_id: string;
+  status: ReferenceReadinessStatus;
+  suggested_asset_id: string | null;
+  candidate_source: BackendReferenceCandidateSource | null;
+  candidate_quality_score: number | null;
+  candidate_scene_tags: BackendSceneTag[];
+  contains_people: boolean;
+  pending_asset_ids: string[];
+  excluded_asset_ids: string[];
+  eligible_candidate_ids: string[];
+}
+
 export interface BackendStyleProfile {
   exposure_bias_ev: number | null;
   temperature_bias: number | null;
@@ -407,6 +431,7 @@ export interface PhotoCakeBridge {
     operationId: string,
   ): Promise<BackendMomentQuickCullOperation>;
   loadReferenceBindings?(batchId: string): Promise<BackendReferenceBinding[]>;
+  loadReferenceReadiness?(batchId: string): Promise<BackendReferenceReadinessPlan[]>;
   setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
   setGroupReferences?(
     batchId: string,

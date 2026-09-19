@@ -542,3 +542,17 @@ ExposureAnalysis v6 extends preview-relative color evidence from one average col
 Reference-relative color matching separates the two directions. Targets that are more colorful than the Reference may receive a bounded negative Saturation correction. Targets that are less colorful use bounded positive Vibrance instead of global positive Saturation. This protects already-saturated skies, neon, clothing and other strong colors while still restoring muted color separation.
 
 The Review preview approximates Vibrance with a per-pixel saturation-aware chroma gain: lower-saturation pixels receive more gain than already-saturated pixels. Lightroom handoff serializes the first-class Recipe value as crs:Vibrance.
+
+## Quality-first Recipe gate
+
+Photo-Cake treats automation as a throughput tool, not as permission to force every generated edit through delivery. The canonical Recipe Review preflight evaluates the final effective Recipe together with current ExposureAnalysis evidence. A photo is routed to exception Review when the automatic result crosses conservative risk boundaries: low-confidence preview evidence, meaningful clipping, large exposure movement, aggressive Highlights/Shadows recovery, stressed Whites/Blacks, strong Contrast, or strong color pressure. Highly saturated previews also require Review before additional positive Saturation/Vibrance is trusted.
+
+This gate is scene-neutral. It protects people/family work and scenery such as skies, sunsets, foliage, neon, night scenes and architecture without creating separate portrait and landscape Recipe engines. Cull Keep does not bypass edit-quality review; an explicit current Recipe confirmation does.
+
+The workflow remains:
+
+```text
+Reference -> adaptive per-photo Recipe -> quality gate -> exception-first Review -> Lightroom XMP
+```
+
+Direct Export remains outside the production path until RAW demosaic, canonical Recipe rendering, color management and metadata handling are trustworthy.

@@ -1,6 +1,8 @@
 use crate::culling::CullingDecision;
 use crate::culling_store::CullingUserDecision;
 use crate::classification::SceneTag;
+use crate::color_sync::PhotoExposureAnalysis;
+use crate::recipe::Recipe;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -38,6 +40,73 @@ pub struct WorkflowStatus {
     pub facts: WorkflowFacts,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RecipeQualityRisk {
+    LowConfidenceEvidence,
+    PreviewClipping,
+    LargeExposureCorrection,
+    AggressiveToneRecovery,
+    EndpointPressure,
+    StrongContrastShift,
+    SaturatedColorPressure,
+    StrongColorShift,
+}
+
+pub fn assess_recipe_quality_risk(
+    recipe: &Recipe,
+    exposure: Option<&PhotoExposureAnalysis>,
+) -> Option<RecipeQualityRisk> {
+    if exposure.is_some_and(|value| value.confidence < 0.45) {
+        return Some(RecipeQualityRisk::LowConfidenceEvidence);
+    }
+    if exposure.is_some_and(|value| {
+        value
+            .shadow_clip_ratio
+            .unwrap_or(0.0)
+            .max(value.highlight_clip_ratio.unwrap_or(0.0))
+            > 0.03
+    }) {
+        return Some(RecipeQualityRisk::PreviewClipping);
+    }
+
+    let adjustments = &recipe.adjustments;
+    if adjustments.exposure.unwrap_or(0.0).abs() > 1.25 {
+        return Some(RecipeQualityRisk::LargeExposureCorrection);
+    }
+
+    let highlights = adjustments.highlights.unwrap_or(0.0).abs();
+    let shadows = adjustments.shadows.unwrap_or(0.0).abs();
+    if highlights.max(shadows) > 55.0 || highlights + shadows > 90.0 {
+        return Some(RecipeQualityRisk::AggressiveToneRecovery);
+    }
+
+    let whites = adjustments.whites.unwrap_or(0.0).abs();
+    let blacks = adjustments.blacks.unwrap_or(0.0).abs();
+    if whites.max(blacks) > 45.0 || whites + blacks > 70.0 {
+        return Some(RecipeQualityRisk::EndpointPressure);
+    }
+
+    if adjustments.contrast.unwrap_or(0.0).abs() > 25.0 {
+        return Some(RecipeQualityRisk::StrongContrastShift);
+    }
+
+    let saturation = adjustments.saturation.unwrap_or(0.0);
+    let vibrance = adjustments.vibrance.unwrap_or(0.0);
+    if exposure
+        .and_then(|value| value.colorfulness_p75)
+        .is_some_and(|p75| p75 > 0.82)
+        && saturation.max(0.0) + vibrance.max(0.0) > 8.0
+    {
+        return Some(RecipeQualityRisk::SaturatedColorPressure);
+    }
+    if saturation.abs() > 18.0 || vibrance.abs() > 22.0 {
+        return Some(RecipeQualityRisk::StrongColorShift);
+    }
+
+    None
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RecipeReviewSignal {
     pub confirmed: bool,
@@ -45,6 +114,7 @@ pub struct RecipeReviewSignal {
     pub user_decision: Option<CullingUserDecision>,
     pub ai_decision: Option<CullingDecision>,
     pub evidence_pending: bool,
+    pub quality_risk: Option<RecipeQualityRisk>,
 }
 
 pub fn recipe_review_requires_attention(signal: &RecipeReviewSignal) -> bool {
@@ -56,8 +126,17 @@ pub fn recipe_review_requires_attention(signal: &RecipeReviewSignal) -> bool {
     }
     match signal.user_decision {
         Some(CullingUserDecision::Review) => return true,
-        Some(CullingUserDecision::Keep | CullingUserDecision::Reject) => return false,
+        Some(CullingUserDecision::Keep | CullingUserDecision::Reject) => {}
         None => {}
+    }
+    if signal.quality_risk.is_some() {
+        return true;
+    }
+    if matches!(
+        signal.user_decision,
+        Some(CullingUserDecision::Keep | CullingUserDecision::Reject)
+    ) {
+        return false;
     }
     matches!(
         signal.ai_decision,
@@ -80,6 +159,7 @@ pub enum RecipeReviewAttentionReason {
     PhotographerReview,
     AiRejectSuggestion,
     AiReview,
+    QualityRisk,
     EvidencePending,
 }
 
@@ -97,6 +177,8 @@ pub struct RecipeReviewAssetPreflight {
     pub asset_id: Uuid,
     pub disposition: RecipeReviewDisposition,
     pub reason: Option<RecipeReviewAttentionReason>,
+    #[serde(default)]
+    pub quality_risk: Option<RecipeQualityRisk>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,8 +215,17 @@ pub fn recipe_review_attention_reason(
         Some(CullingUserDecision::Review) => {
             return Some(RecipeReviewAttentionReason::PhotographerReview)
         }
-        Some(CullingUserDecision::Keep | CullingUserDecision::Reject) => return None,
+        Some(CullingUserDecision::Keep | CullingUserDecision::Reject) => {}
         None => {}
+    }
+    if signal.quality_risk.is_some() {
+        return Some(RecipeReviewAttentionReason::QualityRisk);
+    }
+    if matches!(
+        signal.user_decision,
+        Some(CullingUserDecision::Keep | CullingUserDecision::Reject)
+    ) {
+        return None;
     }
     if signal.evidence_pending {
         return Some(RecipeReviewAttentionReason::EvidencePending);
@@ -180,6 +271,7 @@ pub fn build_recipe_review_group_preflight(
             asset_id: *asset_id,
             disposition,
             reason,
+            quality_risk: signal.quality_risk,
         });
     }
 
@@ -329,6 +421,62 @@ mod tests {
         assert!(recipe_review_requires_attention(&signal));
         signal.confirmed = true;
         assert!(!recipe_review_requires_attention(&signal));
+    }
+
+    #[test]
+    fn quality_gate_requires_review_even_after_cull_keep() {
+        let signal = RecipeReviewSignal {
+            user_decision: Some(CullingUserDecision::Keep),
+            ai_decision: Some(CullingDecision::Keep),
+            quality_risk: Some(RecipeQualityRisk::PreviewClipping),
+            ..RecipeReviewSignal::default()
+        };
+        assert!(recipe_review_requires_attention(&signal));
+        assert_eq!(
+            recipe_review_attention_reason(&signal),
+            Some(RecipeReviewAttentionReason::QualityRisk)
+        );
+    }
+
+    #[test]
+    fn recipe_quality_gate_flags_large_and_saturated_edits() {
+        let asset_id = Uuid::new_v4();
+        let mut recipe = Recipe {
+            id: Uuid::new_v4(),
+            name: "quality".into(),
+            target_asset_id: Some(asset_id),
+            source_reference_ids: Vec::new(),
+            adjustments: crate::EditAdjustments::default(),
+        };
+        recipe.adjustments.exposure = Some(1.4);
+        assert_eq!(
+            assess_recipe_quality_risk(&recipe, None),
+            Some(RecipeQualityRisk::LargeExposureCorrection)
+        );
+
+        recipe.adjustments.exposure = Some(0.2);
+        recipe.adjustments.vibrance = Some(12.0);
+        let exposure = PhotoExposureAnalysis {
+            asset_id,
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 0.9,
+            luminance_p02: None,
+            luminance_p10: None,
+            luminance_p50: None,
+            luminance_p90: None,
+            luminance_p98: None,
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.6),
+            colorfulness_p25: Some(0.2),
+            colorfulness_p75: Some(0.9),
+        };
+        assert_eq!(
+            assess_recipe_quality_risk(&recipe, Some(&exposure)),
+            Some(RecipeQualityRisk::SaturatedColorPressure)
+        );
     }
 
     #[test]

@@ -493,3 +493,14 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Existing StyleProfile Saturation remains an intentional global photographer preference and MUST not be silently replaced by adaptive Vibrance.
 - Vibrance MUST be represented in Recipe, Review preview, per-photo exception editing, selective exception synchronization and Lightroom XMP delivery.
 - Legacy analysis payloads without colorfulness P25/P75 MUST remain readable and MUST skip automatic Vibrance rather than invent distribution evidence.
+
+### Quality-first automatic edit gate
+
+- Automatic Recipe generation MUST NOT imply automatic approval.
+- Recipe Review MUST surface a canonical quality-risk reason when the final Recipe or its preview-derived evidence crosses conservative safety thresholds.
+- Quality risk MUST be evaluated after per-photo exceptions are applied so Review and Lightroom see the same effective Recipe.
+- Photographer Cull Keep MAY simplify selection, but MUST NOT bypass an edit-quality risk.
+- A current explicit Recipe confirmation MAY clear the risk until Reference/style/evidence/exception changes invalidate the Recipe fingerprint.
+- The first implemented risks cover low-confidence exposure evidence, preview clipping, large Exposure, aggressive Highlights/Shadows, stressed Whites/Blacks, strong Contrast, strong Saturation/Vibrance, and positive color pressure on already highly saturated imagery.
+- The gate MUST remain scene-neutral and usable for portraits, family, landscape, architecture, night, food and mixed travel sets.
+- Batch clear-group confirmation MUST exclude any photo currently flagged by the quality gate.

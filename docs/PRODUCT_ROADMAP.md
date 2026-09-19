@@ -233,3 +233,9 @@ Prepared after channel-aware clipping protection: ExposureAnalysis v5 adds P02/P
 ### Core editing quality: protected color recovery
 
 Prepared after white/black point control: ExposureAnalysis v6 adds colorfulness P25/P75 and adaptive color matching shifts positive recovery from global Saturation to saturation-aware Vibrance. The goal is stronger muted colors without overdriving already-saturated skies, neon, clothing and similar scene elements.
+
+### Core editing quality: quality-first exception gate
+
+Completed after protected adaptive color recovery: canonical Recipe Review now adds a quality-first guard before batch confirmation. Risky generated edits—large exposure/tone/endpoint/contrast/color moves, clipped or low-confidence preview evidence, and extra color pressure on already-saturated scenes—return to exception Review instead of joining the clear cohort.
+
+This intentionally copies only the useful workflow principle from mature batch editors: automate the standard images, then spend human attention on exceptions. The gate is shared by people and scenery, does not create a portrait-only branch, and does not weaken the existing Direct Export readiness boundary.

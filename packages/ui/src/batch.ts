@@ -395,11 +395,22 @@ export interface BackendRecipeReviewOverride {
   vibrance_delta: number;
 }
 
+export type RecipeQualityRisk =
+  | "LOW_CONFIDENCE_EVIDENCE"
+  | "PREVIEW_CLIPPING"
+  | "LARGE_EXPOSURE_CORRECTION"
+  | "AGGRESSIVE_TONE_RECOVERY"
+  | "ENDPOINT_PRESSURE"
+  | "STRONG_CONTRAST_SHIFT"
+  | "SATURATED_COLOR_PRESSURE"
+  | "STRONG_COLOR_SHIFT";
+
 export type RecipeReviewAttentionReason =
   | "SAVED_EXCEPTION"
   | "PHOTOGRAPHER_REVIEW"
   | "AI_REJECT_SUGGESTION"
   | "AI_REVIEW"
+  | "QUALITY_RISK"
   | "EVIDENCE_PENDING";
 
 export type RecipeReviewDisposition =
@@ -412,6 +423,7 @@ export interface BackendRecipeReviewAssetPreflight {
   asset_id: string;
   disposition: RecipeReviewDisposition;
   reason: RecipeReviewAttentionReason | null;
+  quality_risk: RecipeQualityRisk | null;
 }
 
 export interface BackendRecipeReviewGroupPreflight {

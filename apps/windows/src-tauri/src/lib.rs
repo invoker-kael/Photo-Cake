@@ -1,7 +1,7 @@
 use photo_core::{
     apply_companion_patch as apply_companion_patch_core,
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
-    build_recipe_review_group_preflight, build_reference_readiness_plan,
+    assess_recipe_quality_risk, build_recipe_review_group_preflight, build_reference_readiness_plan,
     build_style_sync_group_context, build_style_sync_preflight, derive_workflow_status,
     preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
     route_exposure_bracket_sources, write_group_sidecars, write_sidecar_batch, AnalysisCache,
@@ -11,7 +11,8 @@ use photo_core::{
     ExposureBracketMergeStore, ExposureBracketSet, GroupCullingResult, GroupReferenceBinding,
     MomentQuickCullOperation, MomentQuickCullPlan,
     JobStatus, ModelBundleManifest, ModelPlatform,
-    PhotoGroup, PreviewArtifact, PreviewStore, RawAsset, RawCatalog, RawImportResult, RawImporter,
+    InferenceTask, PhotoExposureAnalysis, PhotoGroup, PreviewArtifact, PreviewStore, RawAsset,
+    RawCatalog, RawImportResult, RawImporter,
     RawMetadataStore, Recipe, RecipeReviewGroupPreflight, RecipeReviewOverride, RecipeReviewSignal,
     RecipeReviewStore, RecipeReviewSyncFields, ReferenceReadinessPlan, ReferenceReadinessStatus,
     ReferenceStore,
@@ -444,6 +445,22 @@ fn recipe_review_preflight_for_group(
         } else {
             false
         };
+        let quality_risk = if let Some(recipe) = recipe {
+            let analysis = state
+                .analysis_cache
+                .latest_for_asset_task(*asset_id, InferenceTask::ExposureAnalysis)
+                .map_err(|error| error.to_string())?
+                .map(|artifact| {
+                    serde_json::from_value::<PhotoExposureAnalysis>(artifact.payload_json)
+                        .map_err(|error| {
+                            format!("invalid exposure analysis for asset {asset_id}: {error}")
+                        })
+                })
+                .transpose()?;
+            assess_recipe_quality_risk(recipe, analysis.as_ref())
+        } else {
+            None
+        };
 
         signals.push((
             *asset_id,
@@ -453,6 +470,7 @@ fn recipe_review_preflight_for_group(
                 user_decision,
                 ai_decision,
                 evidence_pending,
+                quality_risk,
             },
         ));
     }

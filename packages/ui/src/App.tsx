@@ -33,6 +33,7 @@ import {
   type BackendStyleProfile,
   type BackendStyleSyncPreflight,
   type BackendSceneTag,
+  type RecipeQualityRisk,
   type RecipeReviewAttentionReason,
   type StyleSyncReason,
   type BatchJob,
@@ -70,6 +71,7 @@ export type {
   BackendRecipeReviewGroupBatchResult,
   BackendRecipeReviewOverride,
   BackendRecipeReviewSyncFields,
+  RecipeQualityRisk,
   BackendRecipeReviewSyncResult,
   BackendReviewRenderResult,
   BackendSemanticRefinementReport,
@@ -992,9 +994,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     const order: Record<RecipeReviewAttentionReason, number> = {
       SAVED_EXCEPTION: 0,
       PHOTOGRAPHER_REVIEW: 1,
-      AI_REJECT_SUGGESTION: 2,
-      AI_REVIEW: 3,
-      EVIDENCE_PENDING: 4,
+      QUALITY_RISK: 2,
+      AI_REJECT_SUGGESTION: 3,
+      AI_REVIEW: 4,
+      EVIDENCE_PENDING: 5,
     };
     return plan.reason ? order[plan.reason] : 10;
   };
@@ -1010,9 +1013,24 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       PHOTOGRAPHER_REVIEW: "Photographer marked Review",
       AI_REJECT_SUGGESTION: "AI cull: Reject suggestion",
       AI_REVIEW: "AI cull: Review",
+      QUALITY_RISK: "Quality guard: automatic edit needs visual review",
       EVIDENCE_PENDING: "Waiting for complete local evidence",
     };
     return plan.reason ? labels[plan.reason] : "Recipe needs review";
+  };
+
+  const recipeQualityRiskLabel = (risk: RecipeQualityRisk) => {
+    const labels: Record<RecipeQualityRisk, string> = {
+      LOW_CONFIDENCE_EVIDENCE: "low-confidence preview evidence",
+      PREVIEW_CLIPPING: "meaningful preview clipping",
+      LARGE_EXPOSURE_CORRECTION: "large exposure correction",
+      AGGRESSIVE_TONE_RECOVERY: "aggressive highlight/shadow recovery",
+      ENDPOINT_PRESSURE: "strong white/black point pressure",
+      STRONG_CONTRAST_SHIFT: "strong contrast shift",
+      SATURATED_COLOR_PRESSURE: "already-saturated colors need protection",
+      STRONG_COLOR_SHIFT: "strong saturation/vibrance shift",
+    };
+    return labels[risk];
   };
 
   const recipeReviewItems = (photoContext?.groups ?? []).flatMap((group) => {
@@ -3449,6 +3467,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           const groupPendingCount = preflight?.pending_asset_ids.length ?? 0;
           const groupExceptionCount =
             preflight?.assets.filter((asset) => asset.reason === "SAVED_EXCEPTION").length ?? 0;
+          const groupQualityRiskCount =
+            preflight?.assets.filter((asset) => asset.reason === "QUALITY_RISK").length ?? 0;
           const groupContext = preflight
             ? [
                 preflight.contains_people ? "people/family" : null,
@@ -3468,7 +3488,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <strong>Group {groupIndex + 1}</strong>
                 <div className="recipe-review-head-actions">
                   <span>
-                    {`${groupAttentionCount} attention · ${groupPendingCount} pending · ${groupConfirmedCount} confirmed · ${groupExceptionCount} exceptions · ${recipesWithTargets.length} editable`}
+                    {`${groupAttentionCount} attention · ${groupPendingCount} pending · ${groupConfirmedCount} confirmed · ${groupExceptionCount} exceptions · ${groupQualityRiskCount} quality guard · ${recipesWithTargets.length} editable`}
                   </span>
                   <small>{groupContext}</small>
                   {clearGroup && (
@@ -3631,6 +3651,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       <div className="recipe-review-info">
                         <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
                         <small>{recipeReviewLabel(assetId)}</small>
+                        {recipeReviewPlansByAsset.get(assetId)?.quality_risk && (
+                          <small>
+                            Quality guard · {recipeQualityRiskLabel(
+                              recipeReviewPlansByAsset.get(assetId)!.quality_risk!,
+                            )}
+                          </small>
+                        )}
                         <small>
                           Final exposure {signed(recipe.adjustments.exposure ?? 0)} EV
                           {review ? ` · override ${signed(review.exposure_delta_ev)} EV` : ""}

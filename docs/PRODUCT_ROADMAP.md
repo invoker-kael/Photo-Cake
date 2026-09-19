@@ -228,3 +228,8 @@ Prepared as the next quality batch: ExposureAnalysis v4 makes clipping RGB-chann
 ### Core editing quality: independent white/black points
 
 Prepared after channel-aware clipping protection: ExposureAnalysis v5 adds P02/P98 endpoint evidence and adaptive Recipe gains independent Whites/Blacks instead of forcing Highlights/Shadows to control the entire tonal range. The controls are carried through Review exceptions, preview rendering and Lightroom XMP.
+
+
+### Core editing quality: protected color recovery
+
+Prepared after white/black point control: ExposureAnalysis v6 adds colorfulness P25/P75 and adaptive color matching shifts positive recovery from global Saturation to saturation-aware Vibrance. The goal is stronger muted colors without overdriving already-saturated skies, neon, clothing and similar scene elements.

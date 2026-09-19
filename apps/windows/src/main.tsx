@@ -131,6 +131,7 @@ const bridge: PhotoCakeBridge = {
     blacksDelta,
     contrastDelta,
     saturationDelta,
+    vibranceDelta,
   ) =>
     invoke<BackendRecipeReviewOverride>("set_recipe_review", {
       assetId,
@@ -141,6 +142,7 @@ const bridge: PhotoCakeBridge = {
       blacksDelta,
       contrastDelta,
       saturationDelta,
+      vibranceDelta,
     }),
   syncRecipeReviewException: (
     groupId,

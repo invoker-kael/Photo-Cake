@@ -533,3 +533,12 @@ ExposureAnalysis v5 extends the preview-relative tonal evidence with P02 and P98
 Reference-relative endpoint matching runs after the final per-photo exposure correction. Whites and Blacks are bounded to ±60 and incorporate excess RGB clipping versus the selected Reference. Old cached evidence without P02/P98 remains valid and simply skips endpoint matching.
 
 Whites/Blacks are first-class Recipe fields. The lightweight Review preview approximates them with narrow luminance masks, Recipe Review supports additive per-photo exceptions and selective same-group synchronization, and Lightroom handoff serializes them as crs:Whites2012 / crs:Blacks2012.
+
+
+### Protected color lift with Vibrance
+
+ExposureAnalysis v6 extends preview-relative color evidence from one average colorfulness value to a distribution: mean plus P25/P75 normalized chroma. Positive adaptive color recovery uses P25 to identify genuinely muted regions and P75 to limit the correction when the target already contains strongly saturated colors.
+
+Reference-relative color matching separates the two directions. Targets that are more colorful than the Reference may receive a bounded negative Saturation correction. Targets that are less colorful use bounded positive Vibrance instead of global positive Saturation. This protects already-saturated skies, neon, clothing and other strong colors while still restoring muted color separation.
+
+The Review preview approximates Vibrance with a per-pixel saturation-aware chroma gain: lower-saturation pixels receive more gain than already-saturated pixels. Lightroom handoff serializes the first-class Recipe value as crs:Vibrance.

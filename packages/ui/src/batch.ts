@@ -342,6 +342,7 @@ export interface BackendEditAdjustments {
   temperature: number | null;
   tint: number | null;
   saturation: number | null;
+  vibrance: number | null;
 }
 
 export interface BackendRecipe {
@@ -391,6 +392,7 @@ export interface BackendRecipeReviewOverride {
   blacks_delta: number;
   contrast_delta: number;
   saturation_delta: number;
+  vibrance_delta: number;
 }
 
 export type RecipeReviewAttentionReason =
@@ -442,6 +444,7 @@ export interface BackendRecipeReviewSyncFields {
   blacks: boolean;
   contrast: boolean;
   saturation: boolean;
+  vibrance: boolean;
 }
 
 export interface BackendRecipeReviewSyncResult {
@@ -520,6 +523,7 @@ export interface PhotoCakeBridge {
     blacksDelta: number,
     contrastDelta: number,
     saturationDelta: number,
+    vibranceDelta: number,
   ): Promise<BackendRecipeReviewOverride>;
   syncRecipeReviewException?(
     groupId: string,

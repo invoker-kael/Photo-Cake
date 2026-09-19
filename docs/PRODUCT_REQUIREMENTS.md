@@ -482,3 +482,14 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Legacy analysis payloads without endpoint percentiles MUST remain readable and MUST skip endpoint matching rather than synthesize evidence.
 - Whites/Blacks MUST be represented in Recipe, Review preview, per-photo exception editing, selective exception synchronization and Lightroom XMP delivery.
 - Lightroom handoff MUST use Whites2012 and Blacks2012 for these controls.
+
+
+### Protected adaptive color
+
+- Analyze SHOULD record mean, P25 and P75 normalized preview chroma for Reference-relative color matching.
+- Positive automatic color recovery SHOULD use Vibrance rather than equal global Saturation gain.
+- Automatic Vibrance MUST reduce its gain when the target already has a stronger saturated-color tail than the selected Reference.
+- Targets that are materially more colorful than the Reference MAY receive bounded negative Saturation correction.
+- Existing StyleProfile Saturation remains an intentional global photographer preference and MUST not be silently replaced by adaptive Vibrance.
+- Vibrance MUST be represented in Recipe, Review preview, per-photo exception editing, selective exception synchronization and Lightroom XMP delivery.
+- Legacy analysis payloads without colorfulness P25/P75 MUST remain readable and MUST skip automatic Vibrance rather than invent distribution evidence.

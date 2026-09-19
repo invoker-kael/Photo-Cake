@@ -382,6 +382,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     blacks: true,
     contrast: true,
     saturation: true,
+    vibrance: true,
   });
   const [reviewSyncUpdating, setReviewSyncUpdating] = useState(false);
   const [reviewSyncNote, setReviewSyncNote] = useState<string | null>(null);
@@ -459,7 +460,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setReviewBatchNote(null);
     setReviewSyncSource(null);
     setReviewSyncTargets([]);
-    setReviewSyncFields({ exposure: true, highlights: true, shadows: true, whites: true, blacks: true, contrast: true, saturation: true });
+    setReviewSyncFields({ exposure: true, highlights: true, shadows: true, whites: true, blacks: true, contrast: true, saturation: true, vibrance: true });
     setReviewSyncNote(null);
     setHandoffPreflightErrors({});
     setHandoffBatchTargets([]);
@@ -1675,6 +1676,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     blacksDelta: number,
     contrastDelta: number,
     saturationDelta: number,
+    vibranceDelta: number,
   ) => {
     if (!bridge?.setRecipeReview) return;
     setReviewUpdating(assetId);
@@ -1688,6 +1690,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         blacksDelta,
         contrastDelta,
         saturationDelta,
+        vibranceDelta,
       );
       const neutral =
         Math.abs(review.exposure_delta_ev) <= 0.0001 &&
@@ -1696,7 +1699,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         Math.abs(review.whites_delta) <= 0.0001 &&
         Math.abs(review.blacks_delta) <= 0.0001 &&
         Math.abs(review.contrast_delta) <= 0.0001 &&
-        Math.abs(review.saturation_delta) <= 0.0001;
+        Math.abs(review.saturation_delta) <= 0.0001 &&
+        Math.abs(review.vibrance_delta) <= 0.0001;
       setRecipeReviews((current) => {
         const next = { ...current };
         if (neutral) delete next[assetId];
@@ -1723,7 +1727,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   const adjustRecipeReview = (
     assetId: string,
-    field: "exposure" | "highlights" | "shadows" | "whites" | "blacks" | "contrast" | "saturation",
+    field: "exposure" | "highlights" | "shadows" | "whites" | "blacks" | "contrast" | "saturation" | "vibrance",
     delta: number,
   ) => {
     const current = recipeReviews[assetId];
@@ -1734,6 +1738,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     let blacks = current?.blacks_delta ?? 0;
     let contrast = current?.contrast_delta ?? 0;
     let saturation = current?.saturation_delta ?? 0;
+    let vibrance = current?.vibrance_delta ?? 0;
 
     if (field === "exposure") exposure = Math.max(-3, Math.min(3, exposure + delta));
     if (field === "highlights") highlights = Math.max(-100, Math.min(100, highlights + delta));
@@ -1742,8 +1747,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     if (field === "blacks") blacks = Math.max(-100, Math.min(100, blacks + delta));
     if (field === "contrast") contrast = Math.max(-100, Math.min(100, contrast + delta));
     if (field === "saturation") saturation = Math.max(-100, Math.min(100, saturation + delta));
+    if (field === "vibrance") vibrance = Math.max(-100, Math.min(100, vibrance + delta));
 
-    void saveRecipeReview(assetId, exposure, highlights, shadows, whites, blacks, contrast, saturation);
+    void saveRecipeReview(assetId, exposure, highlights, shadows, whites, blacks, contrast, saturation, vibrance);
   };
 
   const syncRecipeReviewException = async () => {
@@ -1774,7 +1780,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             Math.abs(review.highlights_delta) <= 0.0001 &&
             Math.abs(review.shadows_delta) <= 0.0001 &&
             Math.abs(review.contrast_delta) <= 0.0001 &&
-            Math.abs(review.saturation_delta) <= 0.0001;
+            Math.abs(review.saturation_delta) <= 0.0001 &&
+        Math.abs(review.vibrance_delta) <= 0.0001;
           if (neutral) delete next[review.asset_id];
           else next[review.asset_id] = review;
         }
@@ -1815,7 +1822,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   const resetRecipeReview = async (assetId: string) => {
     if (!bridge?.clearRecipeReview) {
-      void saveRecipeReview(assetId, 0, 0, 0, 0, 0, 0, 0);
+      void saveRecipeReview(assetId, 0, 0, 0, 0, 0, 0, 0, 0);
       return;
     }
     setReviewUpdating(assetId);
@@ -3498,6 +3505,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       ["blacks", "Blacks"],
                       ["contrast", "Contrast"],
                       ["saturation", "Saturation"],
+                      ["vibrance", "Vibrance"],
                     ] as const).map(([field, label]) => (
                       <label key={field}>
                         <input
@@ -3632,8 +3640,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           {" · "}S {signed(recipe.adjustments.shadows ?? 0, 0)}
                           {" · "}W {signed(recipe.adjustments.whites ?? 0, 0)}
                           {" · "}B {signed(recipe.adjustments.blacks ?? 0, 0)}
+                          {" · "}V {signed(recipe.adjustments.vibrance ?? 0, 0)}
                           {review
-                            ? ` · overrides H ${signed(review.highlights_delta, 0)} / S ${signed(review.shadows_delta, 0)} / W ${signed(review.whites_delta, 0)} / B ${signed(review.blacks_delta, 0)}`
+                            ? ` · overrides H ${signed(review.highlights_delta, 0)} / S ${signed(review.shadows_delta, 0)} / W ${signed(review.whites_delta, 0)} / B ${signed(review.blacks_delta, 0)} / V ${signed(review.vibrance_delta, 0)}`
                             : ""}
                         </small>
                       </div>
@@ -3683,6 +3692,12 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           <strong>{signed(review?.saturation_delta ?? 0, 0)}</strong>
                           <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "saturation", 5)}>+</button>
                         </div>
+                        <div className="mini-adjust">
+                          <span>Vibrance</span>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "vibrance", -5)}>−</button>
+                          <strong>{signed(review?.vibrance_delta ?? 0, 0)}</strong>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "vibrance", 5)}>+</button>
+                        </div>
                       </div>
                       <div className="recipe-review-actions">
                         {syncingThisGroup && !isSyncSource && (
@@ -3717,7 +3732,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                               onClick={() => {
                                 setReviewSyncSource({ groupId: group.id, assetId });
                                 setReviewSyncTargets([]);
-                                setReviewSyncFields({ exposure: true, highlights: true, shadows: true, whites: true, blacks: true, contrast: true, saturation: true });
+                                setReviewSyncFields({ exposure: true, highlights: true, shadows: true, whites: true, blacks: true, contrast: true, saturation: true, vibrance: true });
                                 setReviewSyncNote(null);
                               }}
                             >

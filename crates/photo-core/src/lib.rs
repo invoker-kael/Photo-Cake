@@ -65,7 +65,7 @@ pub use color_sync::{
     SemanticRegion, reference_relative_contrast_adjustment,
     reference_relative_endpoint_adjustments, reference_relative_exposure_correction,
     reference_relative_saturation_adjustment,
-    reference_relative_tone_adjustments,
+    reference_relative_tone_adjustments, reference_relative_vibrance_adjustment,
 };
 pub use culling::{
     build_group_culling_result, build_moment_quick_cull_plan, rank_group_candidates,

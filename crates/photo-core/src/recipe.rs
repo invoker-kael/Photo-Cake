@@ -23,6 +23,7 @@ pub struct EditAdjustments {
     pub temperature: Option<f32>,
     pub tint: Option<f32>,
     pub saturation: Option<f32>,
+    pub vibrance: Option<f32>,
 }
 
 impl Recipe {
@@ -68,6 +69,7 @@ impl Recipe {
                 temperature,
                 tint,
                 saturation: Some(resolved.saturation),
+                vibrance: None,
             },
         }
     }

@@ -3,7 +3,7 @@ use crate::classification::SceneTag;
 use crate::color_sync::{
     build_adaptive_group_plan, reference_relative_contrast_adjustment,
     reference_relative_endpoint_adjustments, reference_relative_exposure_correction,
-    reference_relative_saturation_adjustment,
+    reference_relative_saturation_adjustment, reference_relative_vibrance_adjustment,
     reference_relative_tone_adjustments, ColorSyncError,
     GroupColorIntent, GroupColorSyncPlan, GroupSyncMode, PhotoColorAnalysis,
     PhotoExposureAnalysis,
@@ -544,6 +544,11 @@ impl ReferenceSet {
                 recipe.adjustments.saturation =
                     Some((baseline + saturation_delta).clamp(-100.0, 100.0));
             }
+            if let Some(vibrance_delta) =
+                reference_relative_vibrance_adjustment(&reference_evidence, target)
+            {
+                recipe.adjustments.vibrance = Some(vibrance_delta.clamp(-100.0, 100.0));
+            }
         }
         Ok(result)
     }
@@ -963,6 +968,8 @@ mod tests {
                     shadow_clip_ratio: None,
                     highlight_clip_ratio: None,
                     colorfulness: None,
+                    colorfulness_p25: None,
+                    colorfulness_p75: None,
                 }).unwrap(),
             })
             .unwrap();
@@ -1046,6 +1053,8 @@ mod tests {
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: None,
+                colorfulness_p25: None,
+                colorfulness_p75: None,
             },
             PhotoExposureAnalysis {
                 asset_id: target,
@@ -1061,6 +1070,8 @@ mod tests {
                 shadow_clip_ratio: Some(0.03),
                 highlight_clip_ratio: Some(0.04),
                 colorfulness: None,
+                colorfulness_p25: None,
+                colorfulness_p75: None,
             },
         ] {
             cache
@@ -1117,6 +1128,8 @@ mod tests {
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: Some(0.20),
+                colorfulness_p25: None,
+                colorfulness_p75: None,
             },
             PhotoExposureAnalysis {
                 asset_id: dark,
@@ -1132,6 +1145,8 @@ mod tests {
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: Some(0.20),
+                colorfulness_p25: None,
+                colorfulness_p75: None,
             },
         ] {
             cache
@@ -1142,8 +1157,8 @@ mod tests {
                         preview_revision: "preview-v1".into(),
                         task: InferenceTask::ExposureAnalysis,
                         model_id: "preview-relative-exposure".into(),
-                        model_version: "3".into(),
-                        config_hash: "trimmed-luma-percentiles-color-relative-v3".into(),
+                        model_version: "6".into(),
+                        config_hash: "trimmed-luma-rgb-clipping-endpoints-color-distribution-v6".into(),
                     },
                     payload_json: serde_json::to_value(evidence).unwrap(),
                 })
@@ -1165,7 +1180,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_reference_adapts_contrast_and_saturation_per_photo() {
+    fn cached_reference_adapts_contrast_and_protected_color_per_photo() {
         let dir = tempdir().unwrap();
         let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
         let reference_id = Uuid::new_v4();
@@ -1186,6 +1201,8 @@ mod tests {
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: Some(0.30),
+                colorfulness_p25: Some(0.18),
+                colorfulness_p75: Some(0.45),
             },
             PhotoExposureAnalysis {
                 asset_id: flat_muted,
@@ -1201,6 +1218,8 @@ mod tests {
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: Some(0.10),
+                colorfulness_p25: Some(0.04),
+                colorfulness_p75: Some(0.24),
             },
         ] {
             cache
@@ -1234,7 +1253,8 @@ mod tests {
             .unwrap();
         let recipe = &result.recipes[0];
         assert!(recipe.adjustments.contrast.unwrap() > 15.0);
-        assert!(recipe.adjustments.saturation.unwrap() > 13.0);
+        assert_eq!(recipe.adjustments.saturation, Some(3.0));
+        assert!(recipe.adjustments.vibrance.unwrap() > 10.0);
     }
 
     #[test]
@@ -1259,6 +1279,8 @@ mod tests {
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
                 colorfulness: Some(0.2),
+                colorfulness_p25: None,
+                colorfulness_p75: None,
             },
             PhotoExposureAnalysis {
                 asset_id: target,
@@ -1274,6 +1296,8 @@ mod tests {
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.02),
                 colorfulness: Some(0.2),
+                colorfulness_p25: None,
+                colorfulness_p75: None,
             },
         ] {
             cache

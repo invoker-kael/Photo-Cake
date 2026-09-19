@@ -31,6 +31,8 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
             colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
         };
     }
 
@@ -68,18 +70,27 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
         / rgb_total;
     let clipped = shadow_clip_ratio + highlight_clip_ratio;
     let confidence = (1.0 - clipped * 2.5).clamp(0.15, 1.0);
-    let mut chroma_sum = 0.0_f32;
-    let mut chroma_count = 0_u32;
+    let mut chroma = Vec::new();
     for pixel in rgb.pixels() {
         let max = pixel[0].max(pixel[1]).max(pixel[2]);
         if max < 16 {
             continue;
         }
         let min = pixel[0].min(pixel[1]).min(pixel[2]);
-        chroma_sum += f32::from(max - min) / f32::from(max);
-        chroma_count += 1;
+        chroma.push(f32::from(max - min) / f32::from(max));
     }
-    let colorfulness = (chroma_count > 0).then_some(chroma_sum / chroma_count as f32);
+    chroma.sort_by(|left, right| left.total_cmp(right));
+    let colorfulness = (!chroma.is_empty())
+        .then_some(chroma.iter().copied().sum::<f32>() / chroma.len() as f32);
+    let chroma_percentile = |fraction: f32| -> Option<f32> {
+        if chroma.is_empty() {
+            return None;
+        }
+        let index = ((chroma.len().saturating_sub(1)) as f32 * fraction)
+            .round()
+            .clamp(0.0, chroma.len().saturating_sub(1) as f32) as usize;
+        Some(chroma[index])
+    };
 
     PhotoExposureAnalysis {
         asset_id,
@@ -95,6 +106,8 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
         shadow_clip_ratio: Some(shadow_clip_ratio),
         highlight_clip_ratio: Some(highlight_clip_ratio),
         colorfulness,
+        colorfulness_p25: chroma_percentile(0.25),
+        colorfulness_p75: chroma_percentile(0.75),
     }
 }
 
@@ -151,6 +164,20 @@ mod tests {
             .colorfulness
             .unwrap();
         assert!(red_value > gray_value);
+    }
+
+    #[test]
+    fn colorfulness_distribution_separates_muted_and_saturated_pixels() {
+        let image = DynamicImage::ImageRgb8(image::ImageBuffer::from_fn(100, 1, |x, _| {
+            if x < 50 {
+                image::Rgb([140, 120, 110])
+            } else {
+                image::Rgb([220, 40, 40])
+            }
+        }));
+        let analysis = analyze_preview_exposure(Uuid::new_v4(), &image);
+        assert!(analysis.colorfulness_p25.unwrap() < 0.25);
+        assert!(analysis.colorfulness_p75.unwrap() > 0.70);
     }
 
     #[test]

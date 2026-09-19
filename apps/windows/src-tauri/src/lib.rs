@@ -1552,6 +1552,7 @@ fn set_recipe_review(
     blacks_delta: f32,
     contrast_delta: f32,
     saturation_delta: f32,
+    vibrance_delta: f32,
     state: State<'_, AppState>,
 ) -> Result<RecipeReviewOverride, String> {
     let asset_id = Uuid::parse_str(&asset_id)
@@ -1567,6 +1568,7 @@ fn set_recipe_review(
             blacks_delta,
             contrast_delta,
             saturation_delta,
+            vibrance_delta,
         })
         .map_err(|error| error.to_string())
 }

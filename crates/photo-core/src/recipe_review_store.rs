@@ -63,6 +63,8 @@ pub struct RecipeReviewSyncFields {
     pub blacks: bool,
     pub contrast: bool,
     pub saturation: bool,
+    #[serde(default)]
+    pub vibrance: bool,
 }
 
 impl RecipeReviewSyncFields {
@@ -74,6 +76,7 @@ impl RecipeReviewSyncFields {
             || self.blacks
             || self.contrast
             || self.saturation
+            || self.vibrance
     }
 }
 
@@ -91,6 +94,8 @@ pub struct RecipeReviewOverride {
     pub blacks_delta: f32,
     pub contrast_delta: f32,
     pub saturation_delta: f32,
+    #[serde(default)]
+    pub vibrance_delta: f32,
 }
 
 impl RecipeReviewOverride {
@@ -104,6 +109,7 @@ impl RecipeReviewOverride {
             blacks_delta: 0.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
+            vibrance_delta: 0.0,
         }
     }
 
@@ -115,6 +121,7 @@ impl RecipeReviewOverride {
             && self.blacks_delta.abs() <= NEUTRAL_EPSILON
             && self.contrast_delta.abs() <= NEUTRAL_EPSILON
             && self.saturation_delta.abs() <= NEUTRAL_EPSILON
+            && self.vibrance_delta.abs() <= NEUTRAL_EPSILON
     }
 
     pub fn copy_selected_to(
@@ -158,6 +165,11 @@ impl RecipeReviewOverride {
                 self.saturation_delta
             } else {
                 target.saturation_delta
+            },
+            vibrance_delta: if fields.vibrance {
+                self.vibrance_delta
+            } else {
+                target.vibrance_delta
             },
         }
     }
@@ -213,6 +225,12 @@ impl RecipeReviewOverride {
         recipe.adjustments.saturation = add_delta(
             recipe.adjustments.saturation,
             self.saturation_delta,
+            -100.0,
+            100.0,
+        );
+        recipe.adjustments.vibrance = add_delta(
+            recipe.adjustments.vibrance,
+            self.vibrance_delta,
             -100.0,
             100.0,
         );
@@ -300,6 +318,7 @@ impl RecipeReviewStore {
             normalized.blacks_delta = normalized.blacks_delta.clamp(-100.0, 100.0);
             normalized.contrast_delta = normalized.contrast_delta.clamp(-100.0, 100.0);
             normalized.saturation_delta = normalized.saturation_delta.clamp(-100.0, 100.0);
+            normalized.vibrance_delta = normalized.vibrance_delta.clamp(-100.0, 100.0);
             let json = if normalized.is_neutral() {
                 None
             } else {
@@ -506,6 +525,7 @@ mod tests {
                 temperature: None,
                 tint: None,
                 saturation: Some(3.0),
+                vibrance: None,
             },
         }
     }
@@ -521,6 +541,7 @@ mod tests {
         assert_eq!(value.shadows_delta, 0.0);
         assert_eq!(value.whites_delta, 0.0);
         assert_eq!(value.blacks_delta, 0.0);
+        assert_eq!(value.vibrance_delta, 0.0);
     }
 
     #[test]
@@ -537,6 +558,7 @@ mod tests {
             blacks_delta: 0.0,
             contrast_delta: 5.0,
             saturation_delta: -2.0,
+            vibrance_delta: 0.0,
         };
 
         store.set(value.clone()).unwrap();
@@ -556,6 +578,7 @@ mod tests {
             blacks_delta: 0.0,
             contrast_delta: -4.0,
             saturation_delta: 2.0,
+            vibrance_delta: 0.0,
         }
         .apply_to_recipe(&mut target)
         .unwrap();
@@ -584,6 +607,7 @@ mod tests {
             blacks_delta: 4.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
+            vibrance_delta: 0.0,
         }
         .apply_to_recipe(&mut target)
         .unwrap();
@@ -609,6 +633,7 @@ mod tests {
                 blacks_delta: 0.0,
                 contrast_delta: 0.0,
                 saturation_delta: 0.0,
+                vibrance_delta: 0.0,
             })
             .unwrap();
         store
@@ -629,6 +654,7 @@ mod tests {
             blacks_delta: -6.0,
             contrast_delta: 10.0,
             saturation_delta: -4.0,
+            vibrance_delta: 0.0,
         };
         let target_id = Uuid::new_v4();
         let target = RecipeReviewOverride {
@@ -640,6 +666,7 @@ mod tests {
             blacks_delta: 1.0,
             contrast_delta: 3.0,
             saturation_delta: 7.0,
+            vibrance_delta: 0.0,
         };
 
         let copied = source.copy_selected_to(
@@ -652,6 +679,7 @@ mod tests {
                 blacks: false,
                 contrast: false,
                 saturation: true,
+                vibrance: true,
             },
         );
 
@@ -680,6 +708,7 @@ mod tests {
                 blacks_delta: 0.0,
                 contrast_delta: 0.0,
                 saturation_delta: 0.0,
+                vibrance_delta: 0.0,
             })
             .unwrap();
 
@@ -694,6 +723,7 @@ mod tests {
                     blacks_delta: 0.0,
                     contrast_delta: 5.0,
                     saturation_delta: 0.0,
+                    vibrance_delta: 0.0,
                 },
                 RecipeReviewOverride::neutral(second_id),
             ])
@@ -718,6 +748,7 @@ mod tests {
             blacks_delta: 0.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
+            vibrance_delta: 0.0,
         };
 
         assert!(matches!(
@@ -809,6 +840,7 @@ mod tests {
             blacks_delta: 0.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
+            vibrance_delta: 0.0,
         }
         .apply_to_recipe(&mut target)
         .unwrap_err();

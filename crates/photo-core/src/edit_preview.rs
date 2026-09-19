@@ -51,6 +51,11 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
         .saturation
         .unwrap_or(0.0)
         .clamp(-100.0, 100.0);
+    let vibrance = recipe
+        .adjustments
+        .vibrance
+        .unwrap_or(0.0)
+        .clamp(-100.0, 100.0);
 
     if exposure.abs() < 0.0001
         && contrast.abs() < 0.0001
@@ -59,6 +64,7 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
         && whites.abs() < 0.0001
         && blacks.abs() < 0.0001
         && saturation.abs() < 0.0001
+        && vibrance.abs() < 0.0001
     {
         return image;
     }
@@ -101,7 +107,22 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
         remap_luminance_preserving_hue(&mut rgb, post_tone_luminance, endpoint_delta);
 
         let toned_luminance = (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
+        let max_channel = rgb[0].max(rgb[1]).max(rgb[2]);
+        let min_channel = rgb[0].min(rgb[1]).min(rgb[2]);
+        let pixel_saturation = if max_channel <= 1e-6 {
+            0.0
+        } else {
+            ((max_channel - min_channel) / max_channel).clamp(0.0, 1.0)
+        };
+        let vibrance_weight = if vibrance >= 0.0 {
+            (1.0 - pixel_saturation).powf(1.25)
+        } else {
+            0.6 + 0.4 * (1.0 - pixel_saturation)
+        };
+        let vibrance_factor = (1.0 + (vibrance / 100.0) * vibrance_weight).max(0.0);
         for channel in &mut rgb {
+            *channel = (toned_luminance + (*channel - toned_luminance) * vibrance_factor)
+                .clamp(0.0, 1.0);
             *channel = (toned_luminance + (*channel - toned_luminance) * saturation_factor)
                 .clamp(0.0, 1.0);
         }
@@ -205,6 +226,7 @@ mod tests {
                 temperature: None,
                 tint: None,
                 saturation: Some(saturation),
+                vibrance: None,
             },
         }
     }
@@ -347,6 +369,25 @@ mod tests {
         let dark_gain = i16::from(edited.get_pixel(0, 0)[0]) - 25;
         let mid_gain = i16::from(edited.get_pixel(1, 0)[0]) - 128;
         assert!(dark_gain > mid_gain);
+    }
+
+    #[test]
+    fn positive_vibrance_boosts_muted_color_more_than_saturated_color() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_fn(2, 1, |x, _| {
+            if x == 0 { Rgb([150, 130, 120]) } else { Rgb([220, 40, 40]) }
+        }));
+        let mut edit = recipe(0.0, 0.0, 0.0);
+        edit.adjustments.vibrance = Some(50.0);
+        let edited = apply_preview_adjustments(source, &edit).to_rgb8();
+
+        let muted = edited.get_pixel(0, 0).0;
+        let saturated = edited.get_pixel(1, 0).0;
+        let muted_gain =
+            (i16::from(muted[0]) - i16::from(muted[2])) - 30;
+        let saturated_gain =
+            (i16::from(saturated[0]) - i16::from(saturated[1])) - 180;
+        assert!(muted_gain > 0);
+        assert!(muted_gain > saturated_gain);
     }
 
     #[test]

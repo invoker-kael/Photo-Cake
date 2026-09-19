@@ -25,6 +25,7 @@ pub struct XmpEditState {
     pub temperature: Option<f32>,
     pub tint: Option<f32>,
     pub saturation: Option<f32>,
+    pub vibrance: Option<f32>,
 }
 
 #[derive(Debug, Error)]
@@ -103,6 +104,7 @@ impl XmpEditState {
             temperature,
             tint,
             saturation: recipe.adjustments.saturation,
+            vibrance: recipe.adjustments.vibrance,
         }
     }
 
@@ -128,6 +130,7 @@ impl XmpEditState {
         push_attr(&mut attributes, "crs:Temperature", self.temperature);
         push_attr(&mut attributes, "crs:Tint", self.tint);
         push_attr(&mut attributes, "crs:Saturation", self.saturation);
+        push_attr(&mut attributes, "crs:Vibrance", self.vibrance);
 
         format!(
             "<?xpacket begin='\u{feff}' id='W5M0MpCehiHzreSzNTczkc9d'?>\n\
@@ -157,6 +160,7 @@ impl XmpEditState {
             temperature: None,
             tint: None,
             saturation: None,
+            vibrance: None,
         };
 
         loop {
@@ -208,6 +212,7 @@ fn assign_xmp_attribute(
         "Temperature" => state.temperature = Some(parse_xmp_number(name, value)?),
         "Tint" => state.tint = Some(parse_xmp_number(name, value)?),
         "Saturation" => state.saturation = Some(parse_xmp_number(name, value)?),
+        "Vibrance" => state.vibrance = Some(parse_xmp_number(name, value)?),
         _ => {}
     }
     Ok(())
@@ -240,6 +245,7 @@ pub fn validate_recipe_xmp(recipe: &Recipe, document: &str) -> Result<(), XmpPar
         ("temperature", expected.temperature, actual.temperature),
         ("tint", expected.tint, actual.tint),
         ("saturation", expected.saturation, actual.saturation),
+        ("vibrance", expected.vibrance, actual.vibrance),
     ] {
         if !same_xmp_number(expected, actual) {
             return Err(XmpParseError::Invalid(format!("{name} mismatch")));
@@ -268,6 +274,7 @@ pub fn xmp_document_matches_recipe_state(recipe: &Recipe, document: &str) -> boo
         (expected.temperature, actual.temperature),
         (expected.tint, actual.tint),
         (expected.saturation, actual.saturation),
+        (expected.vibrance, actual.vibrance),
     ]
     .into_iter()
     .all(|(left, right)| same_xmp_number(left, right))
@@ -538,6 +545,7 @@ mod tests {
                 temperature: None,
                 tint: None,
                 saturation: None,
+                vibrance: None,
             },
         }
     }
@@ -590,6 +598,7 @@ mod tests {
         source.id = Uuid::new_v4();
         source.adjustments.contrast = Some(12.0);
         source.adjustments.saturation = Some(-7.0);
+        source.adjustments.vibrance = Some(14.0);
         source.adjustments.temperature = Some(6100.0);
         source.adjustments.tint = Some(-3.0);
 
@@ -604,6 +613,7 @@ mod tests {
         );
         assert_eq!(parsed.temperature, Some(6100.0));
         assert_eq!(parsed.tint, Some(-3.0));
+        assert_eq!(parsed.vibrance, Some(14.0));
     }
 
     #[test]

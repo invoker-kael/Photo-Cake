@@ -1036,7 +1036,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_reference_generates_per_photo_highlight_shadow_recipe() {
+    fn cached_reference_scales_tone_recovery_for_scene_outlier() {
         let dir = tempdir().unwrap();
         let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
         let reference_id = Uuid::new_v4();
@@ -1107,7 +1107,9 @@ mod tests {
             .unwrap();
         let recipe = &result.recipes[0];
         assert!(recipe.adjustments.highlights.unwrap() < -20.0);
-        assert!(recipe.adjustments.shadows.unwrap() > 20.0);
+        let shadows = recipe.adjustments.shadows.unwrap();
+        assert!(shadows > 10.0);
+        assert!(shadows < 20.0);
     }
 
     #[test]

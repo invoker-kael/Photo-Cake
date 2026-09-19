@@ -404,6 +404,7 @@ export type RecipeQualityRisk =
   | "STRONG_CONTRAST_SHIFT"
   | "DEEP_SHADOW_LIFT"
   | "DYNAMIC_RANGE_COMPRESSION"
+  | "REFERENCE_MISMATCH"
   | "SATURATED_COLOR_PRESSURE"
   | "STRONG_COLOR_SHIFT";
 
@@ -426,6 +427,7 @@ export interface BackendRecipeReviewAssetPreflight {
   disposition: RecipeReviewDisposition;
   reason: RecipeReviewAttentionReason | null;
   quality_risk: RecipeQualityRisk | null;
+  reference_match_score: number | null;
 }
 
 export interface BackendRecipeReviewGroupPreflight {

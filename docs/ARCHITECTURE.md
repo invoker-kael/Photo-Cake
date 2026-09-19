@@ -567,3 +567,11 @@ The Reference-relative tone engine now protects photographic structure before Re
 - positive Whites are damped when P98 is already close to the preview endpoint or highlight clipping is present.
 
 These are conservative preview-evidence guards, not claims about recoverable sensor data. They change the generated Recipe itself, then the existing quality-first preflight still routes unusually strong manual or legacy edits to exception Review. Lightroom/Camera Raw remains the authoritative RAW renderer.
+
+## Reference-relative adaptive strength
+
+Reference synchronization now separates look intent from how hard a particular frame should be pushed toward that look. A scene-neutral match-strength function compares preview tonal shape (P10/P50 and P90/P50), color distribution and clipping profile. Pure exposure differences stay near full strength, while materially different tonal structures automatically reduce the secondary adaptive corrections.
+
+The strength scales median exposure refinement plus adaptive Highlights/Shadows, Whites/Blacks, Contrast, Saturation and Vibrance. The base per-photo exposure alignment and explicit photographer StyleProfile preferences remain intact. This means a backlit landscape or low-key night frame can still belong to the same batch without being forced to mimic the Reference's local tone distribution.
+
+Recipe Review exposes the same strength as a percentage. Very weak fits below 62% become a REFERENCE_MISMATCH quality exception rather than silently joining the clear batch cohort. Missing legacy percentile evidence preserves the previous full-strength behavior.

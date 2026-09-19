@@ -3,8 +3,8 @@ use crate::classification::SceneTag;
 use crate::color_sync::{
     build_adaptive_group_plan, reference_relative_contrast_adjustment,
     reference_relative_endpoint_adjustments, reference_relative_exposure_correction,
-    reference_relative_saturation_adjustment, reference_relative_vibrance_adjustment,
-    reference_relative_tone_adjustments, ColorSyncError,
+    reference_relative_match_strength, reference_relative_saturation_adjustment,
+    reference_relative_tone_adjustments, reference_relative_vibrance_adjustment, ColorSyncError,
     GroupColorIntent, GroupColorSyncPlan, GroupSyncMode, PhotoColorAnalysis,
     PhotoExposureAnalysis,
 };
@@ -502,6 +502,8 @@ impl ReferenceSet {
             let Some(target) = evidence.iter().find(|item| item.asset_id == asset_id) else {
                 continue;
             };
+            let match_strength =
+                reference_relative_match_strength(&reference_evidence, target).unwrap_or(1.0);
             let mut exposure_delta = recipe.adjustments.exposure.unwrap_or(0.0);
             if let Some(exposure_correction) = reference_relative_exposure_correction(
                 &reference_evidence,
@@ -509,7 +511,8 @@ impl ReferenceSet {
                 exposure_delta,
                 self.style_profile.exposure_bias_ev.unwrap_or(0.0),
             ) {
-                exposure_delta = (exposure_delta + exposure_correction).clamp(-4.0, 4.0);
+                exposure_delta =
+                    (exposure_delta + exposure_correction * match_strength).clamp(-4.0, 4.0);
                 recipe.adjustments.exposure = Some(exposure_delta);
             }
             if let Some((highlights, shadows)) = reference_relative_tone_adjustments(
@@ -517,16 +520,16 @@ impl ReferenceSet {
                 target,
                 exposure_delta,
             ) {
-                recipe.adjustments.highlights = Some(highlights);
-                recipe.adjustments.shadows = Some(shadows);
+                recipe.adjustments.highlights = Some(highlights * match_strength);
+                recipe.adjustments.shadows = Some(shadows * match_strength);
             }
             if let Some((whites, blacks)) = reference_relative_endpoint_adjustments(
                 &reference_evidence,
                 target,
                 exposure_delta,
             ) {
-                recipe.adjustments.whites = Some(whites);
-                recipe.adjustments.blacks = Some(blacks);
+                recipe.adjustments.whites = Some(whites * match_strength);
+                recipe.adjustments.blacks = Some(blacks * match_strength);
             }
             if let Some(contrast_delta) = reference_relative_contrast_adjustment(
                 &reference_evidence,
@@ -535,19 +538,20 @@ impl ReferenceSet {
             ) {
                 let baseline = recipe.adjustments.contrast.unwrap_or(0.0);
                 recipe.adjustments.contrast =
-                    Some((baseline + contrast_delta).clamp(-100.0, 100.0));
+                    Some((baseline + contrast_delta * match_strength).clamp(-100.0, 100.0));
             }
             if let Some(saturation_delta) =
                 reference_relative_saturation_adjustment(&reference_evidence, target)
             {
                 let baseline = recipe.adjustments.saturation.unwrap_or(0.0);
                 recipe.adjustments.saturation =
-                    Some((baseline + saturation_delta).clamp(-100.0, 100.0));
+                    Some((baseline + saturation_delta * match_strength).clamp(-100.0, 100.0));
             }
             if let Some(vibrance_delta) =
                 reference_relative_vibrance_adjustment(&reference_evidence, target)
             {
-                recipe.adjustments.vibrance = Some(vibrance_delta.clamp(-100.0, 100.0));
+                recipe.adjustments.vibrance =
+                    Some((vibrance_delta * match_strength).clamp(-100.0, 100.0));
             }
         }
         Ok(result)

@@ -3,6 +3,7 @@ use photo_core::{
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
     assess_recipe_quality_risk, build_recipe_review_group_preflight, build_reference_readiness_plan,
     build_style_sync_group_context, build_style_sync_preflight, derive_workflow_status,
+    reference_relative_match_strength,
     preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
     route_exposure_bracket_sources, write_group_sidecars, write_sidecar_batch, AnalysisCache,
     AssetMetadataEvidence, AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor,
@@ -13,7 +14,8 @@ use photo_core::{
     JobStatus, ModelBundleManifest, ModelPlatform,
     InferenceTask, PhotoExposureAnalysis, PhotoGroup, PreviewArtifact, PreviewStore, RawAsset,
     RawCatalog, RawImportResult, RawImporter,
-    RawMetadataStore, Recipe, RecipeReviewGroupPreflight, RecipeReviewOverride, RecipeReviewSignal,
+    RawMetadataStore, Recipe, RecipeQualityRisk, RecipeReviewGroupPreflight, RecipeReviewOverride,
+    RecipeReviewSignal,
     RecipeReviewStore, RecipeReviewSyncFields, ReferenceReadinessPlan, ReferenceReadinessStatus,
     ReferenceStore,
     ReferenceWorkflowError, RunStep, SemanticGroupingConfig, SemanticRefinementReport,
@@ -409,6 +411,29 @@ fn recipe_review_preflight_for_group(
         }
     };
 
+    let reference_analysis = if recipes.is_empty() {
+        None
+    } else {
+        state
+            .analysis_cache
+            .latest_for_asset_task(
+                binding.selected_reference_asset_id,
+                InferenceTask::ExposureAnalysis,
+            )
+            .map_err(|error| error.to_string())?
+            .map(|artifact| {
+                serde_json::from_value::<PhotoExposureAnalysis>(artifact.payload_json).map_err(
+                    |error| {
+                        format!(
+                            "invalid exposure analysis for reference asset {}: {error}",
+                            binding.selected_reference_asset_id
+                        )
+                    },
+                )
+            })
+            .transpose()?
+    };
+
     let recipes_by_asset = recipes
         .iter()
         .filter_map(|recipe| recipe.target_asset_id.map(|asset_id| (asset_id, recipe)))
@@ -445,8 +470,8 @@ fn recipe_review_preflight_for_group(
         } else {
             false
         };
-        let quality_risk = if let Some(recipe) = recipe {
-            let analysis = state
+        let analysis = if recipe.is_some() {
+            state
                 .analysis_cache
                 .latest_for_asset_task(*asset_id, InferenceTask::ExposureAnalysis)
                 .map_err(|error| error.to_string())?
@@ -456,11 +481,23 @@ fn recipe_review_preflight_for_group(
                             format!("invalid exposure analysis for asset {asset_id}: {error}")
                         })
                 })
-                .transpose()?;
-            assess_recipe_quality_risk(recipe, analysis.as_ref())
+                .transpose()?
         } else {
             None
         };
+        let reference_match_strength = reference_analysis
+            .as_ref()
+            .zip(analysis.as_ref())
+            .and_then(|(reference, target)| reference_relative_match_strength(reference, target));
+        let reference_match_score = reference_match_strength
+            .map(|strength| (strength * 100.0).round().clamp(0.0, 100.0) as u8);
+        let quality_risk = recipe
+            .and_then(|recipe| assess_recipe_quality_risk(recipe, analysis.as_ref()))
+            .or_else(|| {
+                reference_match_strength
+                    .is_some_and(|strength| strength < 0.62)
+                    .then_some(RecipeQualityRisk::ReferenceMismatch)
+            });
 
         signals.push((
             *asset_id,
@@ -471,6 +508,7 @@ fn recipe_review_preflight_for_group(
                 ai_decision,
                 evidence_pending,
                 quality_risk,
+                reference_match_score,
             },
         ));
     }

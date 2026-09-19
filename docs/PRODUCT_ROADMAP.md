@@ -245,3 +245,9 @@ This intentionally copies only the useful workflow principle from mature batch e
 Completed after the quality-first exception gate: adaptive tone matching now protects deep shadows, black anchors, white headroom and naturally wide scene contrast before a Recipe reaches Review. The generator backs off shadow opening in low-key frames, limits opposing Highlights/Shadows compression on wide-range scenes, avoids casually lifting deep blacks, and reduces positive Whites near the endpoint.
 
 The quality preflight adds explicit deep-shadow-lift and dynamic-range-compression risks for manual overrides, legacy Recipes or remaining edge cases. This improves night, landscape, architecture and mixed travel work while staying on the same Reference-driven engine used for people photography.
+
+### Core editing quality: adaptive Reference strength
+
+Completed after low-light/dynamic-range protection: Reference synchronization now measures whether a target frame differs only in exposure or differs materially in tonal/color structure. Exposure-only variants stay near full synchronization strength; scene outliers automatically receive a softer version of the Reference-relative tone, endpoint, contrast and color corrections.
+
+Review surfaces the exact adaptation percentage, and very weak fits become explicit REFERENCE_MISMATCH exceptions. This moves the workflow closer to the useful mature batch-editor pattern—one trusted standard image, strong automation for ordinary variants, conservative treatment of scene outliers, and human attention only where the shared look stops being trustworthy.

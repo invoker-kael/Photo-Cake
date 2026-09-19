@@ -513,3 +513,13 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Positive Whites SHOULD back off as the target approaches its preview white endpoint or highlight clipping increases.
 - The quality gate MUST separately identify excessive deep-shadow opening and excessive wide-range compression after the final effective Recipe is assembled.
 - These protections MUST use the same scene-neutral Reference -> adaptive Recipe -> Review -> XMP workflow for people, landscape, architecture, night and mixed travel work.
+
+### Reference adaptation strength
+
+- Reference-driven automatic editing MUST distinguish ordinary exposure variation from materially different tonal structure.
+- Exposure-only variation SHOULD retain near-full Reference adaptation strength.
+- Tonal-shape, color-distribution and clipping mismatch SHOULD progressively reduce secondary adaptive corrections instead of hard-copying the Reference look.
+- The strength MUST scale adaptive exposure refinement, Highlights/Shadows, Whites/Blacks, Contrast, Saturation and Vibrance while preserving the base per-photo exposure match and explicit StyleProfile preferences.
+- Recipe Review MUST expose the computed Reference adaptation percentage for each photo.
+- A computed strength below 62% MUST route the photo to quality Review as REFERENCE_MISMATCH.
+- Legacy evidence without the required percentiles MUST retain the existing behavior rather than being rejected or silently assigned an invented score.

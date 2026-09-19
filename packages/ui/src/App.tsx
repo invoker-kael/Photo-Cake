@@ -1029,6 +1029,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       STRONG_CONTRAST_SHIFT: "strong contrast shift",
       DEEP_SHADOW_LIFT: "deep shadows would be opened too aggressively",
       DYNAMIC_RANGE_COMPRESSION: "wide dynamic range would be flattened too much",
+      REFERENCE_MISMATCH: "this frame differs materially from the Reference look",
       SATURATED_COLOR_PRESSURE: "already-saturated colors need protection",
       STRONG_COLOR_SHIFT: "strong saturation/vibrance shift",
     };
@@ -1077,6 +1078,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     exceptions: reviewPlans.reduce(
       (total, plan) =>
         total + plan.assets.filter((asset) => asset.reason === "SAVED_EXCEPTION").length,
+      0,
+    ),
+    referenceMismatch: reviewPlans.reduce(
+      (total, plan) =>
+        total + plan.assets.filter((asset) => asset.quality_risk === "REFERENCE_MISMATCH").length,
       0,
     ),
     hdrSources: new Set(reviewPlans.flatMap((plan) => plan.hdr_source_asset_ids)).size,
@@ -3342,6 +3348,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         <div><span>Confirmed</span><strong>{recipeReviewSummary.confirmed}</strong></div>
         <div><span>Pending</span><strong>{recipeReviewSummary.pending}</strong></div>
         <div><span>Exceptions</span><strong>{recipeReviewSummary.exceptions}</strong></div>
+        <div><span>Reference mismatch</span><strong>{recipeReviewSummary.referenceMismatch}</strong></div>
         <div><span>HDR sources</span><strong>{recipeReviewSummary.hdrSources}</strong></div>
         <div><span>Reject skipped</span><strong>{recipeReviewSummary.rejected}</strong></div>
       </div>
@@ -3658,6 +3665,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                             Quality guard · {recipeQualityRiskLabel(
                               recipeReviewPlansByAsset.get(assetId)!.quality_risk!,
                             )}
+                          </small>
+                        )}
+                        {recipeReviewPlansByAsset.get(assetId)?.reference_match_score != null && (
+                          <small>
+                            Reference adaptation · {recipeReviewPlansByAsset.get(assetId)!.reference_match_score}% strength
                           </small>
                         )}
                         <small>

@@ -132,6 +132,57 @@ impl PhotoExposureAnalysis {
     }
 }
 
+pub fn reference_relative_match_strength(
+    reference: &PhotoExposureAnalysis,
+    target: &PhotoExposureAnalysis,
+) -> Option<f32> {
+    let reference_mid = reference.luminance_p50?;
+    let target_mid = target.luminance_p50?;
+    let (reference_shadow, reference_highlight) = reference.tone_percentiles()?;
+    let (target_shadow, target_highlight) = target.tone_percentiles()?;
+    if reference_mid <= 0.0 || target_mid <= 0.0 {
+        return None;
+    }
+
+    let safe_ratio = |value: f32, midpoint: f32| {
+        (value.max(1.0 / 255.0) / midpoint.max(1.0 / 255.0))
+            .max(1.0 / 255.0)
+            .log2()
+    };
+    let tone_shape_distance = (
+        (safe_ratio(reference_shadow, reference_mid) - safe_ratio(target_shadow, target_mid)).abs()
+            + (safe_ratio(reference_highlight, reference_mid)
+                - safe_ratio(target_highlight, target_mid))
+            .abs()
+    ) * 0.5;
+
+    let color_distance = match (reference.colorfulness, target.colorfulness) {
+        (Some(reference_mean), Some(target_mean)) => {
+            let tail = match (reference.colorfulness_p75, target.colorfulness_p75) {
+                (Some(reference_tail), Some(target_tail)) => {
+                    (reference_tail - target_tail).abs() * 0.5
+                }
+                _ => 0.0,
+            };
+            (reference_mean - target_mean).abs() + tail
+        }
+        _ => 0.0,
+    };
+
+    let clipping_distance =
+        (reference.shadow_clip_ratio.unwrap_or(0.0) - target.shadow_clip_ratio.unwrap_or(0.0))
+            .abs()
+            + (reference.highlight_clip_ratio.unwrap_or(0.0)
+                - target.highlight_clip_ratio.unwrap_or(0.0))
+            .abs();
+    let confidence = reference.confidence.min(target.confidence).clamp(0.0, 1.0);
+    let penalty = tone_shape_distance * 0.20
+        + color_distance * 0.30
+        + clipping_distance * 2.0
+        + (1.0 - confidence) * 0.10;
+    Some((1.0 - penalty).clamp(0.45, 1.0))
+}
+
 /// Resolve highlight/shadow corrections after the normal per-photo exposure
 /// correction so the target follows the photographer-selected Reference's
 /// tonal distribution without blindly copying numeric settings.
@@ -809,6 +860,46 @@ mod tests {
         assert!((plan.resolved[0].exposure_delta_ev - 0.7).abs() < 1e-6);
         assert_eq!(plan.resolved[0].temperature_delta_k, Some(600.0));
         assert_eq!(plan.resolved[0].tint_delta, Some(2.0));
+    }
+
+    #[test]
+    fn reference_match_strength_keeps_exposure_only_variation_near_full_strength() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: Some(0.04), luminance_p10: Some(0.10),
+            luminance_p50: Some(0.20), luminance_p90: Some(0.40), luminance_p98: Some(0.50),
+            shadow_clip_ratio: Some(0.0), highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.35), colorfulness_p25: Some(0.18), colorfulness_p75: Some(0.55),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 1.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: Some(0.08), luminance_p10: Some(0.20),
+            luminance_p50: Some(0.40), luminance_p90: Some(0.80), luminance_p98: Some(0.95),
+            shadow_clip_ratio: Some(0.0), highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.35), colorfulness_p25: Some(0.18), colorfulness_p75: Some(0.55),
+        };
+        assert!(reference_relative_match_strength(&reference, &target).unwrap() > 0.95);
+    }
+
+    #[test]
+    fn reference_match_strength_backs_off_for_scene_outlier() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: Some(0.05), luminance_p10: Some(0.20),
+            luminance_p50: Some(0.50), luminance_p90: Some(0.78), luminance_p98: Some(0.95),
+            shadow_clip_ratio: Some(0.0), highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.25), colorfulness_p25: Some(0.12), colorfulness_p75: Some(0.45),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: Some(0.005), luminance_p10: Some(0.03),
+            luminance_p50: Some(0.48), luminance_p90: Some(0.98), luminance_p98: Some(1.0),
+            shadow_clip_ratio: Some(0.02), highlight_clip_ratio: Some(0.02),
+            colorfulness: Some(0.65), colorfulness_p25: Some(0.30), colorfulness_p75: Some(0.90),
+        };
+        let strength = reference_relative_match_strength(&reference, &target).unwrap();
+        assert!(strength < 0.62);
+        assert!(strength >= 0.45);
     }
 
     #[test]

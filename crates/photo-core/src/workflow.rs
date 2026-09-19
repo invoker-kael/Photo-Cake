@@ -51,6 +51,7 @@ pub enum RecipeQualityRisk {
     StrongContrastShift,
     DeepShadowLift,
     DynamicRangeCompression,
+    ReferenceMismatch,
     SaturatedColorPressure,
     StrongColorShift,
 }
@@ -144,6 +145,7 @@ pub struct RecipeReviewSignal {
     pub ai_decision: Option<CullingDecision>,
     pub evidence_pending: bool,
     pub quality_risk: Option<RecipeQualityRisk>,
+    pub reference_match_score: Option<u8>,
 }
 
 pub fn recipe_review_requires_attention(signal: &RecipeReviewSignal) -> bool {
@@ -208,6 +210,8 @@ pub struct RecipeReviewAssetPreflight {
     pub reason: Option<RecipeReviewAttentionReason>,
     #[serde(default)]
     pub quality_risk: Option<RecipeQualityRisk>,
+    #[serde(default)]
+    pub reference_match_score: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -301,6 +305,7 @@ pub fn build_recipe_review_group_preflight(
             disposition,
             reason,
             quality_risk: signal.quality_risk,
+            reference_match_score: signal.reference_match_score,
         });
     }
 

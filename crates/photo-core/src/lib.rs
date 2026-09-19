@@ -125,9 +125,11 @@ pub use recipe_review_store::{
     RecipeReviewStore, RecipeReviewStoreError, RecipeReviewSyncFields,
 };
 pub use reference::{
-    build_reference_readiness_plan, ReferenceCandidateSource, ReferenceGroupResult,
+    build_reference_readiness_plan, build_style_sync_group_context, build_style_sync_preflight,
+    style_sync_compatibility, ReferenceCandidateSource, ReferenceGroupResult,
     ReferenceReadinessPlan, ReferenceReadinessStatus, ReferenceSet, ReferenceWorkflowError,
-    StyleProfile,
+    StyleProfile, StyleSyncCompatibility, StyleSyncGroupContext, StyleSyncPreflight,
+    StyleSyncReason, StyleSyncTargetPlan,
 };
 pub use reference_store::{GroupReferenceBinding, ReferenceStore, ReferenceStoreError};
 pub use renderer::ImageExportRenderer;

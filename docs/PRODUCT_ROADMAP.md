@@ -187,3 +187,10 @@ Quick Cull safety now covers scenic work as well as people photography. Cull rec
 Completed: Cull → Reference handoff now uses a canonical, scene-visible readiness preflight. Large travel/family/scenery sessions can select all groups that are genuinely ready, see which groups are blocked by pending Cull evidence or HDR merge, and keep photographer Keep decisions authoritative. The UI and backend share the same suggested candidate instead of maintaining separate ranking rules.
 
 This follows the useful part of the PixCake-style workflow pattern—establish a trusted standard image, synchronize the shared look in batches, then spend attention on exceptions—while retaining Photo-Cake's own adaptive Reference → Recipe model. It does not clone proprietary algorithms, does not make landscape work behave like portrait work, and does not introduce fake Direct Export.
+
+
+### Mixed-scene look synchronization
+
+Completed: Reference look reuse now has scene-aware preflight for mixed travel shoots. The default batch selection favors people/family-to-people/family and scenic groups that share existing scene evidence, while landscape↔food, portrait↔pure scenery, or incomplete-evidence pairs remain visible as explicit Review targets instead of being auto-selected.
+
+This extends the useful “standard image → synchronize shared look → review exceptions” workflow pattern without making Photo-Cake portrait-only. StyleProfile stays shared, each group keeps an independent Reference/adaptive exposure baseline, and Recipe Review remains the place for single-photo exceptions.

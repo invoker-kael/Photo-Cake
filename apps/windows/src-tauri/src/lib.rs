@@ -1,7 +1,8 @@
 use photo_core::{
     apply_companion_patch as apply_companion_patch_core,
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
-    build_reference_readiness_plan, derive_workflow_status, recipe_review_group_can_confirm,
+    build_reference_readiness_plan, build_style_sync_group_context, build_style_sync_preflight,
+    derive_workflow_status, recipe_review_group_can_confirm,
     recipe_review_requires_attention,
     preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
     route_exposure_bracket_sources, write_group_sidecars, write_sidecar_batch, AnalysisCache,
@@ -15,7 +16,7 @@ use photo_core::{
     RawMetadataStore, Recipe, RecipeReviewOverride, RecipeReviewSignal, RecipeReviewStore,
     RecipeReviewSyncFields, ReferenceReadinessPlan, ReferenceReadinessStatus, ReferenceStore,
     ReferenceWorkflowError, RunStep, SemanticGroupingConfig, SemanticRefinementReport,
-    StyleProfile, WorkflowFacts, WorkflowStatus,
+    StyleProfile, StyleSyncGroupContext, StyleSyncPreflight, WorkflowFacts, WorkflowStatus,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::{Deserialize, Serialize};
@@ -1546,6 +1547,74 @@ fn clear_recipe_review(
         .map_err(|error| error.to_string())
 }
 
+fn style_sync_context_for_group(
+    group: &PhotoGroup,
+    state: &AppState,
+) -> Result<StyleSyncGroupContext, String> {
+    let culling = build_group_culling_result(&state.analysis_cache, group, 0.98)
+        .map_err(|error| error.to_string())?;
+    let reviews = state
+        .culling_reviews
+        .list_for_assets(&group.asset_ids)
+        .map_err(|error| error.to_string())?;
+    Ok(build_style_sync_group_context(
+        group.id,
+        &culling.recommendations,
+        &culling.pending_asset_ids,
+        &reviews,
+    ))
+}
+
+#[tauri::command]
+fn preflight_reference_style_sync(
+    batch_id: String,
+    source_group_id: String,
+    state: State<'_, AppState>,
+) -> Result<StyleSyncPreflight, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let source_group_id = Uuid::parse_str(&source_group_id)
+        .map_err(|error| format!("invalid source group id: {error}"))?;
+    let groups = state
+        .catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let groups_by_id = groups
+        .into_iter()
+        .map(|group| (group.id, group))
+        .collect::<HashMap<_, _>>();
+
+    let source_group = groups_by_id
+        .get(&source_group_id)
+        .ok_or_else(|| format!("source photo group is not part of batch {batch_id}: {source_group_id}"))?;
+    if state
+        .reference_store
+        .group_binding(source_group_id)
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        return Err("select a source group Reference before syncing its look".to_string());
+    }
+
+    let source_context = style_sync_context_for_group(source_group, &state)?;
+    let mut target_contexts = Vec::new();
+    for group in groups_by_id.values() {
+        if group.id == source_group_id {
+            continue;
+        }
+        if state
+            .reference_store
+            .group_binding(group.id)
+            .map_err(|error| error.to_string())?
+            .is_none()
+        {
+            continue;
+        }
+        target_contexts.push(style_sync_context_for_group(group, &state)?);
+    }
+
+    Ok(build_style_sync_preflight(source_context, target_contexts))
+}
+
 #[tauri::command]
 fn batch_reference_styles(
     batch_id: String,
@@ -2484,6 +2553,7 @@ pub fn run() {
             sync_recipe_review_exception,
             clear_recipe_review,
             batch_reference_styles,
+            preflight_reference_style_sync,
             update_group_reference_style,
             copy_group_reference_style,
             copy_reference_style_to_groups,

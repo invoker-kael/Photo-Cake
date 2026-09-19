@@ -474,3 +474,10 @@ Each applied Quick Cull batch is recorded transactionally with its batch/group s
 Batch Reference setup now has one canonical planner in `photo-core::reference` instead of a second UI-only candidate algorithm. The planner consumes the existing Cull recommendations, photographer Cull reviews, pending evidence and HDR bracket routing. Candidate order is photographer Keep → AI Keep → photographer Review → AI Review, then measured quality/rank tie-breaks. A photographer Keep may advance a group while sibling evidence is still pending; AI-only automation waits for the group to finish Cull evidence. Photographer Reject and unoverridden AI Reject suggestions are excluded.
 
 The same `ReferenceReadinessPlan` is returned to the workstation and revalidated by the batch Reference write command, so a stale browser suggestion cannot silently choose a different photo. Landscape, architecture, food, night and other scene tags remain visible context from the existing classifier; they do not create a portrait-only branch or a second Reference engine. Exposure-bracket groups remain blocked for HDR merge before batch Reference selection.
+
+
+## Scene-aware StyleProfile sync preflight
+
+Batch look sync continues to copy the existing `StyleProfile`; there is no second preset or scene-rendering engine. Before the UI proposes targets, the backend summarizes each referenced group from existing Cull evidence after excluding photographer Rejects and unoverridden AI Reject suggestions.
+
+Compatibility is advisory, not a hard gate. People/family groups are recommended with other people/family groups. Non-people groups are recommended when they share scene evidence such as Landscape, Architecture, Food, Night or Document. People-to-scene, disjoint-scene and incomplete-evidence pairs are marked Review. The photographer can still explicitly select Review targets; each group keeps its own Reference and adaptive exposure baseline, and downstream Recipe Review remains the exception check.

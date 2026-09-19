@@ -29,6 +29,7 @@ import App, {
   type BackendRecipeReviewSyncResult,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
+  type BackendStyleSyncPreflight,
   type BackendWorkflowStatus,
   type BatchWorkerEvent,
   type PhotoCakeBridge,
@@ -164,6 +165,11 @@ const bridge: PhotoCakeBridge = {
   },
   loadReferenceStyles: (batchId) =>
     invoke<BackendGroupReferenceStyle[]>("batch_reference_styles", { batchId }),
+  preflightReferenceStyleSync: (batchId, sourceGroupId) =>
+    invoke<BackendStyleSyncPreflight>("preflight_reference_style_sync", {
+      batchId,
+      sourceGroupId,
+    }),
   updateReferenceStyle: (
     groupId,
     exposureBiasEv,

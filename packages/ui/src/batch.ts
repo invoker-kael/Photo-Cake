@@ -303,6 +303,35 @@ export interface BackendGroupReferenceStyleBatchResult {
   styles: BackendGroupReferenceStyle[];
 }
 
+export type StyleSyncCompatibility = "RECOMMENDED" | "REVIEW";
+
+export type StyleSyncReason =
+  | "PEOPLE_MATCH"
+  | "SHARED_SCENE"
+  | "PEOPLE_SCENE_MISMATCH"
+  | "SCENE_MISMATCH"
+  | "EVIDENCE_INCOMPLETE";
+
+export interface BackendStyleSyncGroupContext {
+  group_id: string;
+  contains_people: boolean;
+  scene_tags: BackendSceneTag[];
+  evidence_complete: boolean;
+  pending_asset_ids: string[];
+}
+
+export interface BackendStyleSyncTargetPlan {
+  target_group_id: string;
+  compatibility: StyleSyncCompatibility;
+  reason: StyleSyncReason;
+  target_context: BackendStyleSyncGroupContext;
+}
+
+export interface BackendStyleSyncPreflight {
+  source_context: BackendStyleSyncGroupContext;
+  targets: BackendStyleSyncTargetPlan[];
+}
+
 export interface BackendEditAdjustments {
   exposure: number | null;
   contrast: number | null;
@@ -458,6 +487,10 @@ export interface PhotoCakeBridge {
   clearRecipeReviewed?(assetId: string): Promise<void>;
   renderRecipePreview?(groupId: string, assetId: string): Promise<BackendReviewRenderResult>;
   loadReferenceStyles?(batchId: string): Promise<BackendGroupReferenceStyle[]>;
+  preflightReferenceStyleSync?(
+    batchId: string,
+    sourceGroupId: string,
+  ): Promise<BackendStyleSyncPreflight>;
   updateReferenceStyle?(
     groupId: string,
     exposureBiasEv: number,

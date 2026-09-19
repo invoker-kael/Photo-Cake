@@ -219,6 +219,179 @@ pub fn build_reference_readiness_plan(
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StyleSyncGroupContext {
+    pub group_id: Uuid,
+    pub contains_people: bool,
+    #[serde(default)]
+    pub scene_tags: Vec<SceneTag>,
+    pub evidence_complete: bool,
+    #[serde(default)]
+    pub pending_asset_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StyleSyncCompatibility {
+    Recommended,
+    Review,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StyleSyncReason {
+    PeopleMatch,
+    SharedScene,
+    PeopleSceneMismatch,
+    SceneMismatch,
+    EvidenceIncomplete,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StyleSyncTargetPlan {
+    pub target_group_id: Uuid,
+    pub compatibility: StyleSyncCompatibility,
+    pub reason: StyleSyncReason,
+    pub target_context: StyleSyncGroupContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StyleSyncPreflight {
+    pub source_context: StyleSyncGroupContext,
+    #[serde(default)]
+    pub targets: Vec<StyleSyncTargetPlan>,
+}
+
+/// Summarize one referenced group's existing Cull evidence for StyleProfile reuse.
+///
+/// Rejected photos do not define the group look: photographer Reject always drops out,
+/// and an unoverridden AI Reject suggestion is also excluded. No new classifier runs.
+pub fn build_style_sync_group_context(
+    group_id: Uuid,
+    recommendations: &[CullingRecommendation],
+    pending_asset_ids: &[Uuid],
+    reviews: &[CullingReview],
+) -> StyleSyncGroupContext {
+    let reviews_by_asset = reviews
+        .iter()
+        .map(|item| (item.asset_id, item.decision))
+        .collect::<HashMap<_, _>>();
+
+    let mut scene_tags = Vec::new();
+    let mut contains_people = false;
+    let mut active_count = 0usize;
+    let mut active_evidence_complete = true;
+
+    for recommendation in recommendations {
+        let user_decision = reviews_by_asset.get(&recommendation.asset_id).copied();
+        if user_decision == Some(CullingUserDecision::Reject)
+            || (user_decision.is_none()
+                && recommendation.decision == CullingDecision::RejectSuggestion)
+        {
+            continue;
+        }
+
+        active_count += 1;
+        let has_people = recommendation
+            .portrait_evidence
+            .as_ref()
+            .is_some_and(|evidence| evidence.person_count > 0 || evidence.face_count > 0);
+        contains_people |= has_people;
+        for tag in &recommendation.scene_tags {
+            if !scene_tags.contains(tag) {
+                scene_tags.push(*tag);
+            }
+        }
+        if recommendation.scene_tags.is_empty() && !has_people {
+            active_evidence_complete = false;
+        }
+    }
+
+    let pending_asset_ids = pending_asset_ids
+        .iter()
+        .copied()
+        .filter(|asset_id| {
+            reviews_by_asset.get(asset_id).copied() != Some(CullingUserDecision::Reject)
+        })
+        .collect::<Vec<_>>();
+
+    StyleSyncGroupContext {
+        group_id,
+        contains_people,
+        scene_tags,
+        evidence_complete: active_count > 0
+            && active_evidence_complete
+            && pending_asset_ids.is_empty(),
+        pending_asset_ids,
+    }
+}
+
+pub fn style_sync_compatibility(
+    source: &StyleSyncGroupContext,
+    target: &StyleSyncGroupContext,
+) -> (StyleSyncCompatibility, StyleSyncReason) {
+    if !source.evidence_complete || !target.evidence_complete {
+        return (
+            StyleSyncCompatibility::Review,
+            StyleSyncReason::EvidenceIncomplete,
+        );
+    }
+
+    if source.contains_people && target.contains_people {
+        return (
+            StyleSyncCompatibility::Recommended,
+            StyleSyncReason::PeopleMatch,
+        );
+    }
+
+    if source.contains_people != target.contains_people {
+        return (
+            StyleSyncCompatibility::Review,
+            StyleSyncReason::PeopleSceneMismatch,
+        );
+    }
+
+    if source
+        .scene_tags
+        .iter()
+        .any(|tag| target.scene_tags.contains(tag))
+    {
+        return (
+            StyleSyncCompatibility::Recommended,
+            StyleSyncReason::SharedScene,
+        );
+    }
+
+    (
+        StyleSyncCompatibility::Review,
+        StyleSyncReason::SceneMismatch,
+    )
+}
+
+pub fn build_style_sync_preflight(
+    source_context: StyleSyncGroupContext,
+    target_contexts: Vec<StyleSyncGroupContext>,
+) -> StyleSyncPreflight {
+    let targets = target_contexts
+        .into_iter()
+        .map(|target_context| {
+            let (compatibility, reason) =
+                style_sync_compatibility(&source_context, &target_context);
+            StyleSyncTargetPlan {
+                target_group_id: target_context.group_id,
+                compatibility,
+                reason,
+                target_context,
+            }
+        })
+        .collect();
+
+    StyleSyncPreflight {
+        source_context,
+        targets,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ReferenceGroupResult {
     pub plan: GroupColorSyncPlan,
@@ -511,6 +684,169 @@ mod tests {
 
         assert_eq!(plan.status, ReferenceReadinessStatus::HdrMergeFirst);
         assert_eq!(plan.suggested_asset_id, None);
+    }
+
+    #[test]
+    fn landscape_style_sync_recommends_shared_scene() {
+        let source = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: false,
+            scene_tags: vec![SceneTag::Landscape],
+            evidence_complete: true,
+            pending_asset_ids: Vec::new(),
+        };
+        let target = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: false,
+            scene_tags: vec![SceneTag::Landscape, SceneTag::Night],
+            evidence_complete: true,
+            pending_asset_ids: Vec::new(),
+        };
+
+        assert_eq!(
+            style_sync_compatibility(&source, &target),
+            (
+                StyleSyncCompatibility::Recommended,
+                StyleSyncReason::SharedScene
+            )
+        );
+    }
+
+    #[test]
+    fn people_style_sync_recommends_people_groups() {
+        let source = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: true,
+            scene_tags: vec![SceneTag::Architecture],
+            evidence_complete: true,
+            pending_asset_ids: Vec::new(),
+        };
+        let target = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: true,
+            scene_tags: vec![SceneTag::Landscape],
+            evidence_complete: true,
+            pending_asset_ids: Vec::new(),
+        };
+
+        assert_eq!(
+            style_sync_compatibility(&source, &target),
+            (
+                StyleSyncCompatibility::Recommended,
+                StyleSyncReason::PeopleMatch
+            )
+        );
+    }
+
+    #[test]
+    fn portrait_to_landscape_style_sync_requires_review() {
+        let source = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: true,
+            scene_tags: vec![SceneTag::Landscape],
+            evidence_complete: true,
+            pending_asset_ids: Vec::new(),
+        };
+        let target = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: false,
+            scene_tags: vec![SceneTag::Landscape],
+            evidence_complete: true,
+            pending_asset_ids: Vec::new(),
+        };
+
+        assert_eq!(
+            style_sync_compatibility(&source, &target),
+            (
+                StyleSyncCompatibility::Review,
+                StyleSyncReason::PeopleSceneMismatch
+            )
+        );
+    }
+
+    #[test]
+    fn unrelated_scenic_style_sync_requires_review() {
+        let source = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: false,
+            scene_tags: vec![SceneTag::Landscape],
+            evidence_complete: true,
+            pending_asset_ids: Vec::new(),
+        };
+        let target = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: false,
+            scene_tags: vec![SceneTag::Food],
+            evidence_complete: true,
+            pending_asset_ids: Vec::new(),
+        };
+
+        assert_eq!(
+            style_sync_compatibility(&source, &target),
+            (
+                StyleSyncCompatibility::Review,
+                StyleSyncReason::SceneMismatch
+            )
+        );
+    }
+
+    #[test]
+    fn pending_style_evidence_never_auto_recommends() {
+        let source = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: false,
+            scene_tags: vec![SceneTag::Night],
+            evidence_complete: false,
+            pending_asset_ids: vec![Uuid::new_v4()],
+        };
+        let target = StyleSyncGroupContext {
+            group_id: Uuid::new_v4(),
+            contains_people: false,
+            scene_tags: vec![SceneTag::Night],
+            evidence_complete: true,
+            pending_asset_ids: Vec::new(),
+        };
+
+        assert_eq!(
+            style_sync_compatibility(&source, &target),
+            (
+                StyleSyncCompatibility::Review,
+                StyleSyncReason::EvidenceIncomplete
+            )
+        );
+    }
+
+    #[test]
+    fn style_context_ignores_rejected_photos() {
+        let kept = Uuid::new_v4();
+        let rejected = Uuid::new_v4();
+        let context = build_style_sync_group_context(
+            Uuid::new_v4(),
+            &[
+                readiness_candidate(
+                    kept,
+                    CullingDecision::Keep,
+                    0.95,
+                    1,
+                    vec![SceneTag::Landscape],
+                ),
+                readiness_candidate(
+                    rejected,
+                    CullingDecision::Review,
+                    0.80,
+                    2,
+                    vec![SceneTag::Food],
+                ),
+            ],
+            &[],
+            &[CullingReview {
+                asset_id: rejected,
+                decision: CullingUserDecision::Reject,
+            }],
+        );
+
+        assert!(context.evidence_complete);
+        assert_eq!(context.scene_tags, vec![SceneTag::Landscape]);
     }
 
     #[test]

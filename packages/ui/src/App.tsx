@@ -29,7 +29,9 @@ import {
   type BackendSemanticRefinementReport,
   type BackendWorkflowStatus,
   type BackendStyleProfile,
+  type BackendStyleSyncPreflight,
   type BackendSceneTag,
+  type StyleSyncReason,
   type BatchJob,
   type BatchStage,
   type CullingDecision,
@@ -66,6 +68,7 @@ export type {
   BackendRecipeReviewSyncResult,
   BackendReviewRenderResult,
   BackendSemanticRefinementReport,
+  BackendStyleSyncPreflight,
   BackendWorkflowStatus,
   BatchWorkerEvent,
   PhotoCakeBridge,
@@ -224,6 +227,17 @@ function referenceCandidateSourceLabel(source: BackendReferenceCandidateSource |
   }
 }
 
+function styleSyncReasonLabel(reason: StyleSyncReason) {
+  const labels: Record<StyleSyncReason, string> = {
+    PEOPLE_MATCH: "people/family match",
+    SHARED_SCENE: "shared scene",
+    PEOPLE_SCENE_MISMATCH: "people vs scene",
+    SCENE_MISMATCH: "different scene",
+    EVIDENCE_INCOMPLETE: "evidence incomplete",
+  };
+  return labels[reason];
+}
+
 function sceneTagLabel(tag: BackendSceneTag) {
   const labels: Record<BackendSceneTag, string> = {
     LANDSCAPE: "Landscape",
@@ -342,6 +356,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [editedPreviews, setEditedPreviews] = useState<Record<string, BackendReviewRenderResult>>({});
   const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
   const [styleBatchSource, setStyleBatchSource] = useState("");
+  const [styleSyncPreflight, setStyleSyncPreflight] =
+    useState<BackendStyleSyncPreflight | null>(null);
   const [styleBatchTargets, setStyleBatchTargets] = useState<string[]>([]);
   const [styleBatchUpdating, setStyleBatchUpdating] = useState(false);
   const [styleBatchNote, setStyleBatchNote] = useState<string | null>(null);
@@ -610,6 +626,43 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       disposed = true;
     };
   }, [activeBatchId, bridge, referenceBindings]);
+
+  useEffect(() => {
+    if (!bridge?.preflightReferenceStyleSync || !activeBatchId) {
+      setStyleSyncPreflight(null);
+      return;
+    }
+
+    const referencedGroupIds = Object.keys(referenceStyles);
+    const sourceGroupId = referencedGroupIds.includes(styleBatchSource)
+      ? styleBatchSource
+      : referencedGroupIds[0];
+    if (!sourceGroupId) {
+      setStyleSyncPreflight(null);
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .preflightReferenceStyleSync(activeBatchId, sourceGroupId)
+      .then((preflight) => {
+        if (!disposed) setStyleSyncPreflight(preflight);
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    activeBatchId,
+    bridge,
+    cullingReviews,
+    groupRevision,
+    referenceStyles,
+    styleBatchSource,
+  ]);
 
   useEffect(() => {
     if (!bridge?.loadRecipeReviews || !activeBatchId) {
@@ -2694,9 +2747,21 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     const eligibleTargetIds = new Set(
       eligibleLookTargets.map((group) => group.id),
     );
+    const styleSyncPlans = new Map(
+      (styleSyncPreflight?.targets ?? []).map((plan) => [plan.target_group_id, plan]),
+    );
+    const recommendedLookTargets = eligibleLookTargets.filter(
+      (group) => styleSyncPlans.get(group.id)?.compatibility === "RECOMMENDED",
+    );
+    const reviewLookTargets = eligibleLookTargets.filter(
+      (group) => styleSyncPlans.get(group.id)?.compatibility !== "RECOMMENDED",
+    );
     const selectedLookTargets = styleBatchTargets.filter((groupId) =>
       eligibleTargetIds.has(groupId),
     );
+    const selectedReviewLookCount = selectedLookTargets.filter(
+      (groupId) => styleSyncPlans.get(groupId)?.compatibility !== "RECOMMENDED",
+    ).length;
     const alreadyMatchingCount = lookGroups.filter(
       (group) =>
         group.id !== selectedBatchSource &&
@@ -2795,7 +2860,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <strong>Reference → selected groups → exception review</strong>
               </div>
               <small>
-                Same-look groups are skipped automatically. Targets keep their own Reference photos and scene-adaptive exposure baselines.
+                Same-look groups are skipped automatically. Existing Cull scene evidence only changes the default recommendation: people/family stays with people/family, and scenic groups prefer shared scene tags such as Landscape or Architecture. Cross-scene sync remains available when you explicitly select it. Targets keep their own Reference and adaptive exposure baseline.
               </small>
             </div>
             <div className="reference-batch-controls">
@@ -2822,25 +2887,45 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 <div className="batch-look-target-head">
                   <span>Sync to selected</span>
                   <small>
-                    {eligibleLookTargets.length} eligible
+                    {recommendedLookTargets.length} recommended
+                    {reviewLookTargets.length ? ` · ${reviewLookTargets.length} review` : ""}
                     {alreadyMatchingCount ? ` · ${alreadyMatchingCount} already matching` : ""}
                   </small>
                 </div>
                 <div className="batch-look-target-grid">
-                  {eligibleLookTargets.map((group) => (
-                    <label key={group.id}>
-                      <input
-                        type="checkbox"
-                        checked={selectedLookTargets.includes(group.id)}
-                        disabled={styleBatchUpdating || styleUpdating != null}
-                        onChange={() => toggleLookTarget(group.id)}
-                      />
-                      <span>
-                        Group {(photoContext?.groups ?? []).findIndex((item) => item.id === group.id) + 1}
-                        <small>{group.asset_ids.length} photos</small>
-                      </span>
-                    </label>
-                  ))}
+                  {eligibleLookTargets.map((group) => {
+                    const plan = styleSyncPlans.get(group.id);
+                    const context = plan?.target_context;
+                    const contextLabel = context
+                      ? [
+                          context.contains_people ? "people/family" : null,
+                          ...context.scene_tags.map(sceneTagLabel),
+                          context.evidence_complete
+                            ? null
+                            : context.pending_asset_ids.length
+                              ? context.pending_asset_ids.length + " pending"
+                              : "evidence incomplete",
+                        ].filter(Boolean).join(" · ")
+                      : "preflight loading";
+                    return (
+                      <label key={group.id}>
+                        <input
+                          type="checkbox"
+                          checked={selectedLookTargets.includes(group.id)}
+                          disabled={styleBatchUpdating || styleUpdating != null}
+                          onChange={() => toggleLookTarget(group.id)}
+                        />
+                        <span>
+                          Group {(photoContext?.groups ?? []).findIndex((item) => item.id === group.id) + 1}
+                          <small>
+                            {group.asset_ids.length} photos · {plan?.compatibility === "RECOMMENDED" ? "Recommended" : "Review"}
+                            {plan ? ` · ${styleSyncReasonLabel(plan.reason)}` : ""}
+                          </small>
+                          <small>{contextLabel}</small>
+                        </span>
+                      </label>
+                    );
+                  })}
                   {eligibleLookTargets.length === 0 && (
                     <small className="success-text">
                       Every other referenced group already uses this visual look.
@@ -2852,12 +2937,22 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               <div className="batch-look-actions">
                 <button
                   className="review-choice clear"
+                  disabled={styleBatchUpdating || recommendedLookTargets.length === 0}
+                  onClick={() =>
+                    setStyleBatchTargets(recommendedLookTargets.map((group) => group.id))
+                  }
+                >
+                  Select recommended
+                </button>
+                <button
+                  className="review-choice clear"
                   disabled={styleBatchUpdating || eligibleLookTargets.length === 0}
+                  title="Includes cross-scene and incomplete-evidence targets that should be checked after sync."
                   onClick={() =>
                     setStyleBatchTargets(eligibleLookTargets.map((group) => group.id))
                   }
                 >
-                  Select eligible
+                  Select all incl. review
                 </button>
                 <button
                   className="review-choice clear"
@@ -2866,6 +2961,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 >
                   Clear
                 </button>
+                {selectedReviewLookCount > 0 && (
+                  <small className="panel-note">
+                    {selectedReviewLookCount} selected groups cross scene/evidence boundaries; sync is allowed because selection is explicit, then Recipe Review should check exceptions.
+                  </small>
+                )}
                 <button
                   className="button primary"
                   disabled={

@@ -407,3 +407,14 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - HDR bracket groups MUST remain routed to Lightroom/Camera Raw merge before batch Reference setup.
 - The Reference UI MUST expose useful people and scene context, including landscape/architecture/food/night/document tags when available, without requiring a portrait-specific workflow.
 - Batch apply MUST revalidate the current readiness plan and reject stale suggested asset IDs rather than silently choosing a replacement.
+
+
+### Scene-aware batch look sync
+
+- Batch look sync MUST continue to reuse the existing `StyleProfile` path and MUST NOT introduce a separate portrait preset, landscape preset, or copied numeric Recipe path.
+- The workstation SHOULD default-select only style-sync targets with compatible existing Cull evidence.
+- People/family source groups SHOULD recommend other people/family groups. Non-people groups SHOULD recommend targets sharing at least one existing scene tag.
+- People↔scene mismatches, disjoint scenic tags, and incomplete evidence MUST be surfaced as Review rather than silently included in the recommended batch.
+- Review targets MUST remain manually selectable so photographer intent remains authoritative.
+- Photographer Rejects and unoverridden AI Reject suggestions MUST NOT define the group scene context used for look-sync recommendations.
+- Every target MUST preserve its own Reference photo and adaptive baseline after StyleProfile sync, then continue through the normal Recipe exception-review path.

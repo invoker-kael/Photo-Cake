@@ -1,8 +1,9 @@
 use crate::bracketing::ExposureBracketSet;
 use crate::classification::SceneTag;
 use crate::color_sync::{
-    build_adaptive_group_plan, ColorSyncError, GroupColorIntent, GroupColorSyncPlan, GroupSyncMode,
-    PhotoColorAnalysis,
+    build_adaptive_group_plan, reference_relative_tone_adjustments, ColorSyncError,
+    GroupColorIntent, GroupColorSyncPlan, GroupSyncMode, PhotoColorAnalysis,
+    PhotoExposureAnalysis,
 };
 use crate::culling::{CullingDecision, CullingRecommendation};
 use crate::culling_store::{CullingReview, CullingUserDecision};
@@ -480,13 +481,35 @@ impl ReferenceSet {
             return Err(ReferenceWorkflowError::ReferenceNotInSet);
         }
 
-        let reference = cached_exposure_analysis(cache, selected_reference_asset_id)?;
+        let reference_evidence = cached_exposure_analysis(cache, selected_reference_asset_id)?;
+        let reference = reference_evidence.color_analysis();
+        let mut evidence = Vec::with_capacity(group.asset_ids.len());
         let mut analyses = Vec::with_capacity(group.asset_ids.len());
         for asset_id in &group.asset_ids {
-            analyses.push(cached_exposure_analysis(cache, *asset_id)?);
+            let item = cached_exposure_analysis(cache, *asset_id)?;
+            analyses.push(item.color_analysis());
+            evidence.push(item);
         }
 
-        self.resolve_group(group, &reference, &analyses, revision)
+        let mut result = self.resolve_group(group, &reference, &analyses, revision)?;
+        for recipe in &mut result.recipes {
+            let Some(asset_id) = recipe.target_asset_id else {
+                continue;
+            };
+            let Some(target) = evidence.iter().find(|item| item.asset_id == asset_id) else {
+                continue;
+            };
+            let exposure_delta = recipe.adjustments.exposure.unwrap_or(0.0);
+            if let Some((highlights, shadows)) = reference_relative_tone_adjustments(
+                &reference_evidence,
+                target,
+                exposure_delta,
+            ) {
+                recipe.adjustments.highlights = Some(highlights);
+                recipe.adjustments.shadows = Some(shadows);
+            }
+        }
+        Ok(result)
     }
 
     /// Resolve one photographer-selected reference look against every photo in
@@ -525,11 +548,11 @@ impl ReferenceSet {
 fn cached_exposure_analysis(
     cache: &AnalysisCache,
     asset_id: Uuid,
-) -> Result<PhotoColorAnalysis, ReferenceWorkflowError> {
+) -> Result<PhotoExposureAnalysis, ReferenceWorkflowError> {
     let artifact = cache
         .latest_for_asset_task(asset_id, InferenceTask::ExposureAnalysis)?
         .ok_or(ReferenceWorkflowError::MissingExposureAnalysis(asset_id))?;
-    serde_json::from_value::<PhotoColorAnalysis>(artifact.payload_json).map_err(|source| {
+    serde_json::from_value::<PhotoExposureAnalysis>(artifact.payload_json).map_err(|source| {
         ReferenceWorkflowError::InvalidExposureAnalysis { asset_id, source }
     })
 }
@@ -890,7 +913,18 @@ mod tests {
                     model_version: "1".into(),
                     config_hash: "trimmed-luma-relative-v1".into(),
                 },
-                payload_json: serde_json::to_value(analysis).unwrap(),
+                payload_json: serde_json::to_value(PhotoExposureAnalysis {
+                    asset_id: analysis.asset_id,
+                    exposure_ev: analysis.exposure_ev,
+                    temperature_k: analysis.temperature_k,
+                    tint: analysis.tint,
+                    confidence: analysis.confidence,
+                    luminance_p10: None,
+                    luminance_p50: None,
+                    luminance_p90: None,
+                    shadow_clip_ratio: None,
+                    highlight_clip_ratio: None,
+                }).unwrap(),
             })
             .unwrap();
     }
@@ -949,6 +983,71 @@ mod tests {
             .iter()
             .all(|recipe| recipe.adjustments.temperature.is_none()
                 && recipe.adjustments.tint.is_none()));
+    }
+
+    #[test]
+    fn cached_reference_generates_per_photo_highlight_shadow_recipe() {
+        let dir = tempdir().unwrap();
+        let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
+        let reference_id = Uuid::new_v4();
+        let target = Uuid::new_v4();
+
+        for evidence in [
+            PhotoExposureAnalysis {
+                asset_id: reference_id,
+                exposure_ev: 0.0,
+                temperature_k: None,
+                tint: None,
+                confidence: 1.0,
+                luminance_p10: Some(0.18),
+                luminance_p50: Some(0.48),
+                luminance_p90: Some(0.78),
+                shadow_clip_ratio: Some(0.0),
+                highlight_clip_ratio: Some(0.0),
+            },
+            PhotoExposureAnalysis {
+                asset_id: target,
+                exposure_ev: 0.0,
+                temperature_k: None,
+                tint: None,
+                confidence: 1.0,
+                luminance_p10: Some(0.05),
+                luminance_p50: Some(0.50),
+                luminance_p90: Some(0.96),
+                shadow_clip_ratio: Some(0.03),
+                highlight_clip_ratio: Some(0.04),
+            },
+        ] {
+            cache
+                .put(&AnalysisArtifact {
+                    key: AnalysisCacheKey {
+                        asset_id: evidence.asset_id,
+                        source_fingerprint: "raw-v2".into(),
+                        preview_revision: "preview-v1".into(),
+                        task: InferenceTask::ExposureAnalysis,
+                        model_id: "preview-relative-exposure".into(),
+                        model_version: "2".into(),
+                        config_hash: "trimmed-luma-percentiles-relative-v2".into(),
+                    },
+                    payload_json: serde_json::to_value(evidence).unwrap(),
+                })
+                .unwrap();
+        }
+
+        let group = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Similar,
+            basis: GroupingBasis::SemanticSimilarity,
+            asset_ids: vec![target],
+            manual_locked: false,
+        };
+        let references = ReferenceSet::from_photos("reference", vec![reference_id]);
+        let result = references
+            .resolve_group_from_cache(&cache, &group, reference_id, 1)
+            .unwrap();
+        let recipe = &result.recipes[0];
+        assert!(recipe.adjustments.highlights.unwrap() < -20.0);
+        assert!(recipe.adjustments.shadows.unwrap() > 20.0);
     }
 
     #[test]

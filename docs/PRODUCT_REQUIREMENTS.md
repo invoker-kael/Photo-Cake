@@ -429,3 +429,16 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Clear-group batch confirmation MUST revalidate the current preflight immediately before writing confirmation fingerprints.
 - Landscape, architecture, night, food and people/family context MAY be displayed in Review, but MUST NOT create a second Recipe engine or portrait-only workflow.
 - Exposure-bracket source RAWs MUST remain outside ordinary adaptive Recipe confirmation. Mixed groups MAY continue reviewing non-HDR peers while HDR sources route separately to Lightroom/Camera Raw.
+
+
+### Adaptive tonal correction
+
+- Analyze MUST retain a robust relative exposure signal and SHOULD record luminance tail/midtone evidence sufficient to compare tonal distribution between a Reference and target photo.
+- Reference-driven Recipe generation MUST resolve exposure per photo before deriving Highlights/Shadows corrections.
+- Highlights/Shadows MUST be target-specific; Photo-Cake MUST NOT blindly copy the Reference photo's numeric tone sliders to every image.
+- Tone corrections MUST be bounded and confidence-weighted because embedded JPEG previews have already passed through the camera rendering pipeline.
+- Legacy analysis evidence without tone percentiles MUST fall back safely to exposure-only Recipe generation.
+- Recipe Review MUST allow per-photo Highlights/Shadows exceptions and selective same-group exception synchronization alongside Exposure, Contrast and Saturation.
+- Edited preview SHOULD visualize Highlights/Shadows direction without claiming RAW-engine parity.
+- Lightroom XMP handoff MUST preserve the generated or manually adjusted Highlights/Shadows values.
+- White balance MUST continue to remain unset when reliable RAW/metadata evidence is unavailable.

@@ -53,13 +53,17 @@ pub fn recipe_review_fingerprint(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecipeReviewSyncFields {
     pub exposure: bool,
+    #[serde(default)]
+    pub highlights: bool,
+    #[serde(default)]
+    pub shadows: bool,
     pub contrast: bool,
     pub saturation: bool,
 }
 
 impl RecipeReviewSyncFields {
     pub fn any(self) -> bool {
-        self.exposure || self.contrast || self.saturation
+        self.exposure || self.highlights || self.shadows || self.contrast || self.saturation
     }
 }
 
@@ -67,6 +71,10 @@ impl RecipeReviewSyncFields {
 pub struct RecipeReviewOverride {
     pub asset_id: Uuid,
     pub exposure_delta_ev: f32,
+    #[serde(default)]
+    pub highlights_delta: f32,
+    #[serde(default)]
+    pub shadows_delta: f32,
     pub contrast_delta: f32,
     pub saturation_delta: f32,
 }
@@ -76,6 +84,8 @@ impl RecipeReviewOverride {
         Self {
             asset_id,
             exposure_delta_ev: 0.0,
+            highlights_delta: 0.0,
+            shadows_delta: 0.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
         }
@@ -83,6 +93,8 @@ impl RecipeReviewOverride {
 
     pub fn is_neutral(&self) -> bool {
         self.exposure_delta_ev.abs() <= NEUTRAL_EPSILON
+            && self.highlights_delta.abs() <= NEUTRAL_EPSILON
+            && self.shadows_delta.abs() <= NEUTRAL_EPSILON
             && self.contrast_delta.abs() <= NEUTRAL_EPSILON
             && self.saturation_delta.abs() <= NEUTRAL_EPSILON
     }
@@ -98,6 +110,16 @@ impl RecipeReviewOverride {
                 self.exposure_delta_ev
             } else {
                 target.exposure_delta_ev
+            },
+            highlights_delta: if fields.highlights {
+                self.highlights_delta
+            } else {
+                target.highlights_delta
+            },
+            shadows_delta: if fields.shadows {
+                self.shadows_delta
+            } else {
+                target.shadows_delta
             },
             contrast_delta: if fields.contrast {
                 self.contrast_delta
@@ -129,6 +151,18 @@ impl RecipeReviewOverride {
             self.exposure_delta_ev,
             -5.0,
             5.0,
+        );
+        recipe.adjustments.highlights = add_delta(
+            recipe.adjustments.highlights,
+            self.highlights_delta,
+            -100.0,
+            100.0,
+        );
+        recipe.adjustments.shadows = add_delta(
+            recipe.adjustments.shadows,
+            self.shadows_delta,
+            -100.0,
+            100.0,
         );
         recipe.adjustments.contrast = add_delta(
             recipe.adjustments.contrast,
@@ -220,6 +254,8 @@ impl RecipeReviewStore {
             }
             let mut normalized = review.clone();
             normalized.exposure_delta_ev = normalized.exposure_delta_ev.clamp(-3.0, 3.0);
+            normalized.highlights_delta = normalized.highlights_delta.clamp(-100.0, 100.0);
+            normalized.shadows_delta = normalized.shadows_delta.clamp(-100.0, 100.0);
             normalized.contrast_delta = normalized.contrast_delta.clamp(-100.0, 100.0);
             normalized.saturation_delta = normalized.saturation_delta.clamp(-100.0, 100.0);
             let json = if normalized.is_neutral() {
@@ -431,6 +467,17 @@ mod tests {
     }
 
     #[test]
+    fn old_override_json_defaults_new_tone_fields_to_zero() {
+        let asset_id = Uuid::new_v4();
+        let json = format!(
+            r#"{{"asset_id":"{asset_id}","exposure_delta_ev":0.2,"contrast_delta":4.0,"saturation_delta":-2.0}}"#
+        );
+        let value: RecipeReviewOverride = serde_json::from_str(&json).unwrap();
+        assert_eq!(value.highlights_delta, 0.0);
+        assert_eq!(value.shadows_delta, 0.0);
+    }
+
+    #[test]
     fn review_override_round_trips_by_asset_id() {
         let dir = tempdir().unwrap();
         let store = RecipeReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
@@ -438,6 +485,8 @@ mod tests {
         let value = RecipeReviewOverride {
             asset_id,
             exposure_delta_ev: 0.25,
+            highlights_delta: 0.0,
+            shadows_delta: 0.0,
             contrast_delta: 5.0,
             saturation_delta: -2.0,
         };
@@ -453,6 +502,8 @@ mod tests {
         RecipeReviewOverride {
             asset_id,
             exposure_delta_ev: 0.2,
+            highlights_delta: 0.0,
+            shadows_delta: 0.0,
             contrast_delta: -4.0,
             saturation_delta: 2.0,
         }
@@ -467,6 +518,26 @@ mod tests {
     }
 
     #[test]
+    fn highlight_shadow_exception_is_additive() {
+        let asset_id = Uuid::new_v4();
+        let mut target = recipe(asset_id);
+        target.adjustments.highlights = Some(-25.0);
+        target.adjustments.shadows = Some(20.0);
+        RecipeReviewOverride {
+            asset_id,
+            exposure_delta_ev: 0.0,
+            highlights_delta: -10.0,
+            shadows_delta: 15.0,
+            contrast_delta: 0.0,
+            saturation_delta: 0.0,
+        }
+        .apply_to_recipe(&mut target)
+        .unwrap();
+        assert_eq!(target.adjustments.highlights, Some(-35.0));
+        assert_eq!(target.adjustments.shadows, Some(35.0));
+    }
+
+    #[test]
     fn neutral_override_removes_persisted_exception() {
         let dir = tempdir().unwrap();
         let store = RecipeReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
@@ -476,6 +547,8 @@ mod tests {
             .set(RecipeReviewOverride {
                 asset_id,
                 exposure_delta_ev: 0.2,
+                highlights_delta: 0.0,
+                shadows_delta: 0.0,
                 contrast_delta: 0.0,
                 saturation_delta: 0.0,
             })
@@ -492,6 +565,8 @@ mod tests {
         let source = RecipeReviewOverride {
             asset_id: Uuid::new_v4(),
             exposure_delta_ev: 0.35,
+            highlights_delta: 0.0,
+            shadows_delta: 0.0,
             contrast_delta: 10.0,
             saturation_delta: -4.0,
         };
@@ -499,6 +574,8 @@ mod tests {
         let target = RecipeReviewOverride {
             asset_id: target_id,
             exposure_delta_ev: -0.1,
+            highlights_delta: 0.0,
+            shadows_delta: 0.0,
             contrast_delta: 3.0,
             saturation_delta: 7.0,
         };
@@ -507,6 +584,8 @@ mod tests {
             &target,
             RecipeReviewSyncFields {
                 exposure: true,
+                highlights: true,
+                shadows: false,
                 contrast: false,
                 saturation: true,
             },
@@ -529,6 +608,8 @@ mod tests {
             .set(RecipeReviewOverride {
                 asset_id: second_id,
                 exposure_delta_ev: 0.2,
+                highlights_delta: 0.0,
+                shadows_delta: 0.0,
                 contrast_delta: 0.0,
                 saturation_delta: 0.0,
             })
@@ -539,6 +620,8 @@ mod tests {
                 RecipeReviewOverride {
                     asset_id: first_id,
                     exposure_delta_ev: 0.3,
+                    highlights_delta: 0.0,
+                    shadows_delta: 0.0,
                     contrast_delta: 5.0,
                     saturation_delta: 0.0,
                 },
@@ -559,6 +642,8 @@ mod tests {
         let review = RecipeReviewOverride {
             asset_id,
             exposure_delta_ev: 0.25,
+            highlights_delta: 0.0,
+            shadows_delta: 0.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
         };
@@ -646,6 +731,8 @@ mod tests {
         let error = RecipeReviewOverride {
             asset_id: Uuid::new_v4(),
             exposure_delta_ev: 0.1,
+            highlights_delta: 0.0,
+            shadows_delta: 0.0,
             contrast_delta: 0.0,
             saturation_delta: 0.0,
         }

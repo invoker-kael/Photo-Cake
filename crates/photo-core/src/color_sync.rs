@@ -77,6 +77,81 @@ impl PhotoColorAnalysis {
     }
 }
 
+/// Preview-derived exposure evidence used for relative photographic matching.
+///
+/// Percentiles and clipping ratios come from the embedded RAW preview and are
+/// deliberately treated as relative tone evidence, not as sensor-linear RAW data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PhotoExposureAnalysis {
+    pub asset_id: Uuid,
+    pub exposure_ev: f32,
+    #[serde(default)]
+    pub temperature_k: Option<f32>,
+    #[serde(default)]
+    pub tint: Option<f32>,
+    pub confidence: f32,
+    #[serde(default)]
+    pub luminance_p10: Option<f32>,
+    #[serde(default)]
+    pub luminance_p50: Option<f32>,
+    #[serde(default)]
+    pub luminance_p90: Option<f32>,
+    #[serde(default)]
+    pub shadow_clip_ratio: Option<f32>,
+    #[serde(default)]
+    pub highlight_clip_ratio: Option<f32>,
+}
+
+impl PhotoExposureAnalysis {
+    pub fn color_analysis(&self) -> PhotoColorAnalysis {
+        PhotoColorAnalysis {
+            asset_id: self.asset_id,
+            exposure_ev: self.exposure_ev,
+            temperature_k: self.temperature_k,
+            tint: self.tint,
+            confidence: self.confidence,
+        }
+    }
+
+    pub fn tone_percentiles(&self) -> Option<(f32, f32)> {
+        self.luminance_p10.zip(self.luminance_p90)
+    }
+}
+
+/// Resolve highlight/shadow corrections after the normal per-photo exposure
+/// correction so the target follows the photographer-selected Reference's
+/// tonal distribution without blindly copying numeric settings.
+pub fn reference_relative_tone_adjustments(
+    reference: &PhotoExposureAnalysis,
+    target: &PhotoExposureAnalysis,
+    exposure_delta_ev: f32,
+) -> Option<(f32, f32)> {
+    let (reference_shadow, reference_highlight) = reference.tone_percentiles()?;
+    let (target_shadow, target_highlight) = target.tone_percentiles()?;
+    let exposure_factor = 2.0_f32.powf(exposure_delta_ev.clamp(-5.0, 5.0));
+    let projected_shadow = (target_shadow * exposure_factor).clamp(0.0, 1.0);
+    let projected_highlight = (target_highlight * exposure_factor).clamp(0.0, 1.0);
+    let confidence = reference
+        .confidence
+        .min(target.confidence)
+        .clamp(0.2, 1.0);
+
+    let mut shadows = (reference_shadow - projected_shadow) * 180.0 * confidence;
+    let mut highlights = (reference_highlight - projected_highlight) * 180.0 * confidence;
+
+    if shadows.abs() < 2.0 {
+        shadows = 0.0;
+    }
+    if highlights.abs() < 2.0 {
+        highlights = 0.0;
+    }
+
+    Some((
+        highlights.clamp(-70.0, 70.0),
+        shadows.clamp(-70.0, 70.0),
+    ))
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResolvedColorEdit {
     pub asset_id: Uuid,
@@ -463,6 +538,89 @@ mod tests {
         assert!((plan.resolved[0].exposure_delta_ev - 0.7).abs() < 1e-6);
         assert_eq!(plan.resolved[0].temperature_delta_k, Some(600.0));
         assert_eq!(plan.resolved[0].tint_delta, Some(2.0));
+    }
+
+    #[test]
+    fn reference_tone_matching_recovers_hot_highlights_and_deep_shadows() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.18),
+            luminance_p50: Some(0.48),
+            luminance_p90: Some(0.78),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.05),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.96),
+            shadow_clip_ratio: Some(0.04),
+            highlight_clip_ratio: Some(0.05),
+        };
+
+        let (highlights, shadows) =
+            reference_relative_tone_adjustments(&reference, &target, 0.0).unwrap();
+        assert!(highlights < -20.0);
+        assert!(shadows > 20.0);
+    }
+
+    #[test]
+    fn tone_matching_accounts_for_exposure_before_tonal_recovery() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.20),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.80),
+            shadow_clip_ratio: None,
+            highlight_clip_ratio: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: -1.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.10),
+            luminance_p50: Some(0.25),
+            luminance_p90: Some(0.40),
+            shadow_clip_ratio: None,
+            highlight_clip_ratio: None,
+        };
+
+        let (highlights, shadows) =
+            reference_relative_tone_adjustments(&reference, &target, 1.0).unwrap();
+        assert_eq!(highlights, 0.0);
+        assert_eq!(shadows, 0.0);
+    }
+
+    #[test]
+    fn old_exposure_evidence_without_percentiles_skips_tone_matching() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: None,
+            luminance_p50: None,
+            luminance_p90: None,
+            shadow_clip_ratio: None,
+            highlight_clip_ratio: None,
+        };
+        assert!(reference_relative_tone_adjustments(&reference, &reference, 0.0).is_none());
     }
 
     #[test]

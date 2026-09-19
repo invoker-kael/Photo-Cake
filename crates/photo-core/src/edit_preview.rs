@@ -42,13 +42,20 @@ pub fn render_recipe_preview(
 pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> DynamicImage {
     let exposure = recipe.adjustments.exposure.unwrap_or(0.0).clamp(-5.0, 5.0);
     let contrast = recipe.adjustments.contrast.unwrap_or(0.0).clamp(-100.0, 100.0);
+    let highlights = recipe.adjustments.highlights.unwrap_or(0.0).clamp(-100.0, 100.0);
+    let shadows = recipe.adjustments.shadows.unwrap_or(0.0).clamp(-100.0, 100.0);
     let saturation = recipe
         .adjustments
         .saturation
         .unwrap_or(0.0)
         .clamp(-100.0, 100.0);
 
-    if exposure.abs() < 0.0001 && contrast.abs() < 0.0001 && saturation.abs() < 0.0001 {
+    if exposure.abs() < 0.0001
+        && contrast.abs() < 0.0001
+        && highlights.abs() < 0.0001
+        && shadows.abs() < 0.0001
+        && saturation.abs() < 0.0001
+    {
         return image;
     }
 
@@ -72,8 +79,18 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
         }
 
         let luminance = (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
+        let shadow_mask = (1.0 - luminance).powi(2);
+        let highlight_mask = luminance.powi(2);
+        let tone_delta =
+            (shadows / 100.0) * shadow_mask * 0.28
+            + (highlights / 100.0) * highlight_mask * 0.28;
         for channel in &mut rgb {
-            *channel = (luminance + (*channel - luminance) * saturation_factor)
+            *channel = (*channel + tone_delta).clamp(0.0, 1.0);
+        }
+
+        let toned_luminance = (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
+        for channel in &mut rgb {
+            *channel = (toned_luminance + (*channel - toned_luminance) * saturation_factor)
                 .clamp(0.0, 1.0);
         }
 
@@ -114,7 +131,13 @@ mod tests {
     use tempfile::tempdir;
     use uuid::Uuid;
 
-    fn recipe(exposure: f32, contrast: f32, saturation: f32) -> Recipe {
+    fn recipe_with_tone(
+        exposure: f32,
+        contrast: f32,
+        highlights: f32,
+        shadows: f32,
+        saturation: f32,
+    ) -> Recipe {
         Recipe {
             id: Uuid::new_v4(),
             name: "preview".into(),
@@ -123,13 +146,17 @@ mod tests {
             adjustments: EditAdjustments {
                 exposure: Some(exposure),
                 contrast: Some(contrast),
-                highlights: None,
-                shadows: None,
+                highlights: Some(highlights),
+                shadows: Some(shadows),
                 temperature: None,
                 tint: None,
                 saturation: Some(saturation),
             },
         }
+    }
+
+    fn recipe(exposure: f32, contrast: f32, saturation: f32) -> Recipe {
+        recipe_with_tone(exposure, contrast, 0.0, 0.0, saturation)
     }
 
     #[test]
@@ -152,6 +179,34 @@ mod tests {
         ));
         let edited = apply_preview_adjustments(source, &recipe(1.0, 0.0, 0.0));
         assert!(edited.to_rgb8().get_pixel(0, 0)[0] > 64);
+    }
+
+    #[test]
+    fn positive_shadows_lift_dark_pixels_more_than_bright_pixels() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_fn(2, 1, |x, _| {
+            if x == 0 { Rgb([30, 30, 30]) } else { Rgb([200, 200, 200]) }
+        }));
+        let edited = apply_preview_adjustments(
+            source,
+            &recipe_with_tone(0.0, 0.0, 0.0, 60.0, 0.0),
+        ).to_rgb8();
+        let dark_gain = i16::from(edited.get_pixel(0, 0)[0]) - 30;
+        let bright_gain = i16::from(edited.get_pixel(1, 0)[0]) - 200;
+        assert!(dark_gain > bright_gain);
+    }
+
+    #[test]
+    fn negative_highlights_recover_bright_pixels_more_than_dark_pixels() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_fn(2, 1, |x, _| {
+            if x == 0 { Rgb([40, 40, 40]) } else { Rgb([230, 230, 230]) }
+        }));
+        let edited = apply_preview_adjustments(
+            source,
+            &recipe_with_tone(0.0, 0.0, -60.0, 0.0, 0.0),
+        ).to_rgb8();
+        let dark_drop = 40 - i16::from(edited.get_pixel(0, 0)[0]);
+        let bright_drop = 230 - i16::from(edited.get_pixel(1, 0)[0]);
+        assert!(bright_drop > dark_drop);
     }
 
     #[test]

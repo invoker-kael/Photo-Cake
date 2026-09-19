@@ -376,6 +376,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [reviewSyncTargets, setReviewSyncTargets] = useState<string[]>([]);
   const [reviewSyncFields, setReviewSyncFields] = useState<BackendRecipeReviewSyncFields>({
     exposure: true,
+    highlights: true,
+    shadows: true,
     contrast: true,
     saturation: true,
   });
@@ -455,7 +457,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setReviewBatchNote(null);
     setReviewSyncSource(null);
     setReviewSyncTargets([]);
-    setReviewSyncFields({ exposure: true, contrast: true, saturation: true });
+    setReviewSyncFields({ exposure: true, highlights: true, shadows: true, contrast: true, saturation: true });
     setReviewSyncNote(null);
     setHandoffPreflightErrors({});
     setHandoffBatchTargets([]);
@@ -1665,6 +1667,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const saveRecipeReview = async (
     assetId: string,
     exposureDeltaEv: number,
+    highlightsDelta: number,
+    shadowsDelta: number,
     contrastDelta: number,
     saturationDelta: number,
   ) => {
@@ -1674,11 +1678,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       const review = await bridge.setRecipeReview(
         assetId,
         exposureDeltaEv,
+        highlightsDelta,
+        shadowsDelta,
         contrastDelta,
         saturationDelta,
       );
       const neutral =
         Math.abs(review.exposure_delta_ev) <= 0.0001 &&
+        Math.abs(review.highlights_delta) <= 0.0001 &&
+        Math.abs(review.shadows_delta) <= 0.0001 &&
         Math.abs(review.contrast_delta) <= 0.0001 &&
         Math.abs(review.saturation_delta) <= 0.0001;
       setRecipeReviews((current) => {
@@ -1707,19 +1715,23 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   const adjustRecipeReview = (
     assetId: string,
-    field: "exposure" | "contrast" | "saturation",
+    field: "exposure" | "highlights" | "shadows" | "contrast" | "saturation",
     delta: number,
   ) => {
     const current = recipeReviews[assetId];
     let exposure = current?.exposure_delta_ev ?? 0;
+    let highlights = current?.highlights_delta ?? 0;
+    let shadows = current?.shadows_delta ?? 0;
     let contrast = current?.contrast_delta ?? 0;
     let saturation = current?.saturation_delta ?? 0;
 
     if (field === "exposure") exposure = Math.max(-3, Math.min(3, exposure + delta));
+    if (field === "highlights") highlights = Math.max(-100, Math.min(100, highlights + delta));
+    if (field === "shadows") shadows = Math.max(-100, Math.min(100, shadows + delta));
     if (field === "contrast") contrast = Math.max(-100, Math.min(100, contrast + delta));
     if (field === "saturation") saturation = Math.max(-100, Math.min(100, saturation + delta));
 
-    void saveRecipeReview(assetId, exposure, contrast, saturation);
+    void saveRecipeReview(assetId, exposure, highlights, shadows, contrast, saturation);
   };
 
   const syncRecipeReviewException = async () => {
@@ -1747,6 +1759,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         for (const review of result.overrides) {
           const neutral =
             Math.abs(review.exposure_delta_ev) <= 0.0001 &&
+            Math.abs(review.highlights_delta) <= 0.0001 &&
+            Math.abs(review.shadows_delta) <= 0.0001 &&
             Math.abs(review.contrast_delta) <= 0.0001 &&
             Math.abs(review.saturation_delta) <= 0.0001;
           if (neutral) delete next[review.asset_id];
@@ -1789,7 +1803,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   const resetRecipeReview = async (assetId: string) => {
     if (!bridge?.clearRecipeReview) {
-      void saveRecipeReview(assetId, 0, 0, 0);
+      void saveRecipeReview(assetId, 0, 0, 0, 0, 0);
       return;
     }
     setReviewUpdating(assetId);
@@ -3466,6 +3480,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   <div className="recipe-sync-fields" role="group" aria-label="Exception fields to sync">
                     {([
                       ["exposure", "Exposure"],
+                      ["highlights", "Highlights"],
+                      ["shadows", "Shadows"],
                       ["contrast", "Contrast"],
                       ["saturation", "Saturation"],
                     ] as const).map(([field, label]) => (
@@ -3597,6 +3613,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           Final exposure {signed(recipe.adjustments.exposure ?? 0)} EV
                           {review ? ` · override ${signed(review.exposure_delta_ev)} EV` : ""}
                         </small>
+                        <small>
+                          Tone H {signed(recipe.adjustments.highlights ?? 0, 0)}
+                          {" · "}S {signed(recipe.adjustments.shadows ?? 0, 0)}
+                          {review
+                            ? ` · overrides H ${signed(review.highlights_delta, 0)} / S ${signed(review.shadows_delta, 0)}`
+                            : ""}
+                        </small>
                       </div>
                       <small className="recipe-preview-note">
                         Edited preview is a lightweight embedded-JPEG approximation; Lightroom/RAW rendering remains authoritative.
@@ -3607,6 +3630,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "exposure", -0.1)}>−</button>
                           <strong>{signed(review?.exposure_delta_ev ?? 0)} EV</strong>
                           <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "exposure", 0.1)}>+</button>
+                        </div>
+                        <div className="mini-adjust">
+                          <span>Highlights</span>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "highlights", -5)}>−</button>
+                          <strong>{signed(review?.highlights_delta ?? 0, 0)}</strong>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "highlights", 5)}>+</button>
+                        </div>
+                        <div className="mini-adjust">
+                          <span>Shadows</span>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "shadows", -5)}>−</button>
+                          <strong>{signed(review?.shadows_delta ?? 0, 0)}</strong>
+                          <button disabled={updating || reviewBatchUpdating || reviewSyncUpdating} onClick={() => adjustRecipeReview(assetId, "shadows", 5)}>+</button>
                         </div>
                         <div className="mini-adjust">
                           <span>Contrast</span>
@@ -3654,7 +3689,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                               onClick={() => {
                                 setReviewSyncSource({ groupId: group.id, assetId });
                                 setReviewSyncTargets([]);
-                                setReviewSyncFields({ exposure: true, contrast: true, saturation: true });
+                                setReviewSyncFields({ exposure: true, highlights: true, shadows: true, contrast: true, saturation: true });
                                 setReviewSyncNote(null);
                               }}
                             >

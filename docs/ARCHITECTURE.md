@@ -490,3 +490,14 @@ Recipe Review now has one backend authority for exception-first triage and clear
 Each editable asset is classified as `CONFIRMED`, `NEEDS_REVIEW`, `CLEAR`, or `PENDING`. Attention reasons are explicit: saved exception, photographer Review, AI Reject suggestion, AI Review, or incomplete evidence. The UI uses these dispositions for Triage and ordering; it no longer re-derives review eligibility from raw Cull state.
 
 Clear-group confirmation re-runs the same backend planner immediately before persistence. A group can be batch-confirmed only when it has at least one current clear Recipe and no attention or pending Recipes. HDR bracket source RAWs remain outside ordinary adaptive Recipe review and are surfaced as separate routing context, so mixed groups can still review non-HDR peers without treating bracket EV differences as edit errors.
+
+
+## Reference-relative adaptive tone matching
+
+ExposureAnalysis v2 keeps the existing preview-relative exposure signal and adds luminance p10/p50/p90 plus shadow/highlight clipping ratios from the embedded RAW preview. These values are relative photographic evidence only; they are not treated as sensor-linear RAW measurements.
+
+Reference-driven Recipe generation first resolves the normal per-photo exposure delta, then projects each target's tone percentiles through that exposure correction and compares them with the selected Reference. The remaining tonal difference becomes bounded per-photo Highlights/Shadows adjustments. This avoids blindly copying the Reference's numeric tone sliders while still matching its bright/dark distribution.
+
+Old ExposureAnalysis payloads remain readable. If percentile evidence is absent, tone matching is skipped and the previous exposure-only behavior remains intact.
+
+Recipe Review preview now approximates Highlights/Shadows in addition to Exposure/Contrast/Saturation. The preview remains an embedded-JPEG approximation; Lightroom/Camera Raw remains authoritative for RAW rendering. Per-photo exceptions can adjust and selectively synchronize Exposure, Highlights, Shadows, Contrast and Saturation. XMP already carries Highlights/Shadows through the existing non-destructive handoff path.

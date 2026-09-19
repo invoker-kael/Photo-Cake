@@ -1546,6 +1546,8 @@ fn batch_recipe_reviews(
 fn set_recipe_review(
     asset_id: String,
     exposure_delta_ev: f32,
+    highlights_delta: f32,
+    shadows_delta: f32,
     contrast_delta: f32,
     saturation_delta: f32,
     state: State<'_, AppState>,
@@ -1557,6 +1559,8 @@ fn set_recipe_review(
         .set(RecipeReviewOverride {
             asset_id,
             exposure_delta_ev,
+            highlights_delta,
+            shadows_delta,
             contrast_delta,
             saturation_delta,
         })

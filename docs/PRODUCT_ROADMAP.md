@@ -201,3 +201,10 @@ This extends the useful “standard image → synchronize shared look → review
 Completed: Recipe Review triage and clear-group confirmation now consume the same backend preflight instead of duplicating Cull/exception logic in the UI. Saved exceptions and uncertain photos rise first, straightforward Recipes form safe clear cohorts, missing evidence stays Pending, and current confirmations remain fingerprint-bound.
 
 Mixed travel sets remain first-class: scene context is visible for landscape/architecture/night/people groups, while HDR bracket sources are reported separately and never flattened into ordinary Recipes. This keeps the workflow on the existing Reference → adaptive Recipe → exception Review → Lightroom path.
+
+
+### Core editing quality: adaptive tone
+
+Completed: the core Reference → adaptive Recipe path now goes beyond exposure-only matching. ExposureAnalysis v2 records preview luminance percentiles and clipping evidence, then generates bounded per-photo Highlights/Shadows after exposure alignment. This improves mixed travel, landscape, architecture, night and people sets without creating scene-specific duplicate pipelines.
+
+Recipe Review now previews those tone adjustments and lets the photographer override or synchronize Highlights/Shadows per photo. Existing Lightroom XMP delivery carries the values directly. Legacy projects continue with exposure-only fallback when percentile evidence is unavailable.

@@ -383,6 +383,8 @@ export interface BackendLightroomBatchHandoffResult {
 export interface BackendRecipeReviewOverride {
   asset_id: string;
   exposure_delta_ev: number;
+  highlights_delta: number;
+  shadows_delta: number;
   contrast_delta: number;
   saturation_delta: number;
 }
@@ -430,6 +432,8 @@ export interface BackendRecipeReviewBatchResult {
 
 export interface BackendRecipeReviewSyncFields {
   exposure: boolean;
+  highlights: boolean;
+  shadows: boolean;
   contrast: boolean;
   saturation: boolean;
 }
@@ -504,6 +508,8 @@ export interface PhotoCakeBridge {
   setRecipeReview?(
     assetId: string,
     exposureDeltaEv: number,
+    highlightsDelta: number,
+    shadowsDelta: number,
     contrastDelta: number,
     saturationDelta: number,
   ): Promise<BackendRecipeReviewOverride>;

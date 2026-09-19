@@ -125,12 +125,16 @@ const bridge: PhotoCakeBridge = {
   setRecipeReview: (
     assetId,
     exposureDeltaEv,
+    highlightsDelta,
+    shadowsDelta,
     contrastDelta,
     saturationDelta,
   ) =>
     invoke<BackendRecipeReviewOverride>("set_recipe_review", {
       assetId,
       exposureDeltaEv,
+      highlightsDelta,
+      shadowsDelta,
       contrastDelta,
       saturationDelta,
     }),

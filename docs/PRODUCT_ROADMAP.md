@@ -257,3 +257,9 @@ Review surfaces the exact adaptation percentage, and very weak fits become expli
 Completed after adaptive Reference strength: automatic color recovery now protects two failure modes common in travel and family work—lifting chroma noise in genuinely dark frames, and over-driving already saturated highlight colors in neon, sunsets and stage lighting.
 
 The adaptive Vibrance path now tapers its own strength from preview evidence before Recipe materialization, while Recipe Review retains specialized quality exceptions if a final edit remains risky. The goal is fewer visibly dirty night shadows and fewer clipped/unnatural saturated highlights without turning off useful batch color matching.
+
+### Core editing quality: preview perceptual fidelity
+
+Completed after low-light color integrity: the Review renderer now better preserves colored-highlight relationships, applies contrast through luminance, smooths tonal-zone masks and prevents positive chroma edits from creating avoidable preview clipping.
+
+This does not replace RAW rendering. It makes the exception-review surface more trustworthy so the photographer can judge direction before the same canonical Recipe is serialized to Lightroom XMP.

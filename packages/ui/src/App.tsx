@@ -3690,7 +3690,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         </small>
                       </div>
                       <small className="recipe-preview-note">
-                        Edited preview is a lightweight embedded-JPEG approximation; Lightroom/RAW rendering remains authoritative.
+                        Edited preview is a perceptual embedded-JPEG approximation of the canonical Recipe; Lightroom/RAW rendering remains authoritative.
                       </small>
                       <div className="recipe-review-controls">
                         <div className="mini-adjust">

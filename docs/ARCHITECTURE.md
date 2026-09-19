@@ -583,3 +583,11 @@ Adaptive Vibrance now treats positive color recovery as a quality-sensitive oper
 A second guard uses absolute P75 colorfulness plus highlight clipping. This matters for sunsets, neon, stage lighting and similar frames where both the Reference and target may already be colorful: relative color difference alone is not enough to protect hue/chroma near the highlight boundary.
 
 Recipe Review adds dedicated LOW_LIGHT_COLOR_LIFT and SATURATED_HIGHLIGHT_COLOR quality exceptions when a final Recipe still requests material positive Saturation/Vibrance under those conditions. Lightroom/Camera Raw remains the authoritative RAW renderer.
+
+## Review preview perceptual fidelity
+
+The embedded-JPEG Review renderer remains an approximation, but its adjustment response now follows the canonical Recipe more conservatively. Exposure is applied in linear light and any channel overflow is compressed by a shared ratio so colored highlights keep their relative channel structure instead of clipping one channel early. Contrast is applied through luminance remapping rather than independent RGB channel stretching.
+
+Highlights/Shadows and Whites/Blacks now use smooth perceptual masks, reducing abrupt transitions between tonal zones. Vibrance and Saturation use chroma scaling with channel-headroom limits so strong positive color adjustments do not create artificial preview clipping simply because the embedded JPEG has less recoverable headroom than RAW.
+
+These changes improve exception-review direction and consistency with the XMP controls, but they do not claim Lightroom/Camera Raw parity. The final RAW renderer remains authoritative.

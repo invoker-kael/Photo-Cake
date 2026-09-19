@@ -83,15 +83,29 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
             f32::from(pixel[2]) / 255.0,
         ];
 
-        for channel in &mut rgb {
-            let linear = srgb_to_linear(*channel);
-            *channel = linear_to_srgb((linear * exposure_factor).clamp(0.0, 1.0));
-            *channel = ((*channel - 0.5) * contrast_factor + 0.5).clamp(0.0, 1.0);
+        let mut linear_rgb = [
+            srgb_to_linear(rgb[0]) * exposure_factor,
+            srgb_to_linear(rgb[1]) * exposure_factor,
+            srgb_to_linear(rgb[2]) * exposure_factor,
+        ];
+        preserve_linear_highlight_ratios(&mut linear_rgb);
+        for (channel, linear) in rgb.iter_mut().zip(linear_rgb) {
+            *channel = linear_to_srgb(linear.clamp(0.0, 1.0));
         }
 
+        let pre_contrast_luminance =
+            (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
+        let contrast_target =
+            ((pre_contrast_luminance - 0.5) * contrast_factor + 0.5).clamp(0.0, 1.0);
+        remap_luminance_preserving_hue(
+            &mut rgb,
+            pre_contrast_luminance,
+            contrast_target - pre_contrast_luminance,
+        );
+
         let luminance = (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
-        let shadow_mask = (1.0 - luminance).powi(2);
-        let highlight_mask = luminance.powi(2);
+        let shadow_mask = 1.0 - smoothstep(0.08, 0.68, luminance);
+        let highlight_mask = smoothstep(0.32, 0.92, luminance);
         let tone_delta =
             (shadows / 100.0) * shadow_mask * 0.28
             + (highlights / 100.0) * highlight_mask * 0.28;
@@ -99,8 +113,8 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
 
         let post_tone_luminance =
             (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
-        let black_mask = (1.0 - post_tone_luminance).powi(4);
-        let white_mask = post_tone_luminance.powi(4);
+        let black_mask = 1.0 - smoothstep(0.02, 0.38, post_tone_luminance);
+        let white_mask = smoothstep(0.62, 0.98, post_tone_luminance);
         let endpoint_delta =
             (blacks / 100.0) * black_mask * 0.18
             + (whites / 100.0) * white_mask * 0.18;
@@ -120,12 +134,10 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
             0.6 + 0.4 * (1.0 - pixel_saturation)
         };
         let vibrance_factor = (1.0 + (vibrance / 100.0) * vibrance_weight).max(0.0);
-        for channel in &mut rgb {
-            *channel = (toned_luminance + (*channel - toned_luminance) * vibrance_factor)
-                .clamp(0.0, 1.0);
-            *channel = (toned_luminance + (*channel - toned_luminance) * saturation_factor)
-                .clamp(0.0, 1.0);
-        }
+        scale_chroma_with_headroom(&mut rgb, toned_luminance, vibrance_factor);
+        let saturation_luminance =
+            (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
+        scale_chroma_with_headroom(&mut rgb, saturation_luminance, saturation_factor);
 
         output.put_pixel(
             x,
@@ -139,6 +151,47 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
     }
 
     DynamicImage::ImageRgb8(output)
+}
+
+fn preserve_linear_highlight_ratios(rgb: &mut [f32; 3]) {
+    let peak = rgb[0].max(rgb[1]).max(rgb[2]);
+    if peak <= 1.0 {
+        return;
+    }
+    let scale = 1.0 / peak.max(1e-6);
+    for channel in rgb {
+        *channel *= scale;
+    }
+}
+
+fn smoothstep(edge0: f32, edge1: f32, value: f32) -> f32 {
+    if edge1 <= edge0 {
+        return if value >= edge1 { 1.0 } else { 0.0 };
+    }
+    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn scale_chroma_with_headroom(rgb: &mut [f32; 3], luminance: f32, requested_factor: f32) {
+    if (requested_factor - 1.0).abs() < 1e-6 {
+        return;
+    }
+
+    let mut factor = requested_factor.max(0.0);
+    if factor > 1.0 {
+        for channel in rgb.iter() {
+            let delta = *channel - luminance;
+            if delta > 1e-6 {
+                factor = factor.min((1.0 - luminance) / delta);
+            } else if delta < -1e-6 {
+                factor = factor.min(luminance / -delta);
+            }
+        }
+    }
+
+    for channel in rgb {
+        *channel = (luminance + (*channel - luminance) * factor).clamp(0.0, 1.0);
+    }
 }
 
 fn remap_luminance_preserving_hue(rgb: &mut [f32; 3], luminance: f32, delta: f32) {
@@ -285,6 +338,44 @@ mod tests {
     }
 
     #[test]
+    fn positive_exposure_preserves_colored_highlight_channel_order() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(
+            1,
+            1,
+            Rgb([240, 150, 70]),
+        ));
+        let edited = apply_preview_adjustments(source, &recipe(1.0, 0.0, 0.0)).to_rgb8();
+        let pixel = edited.get_pixel(0, 0).0;
+        assert!(pixel[0] > pixel[1] && pixel[1] > pixel[2]);
+        assert!(pixel[1] < 230);
+    }
+
+    #[test]
+    fn contrast_preserves_colored_midpoint_channel_order() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(
+            1,
+            1,
+            Rgb([170, 110, 70]),
+        ));
+        let edited = apply_preview_adjustments(source, &recipe(0.0, 40.0, 0.0)).to_rgb8();
+        let pixel = edited.get_pixel(0, 0).0;
+        assert!(pixel[0] > pixel[1] && pixel[1] > pixel[2]);
+    }
+
+    #[test]
+    fn smooth_tone_masks_are_monotonic_across_luminance() {
+        let shadow_dark = 1.0 - smoothstep(0.08, 0.68, 0.15);
+        let shadow_mid = 1.0 - smoothstep(0.08, 0.68, 0.45);
+        let shadow_bright = 1.0 - smoothstep(0.08, 0.68, 0.80);
+        assert!(shadow_dark > shadow_mid && shadow_mid > shadow_bright);
+
+        let highlight_dark = smoothstep(0.32, 0.92, 0.15);
+        let highlight_mid = smoothstep(0.32, 0.92, 0.60);
+        let highlight_bright = smoothstep(0.32, 0.92, 0.90);
+        assert!(highlight_dark < highlight_mid && highlight_mid < highlight_bright);
+    }
+
+    #[test]
     fn positive_shadows_lift_dark_pixels_more_than_bright_pixels() {
         let source = DynamicImage::ImageRgb8(ImageBuffer::from_fn(2, 1, |x, _| {
             if x == 0 { Rgb([30, 30, 30]) } else { Rgb([200, 200, 200]) }
@@ -388,6 +479,21 @@ mod tests {
             (i16::from(saturated[0]) - i16::from(saturated[1])) - 180;
         assert!(muted_gain > 0);
         assert!(muted_gain > saturated_gain);
+    }
+
+    #[test]
+    fn strong_positive_vibrance_does_not_clip_muted_color_channels() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(
+            1,
+            1,
+            Rgb([210, 185, 170]),
+        ));
+        let mut edit = recipe(0.0, 0.0, 0.0);
+        edit.adjustments.vibrance = Some(100.0);
+        let edited = apply_preview_adjustments(source, &edit).to_rgb8();
+        let pixel = edited.get_pixel(0, 0).0;
+        assert!(pixel.iter().all(|value| *value < 255));
+        assert!(pixel[0] > pixel[1] && pixel[1] > pixel[2]);
     }
 
     #[test]

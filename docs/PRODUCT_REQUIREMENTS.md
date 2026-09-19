@@ -532,3 +532,12 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Final Recipes that still apply more than modest positive color lift to deep low-light frames MUST enter quality Review as LOW_LIGHT_COLOR_LIFT.
 - Final Recipes that apply positive color lift to strongly saturated, moderately clipped highlights MUST enter quality Review as SATURATED_HIGHLIGHT_COLOR.
 - Existing generic SATURATED_COLOR_PRESSURE and STRONG_COLOR_SHIFT checks remain fallback quality gates.
+
+### Review preview perceptual fidelity
+
+- Review preview exposure MUST operate in linear light.
+- When positive exposure would overflow one RGB channel, preview rendering MUST preserve channel ratios rather than independently clipping channels.
+- Contrast MUST change perceived luminance without introducing avoidable RGB-channel hue shifts.
+- Highlights/Shadows and Whites/Blacks SHOULD use smooth overlapping tonal masks rather than hard tonal boundaries.
+- Positive Vibrance/Saturation MUST respect available channel headroom so the embedded-JPEG preview does not invent clipping that is not part of the Recipe intent.
+- Preview behavior MUST remain explicitly approximate; Lightroom/Camera Raw is the authority for RAW rendering and final appearance.

@@ -8,7 +8,7 @@ use photo_core::{
     ClassificationStore, CompanionDecisionPatch, CompanionPatchApplyReport, CompanionSnapshot,
     CompanionSnapshotStore, CullingDecision, CullingReview, CullingReviewStore, CullingUserDecision,
     ExposureBracketMergeStore, ExposureBracketSet, GroupCullingResult, GroupReferenceBinding,
-    MomentQuickCullPlan,
+    MomentQuickCullOperation, MomentQuickCullPlan,
     JobStatus, ModelBundleManifest, ModelPlatform,
     PhotoGroup, PreviewArtifact, PreviewStore, RawAsset, RawCatalog, RawImportResult, RawImporter,
     RawMetadataStore, Recipe, RecipeReviewOverride, RecipeReviewSignal, RecipeReviewStore,
@@ -134,6 +134,7 @@ struct RecipeReviewBatchResult {
 struct MomentQuickCullBatchResult {
     group_ids: Vec<Uuid>,
     reviews: Vec<CullingReview>,
+    operation: MomentQuickCullOperation,
 }
 
 #[derive(Clone, Serialize)]
@@ -982,6 +983,18 @@ fn batch_culling_reviews(
 }
 
 #[tauri::command]
+fn batch_latest_moment_quick_cull(
+    batch_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<MomentQuickCullOperation>, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    state
+        .culling_reviews
+        .latest_moment_quick_cull(batch_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn set_culling_review(
     asset_id: String,
     decision: Option<CullingUserDecision>,
@@ -1109,15 +1122,84 @@ fn confirm_moment_quick_cull(
         resolved_group_ids.push(group_id);
     }
 
-    state
+    let operation = state
         .culling_reviews
-        .set_many(&reviews)
+        .set_many_as_moment_quick_cull(batch_id, &resolved_group_ids, &reviews)
         .map_err(|error| error.to_string())?;
 
     Ok(MomentQuickCullBatchResult {
         group_ids: resolved_group_ids,
         reviews,
+        operation,
     })
+}
+
+#[tauri::command]
+fn undo_moment_quick_cull(
+    batch_id: String,
+    operation_id: String,
+    state: State<'_, AppState>,
+) -> Result<MomentQuickCullOperation, String> {
+    let batch_id = parse_batch_id(&batch_id)?;
+    let operation_id = Uuid::parse_str(&operation_id)
+        .map_err(|error| format!("invalid quick-cull operation id: {error}"))?;
+
+    let latest = state
+        .culling_reviews
+        .latest_moment_quick_cull(batch_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("no Moment quick-cull operation exists for batch {batch_id}"))?;
+    if latest.operation_id != operation_id {
+        return Err(format!(
+            "only the latest Moment quick-cull operation can be undone; latest is {}",
+            latest.operation_id
+        ));
+    }
+
+    let groups = state
+        .catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let groups_by_id = groups
+        .into_iter()
+        .map(|group| (group.id, group))
+        .collect::<HashMap<_, _>>();
+    let mut operation_assets = HashSet::new();
+
+    for group_id in &latest.group_ids {
+        let group = groups_by_id.get(group_id).ok_or_else(|| {
+            format!(
+                "Moment quick-cull group {group_id} changed since the operation; undo is blocked"
+            )
+        })?;
+        if state
+            .reference_store
+            .group_binding(*group_id)
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Err(format!(
+                "group {group_id} already has a Reference; clear downstream Reference work before undoing Quick Cull"
+            ));
+        }
+        operation_assets.extend(group.asset_ids.iter().copied());
+    }
+
+    if latest
+        .reviews
+        .iter()
+        .any(|review| !operation_assets.contains(&review.asset_id))
+    {
+        return Err(
+            "Moment quick-cull group membership changed since the operation; undo is blocked"
+                .to_string(),
+        );
+    }
+
+    state
+        .culling_reviews
+        .undo_moment_quick_cull(operation_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2350,9 +2432,11 @@ pub fn run() {
             batch_workflow_status,
             batch_culling,
             batch_culling_reviews,
+            batch_latest_moment_quick_cull,
             set_culling_review,
             set_culling_reviews,
             confirm_moment_quick_cull,
+            undo_moment_quick_cull,
             batch_reference_bindings,
             set_group_references,
             set_group_reference,

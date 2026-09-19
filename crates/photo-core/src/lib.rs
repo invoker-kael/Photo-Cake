@@ -71,6 +71,7 @@ pub use culling::{
 };
 pub use culling_store::{
     CullingReview, CullingReviewStore, CullingReviewStoreError, CullingUserDecision,
+    MomentQuickCullOperation,
 };
 pub use companion::{
     apply_companion_patch, build_companion_decision_patch, build_companion_snapshot,

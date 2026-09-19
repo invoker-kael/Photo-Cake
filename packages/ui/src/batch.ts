@@ -154,6 +154,13 @@ export interface BackendRawImportResult extends BackendPhotoContext {
 
 export type CullingDecision = "KEEP" | "REVIEW" | "REJECT_SUGGESTION";
 export type CullingUserDecision = "KEEP" | "REVIEW" | "REJECT";
+export type BackendSceneTag =
+  | "LANDSCAPE"
+  | "ARCHITECTURE"
+  | "FOOD"
+  | "NIGHT"
+  | "DOCUMENT"
+  | "OTHER";
 export type CullingReason =
   | "STRONG_TECHNICAL_CANDIDATE"
   | "LOW_SHARPNESS"
@@ -194,6 +201,8 @@ export interface BackendCullingRecommendation {
   group_rank: number;
   reasons?: CullingReason[];
   portrait_evidence?: BackendCullingPortraitEvidence | null;
+  duplicate_similarity?: number | null;
+  scene_tags?: BackendSceneTag[];
 }
 
 export interface BackendMomentQuickCullPlan {
@@ -204,6 +213,9 @@ export interface BackendMomentQuickCullPlan {
   reject_asset_ids: string[];
   contains_people: boolean;
   people_evidence_complete: boolean;
+  scene_evidence_complete: boolean;
+  scene_consistent: boolean;
+  shared_scene_tags: BackendSceneTag[];
 }
 
 export interface BackendGroupCullingResult {
@@ -219,9 +231,18 @@ export interface BackendCullingReview {
   decision: CullingUserDecision;
 }
 
+export interface BackendMomentQuickCullOperation {
+  operation_id: string;
+  batch_id: string;
+  group_ids: string[];
+  reviews: BackendCullingReview[];
+  created_at_unix_ms: number;
+}
+
 export interface BackendMomentQuickCullBatchResult {
   group_ids: string[];
   reviews: BackendCullingReview[];
+  operation: BackendMomentQuickCullOperation;
 }
 
 export interface BackendReferenceBinding {
@@ -372,12 +393,19 @@ export interface PhotoCakeBridge {
   ): Promise<BackendPhotoGroup[]>;
   loadCulling?(batchId: string): Promise<BackendGroupCullingResult[]>;
   loadCullingReviews?(batchId: string): Promise<BackendCullingReview[]>;
+  loadLatestMomentQuickCull?(
+    batchId: string,
+  ): Promise<BackendMomentQuickCullOperation | null>;
   setCullingReview?(assetId: string, decision: CullingUserDecision | null): Promise<void>;
   setCullingReviews?(reviews: BackendCullingReview[]): Promise<void>;
   confirmMomentQuickCull?(
     batchId: string,
     groupIds: string[],
   ): Promise<BackendMomentQuickCullBatchResult>;
+  undoMomentQuickCull?(
+    batchId: string,
+    operationId: string,
+  ): Promise<BackendMomentQuickCullOperation>;
   loadReferenceBindings?(batchId: string): Promise<BackendReferenceBinding[]>;
   setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
   setGroupReferences?(

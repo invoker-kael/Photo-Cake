@@ -463,3 +463,7 @@ Analyze -> Group-relative Cull evidence -> Moment Quick Cull (explicit)
 ```
 
 A `Review` result is intentionally not equivalent to approval. It clears the initial selection ambiguity while keeping that frame in the later exception workflow. This is especially important for family photography, where the technically strongest frame may not contain the preferred expression.
+
+Quick Cull is scene-aware rather than portrait-only. The existing segmentation/classification artifact also carries scene tags such as Landscape, Architecture, Food and Night. Those tags and the exact embedding near-match value are surfaced on each Cull recommendation. For a non-people group, automatic Reject requires all of the following: complete scene evidence, a shared scene tag across the moment, embedding similarity of at least 0.985, and the existing material quality gap. Mixed/unknown scenes remain Review. This makes scenic travel bursts conservative while still collapsing truly redundant frames.
+
+Each applied Quick Cull batch is recorded transactionally with its batch/group scope, exact written decisions and write timestamp. The workstation exposes only the latest operation for Undo. Undo is refused if group topology changed, a downstream Reference now exists, or any recorded decision was modified after Quick Cull—even if the photographer later changed it back to the same label. A successful Undo removes only the decisions written by that operation and returns those photos to the ordinary AI-suggestion flow.

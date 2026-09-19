@@ -10,6 +10,15 @@ CREATE TABLE IF NOT EXISTS culling_reviews (
     decision TEXT NOT NULL,
     updated_at_unix_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS moment_quick_cull_operations (
+    operation_id TEXT PRIMARY KEY NOT NULL,
+    batch_id TEXT NOT NULL,
+    group_ids_json TEXT NOT NULL,
+    reviews_json TEXT NOT NULL,
+    created_at_unix_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_moment_quick_cull_batch_created
+    ON moment_quick_cull_operations(batch_id, created_at_unix_ms DESC);
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +35,15 @@ pub struct CullingReview {
     pub decision: CullingUserDecision,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MomentQuickCullOperation {
+    pub operation_id: Uuid,
+    pub batch_id: Uuid,
+    pub group_ids: Vec<Uuid>,
+    pub reviews: Vec<CullingReview>,
+    pub created_at_unix_ms: i64,
+}
+
 #[derive(Debug, Error)]
 pub enum CullingReviewStoreError {
     #[error("sqlite error: {0}")]
@@ -34,8 +52,14 @@ pub enum CullingReviewStoreError {
     Io(#[from] std::io::Error),
     #[error("invalid uuid in culling review store: {0}")]
     Uuid(#[from] uuid::Error),
+    #[error("serialization error: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("invalid culling decision in store: {0}")]
     InvalidDecision(String),
+    #[error("moment quick-cull operation not found: {0}")]
+    OperationNotFound(Uuid),
+    #[error("moment quick-cull operation is stale because photographer decisions changed: {0}")]
+    OperationStale(Uuid),
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +132,153 @@ impl CullingReviewStore {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn set_many_as_moment_quick_cull(
+        &self,
+        batch_id: Uuid,
+        group_ids: &[Uuid],
+        reviews: &[CullingReview],
+    ) -> Result<MomentQuickCullOperation, CullingReviewStoreError> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        let created_at_unix_ms = unix_time_ms();
+        let operation = MomentQuickCullOperation {
+            operation_id: Uuid::new_v4(),
+            batch_id,
+            group_ids: group_ids.to_vec(),
+            reviews: reviews.to_vec(),
+            created_at_unix_ms,
+        };
+
+        for review in reviews {
+            tx.execute(
+                "INSERT INTO culling_reviews (asset_id, decision, updated_at_unix_ms)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(asset_id) DO UPDATE SET
+                     decision = excluded.decision,
+                     updated_at_unix_ms = excluded.updated_at_unix_ms",
+                params![
+                    review.asset_id.to_string(),
+                    decision_to_db(review.decision),
+                    created_at_unix_ms
+                ],
+            )?;
+        }
+        tx.execute(
+            "INSERT INTO moment_quick_cull_operations
+             (operation_id, batch_id, group_ids_json, reviews_json, created_at_unix_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                operation.operation_id.to_string(),
+                batch_id.to_string(),
+                serde_json::to_string(group_ids)?,
+                serde_json::to_string(reviews)?,
+                created_at_unix_ms,
+            ],
+        )?;
+        tx.commit()?;
+        Ok(operation)
+    }
+
+    pub fn latest_moment_quick_cull(
+        &self,
+        batch_id: Uuid,
+    ) -> Result<Option<MomentQuickCullOperation>, CullingReviewStoreError> {
+        let conn = self.connect()?;
+        let row = conn
+            .query_row(
+                "SELECT operation_id, group_ids_json, reviews_json, created_at_unix_ms
+                 FROM moment_quick_cull_operations
+                 WHERE batch_id = ?1
+                 ORDER BY created_at_unix_ms DESC, rowid DESC
+                 LIMIT 1",
+                [batch_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        row.map(|(operation_id, group_ids_json, reviews_json, created_at_unix_ms)| {
+            Ok(MomentQuickCullOperation {
+                operation_id: Uuid::parse_str(&operation_id)?,
+                batch_id,
+                group_ids: serde_json::from_str(&group_ids_json)?,
+                reviews: serde_json::from_str(&reviews_json)?,
+                created_at_unix_ms,
+            })
+        })
+        .transpose()
+    }
+
+    pub fn undo_moment_quick_cull(
+        &self,
+        operation_id: Uuid,
+    ) -> Result<MomentQuickCullOperation, CullingReviewStoreError> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        let row = tx
+            .query_row(
+                "SELECT batch_id, group_ids_json, reviews_json, created_at_unix_ms
+                 FROM moment_quick_cull_operations
+                 WHERE operation_id = ?1",
+                [operation_id.to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ))
+                },
+            )
+            .optional()?
+            .ok_or(CullingReviewStoreError::OperationNotFound(operation_id))?;
+
+        let operation = MomentQuickCullOperation {
+            operation_id,
+            batch_id: Uuid::parse_str(&row.0)?,
+            group_ids: serde_json::from_str(&row.1)?,
+            reviews: serde_json::from_str(&row.2)?,
+            created_at_unix_ms: row.3,
+        };
+
+        for review in &operation.reviews {
+            let current = tx
+                .query_row(
+                    "SELECT decision, updated_at_unix_ms FROM culling_reviews WHERE asset_id = ?1",
+                    [review.asset_id.to_string()],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .optional()?;
+            let Some((current_decision, current_updated_at)) = current else {
+                return Err(CullingReviewStoreError::OperationStale(operation_id));
+            };
+            if decision_from_db(&current_decision)? != review.decision
+                || current_updated_at != operation.created_at_unix_ms
+            {
+                return Err(CullingReviewStoreError::OperationStale(operation_id));
+            }
+        }
+
+        for review in &operation.reviews {
+            tx.execute(
+                "DELETE FROM culling_reviews WHERE asset_id = ?1",
+                [review.asset_id.to_string()],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM moment_quick_cull_operations WHERE operation_id = ?1",
+            [operation_id.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(operation)
     }
 
     pub fn clear(&self, asset_id: Uuid) -> Result<(), CullingReviewStoreError> {
@@ -239,6 +410,107 @@ mod tests {
         assert_eq!(
             store.get(reject).unwrap().unwrap().decision,
             CullingUserDecision::Reject
+        );
+    }
+
+    #[test]
+    fn quick_cull_operation_round_trips_and_undoes_atomically() {
+        let dir = tempdir().unwrap();
+        let store = CullingReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let batch_id = Uuid::new_v4();
+        let group_id = Uuid::new_v4();
+        let keep = Uuid::new_v4();
+        let review = Uuid::new_v4();
+        let reviews = vec![
+            CullingReview {
+                asset_id: keep,
+                decision: CullingUserDecision::Keep,
+            },
+            CullingReview {
+                asset_id: review,
+                decision: CullingUserDecision::Review,
+            },
+        ];
+
+        let operation = store
+            .set_many_as_moment_quick_cull(batch_id, &[group_id], &reviews)
+            .unwrap();
+        assert_eq!(
+            store.latest_moment_quick_cull(batch_id).unwrap(),
+            Some(operation.clone())
+        );
+        assert_eq!(store.get(keep).unwrap().unwrap().decision, CullingUserDecision::Keep);
+
+        let undone = store
+            .undo_moment_quick_cull(operation.operation_id)
+            .unwrap();
+        assert_eq!(undone, operation);
+        assert!(store.get(keep).unwrap().is_none());
+        assert!(store.get(review).unwrap().is_none());
+        assert!(store.latest_moment_quick_cull(batch_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn quick_cull_undo_refuses_to_erase_later_photographer_changes() {
+        let dir = tempdir().unwrap();
+        let store = CullingReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let asset_id = Uuid::new_v4();
+        let operation = store
+            .set_many_as_moment_quick_cull(
+                Uuid::new_v4(),
+                &[Uuid::new_v4()],
+                &[CullingReview {
+                    asset_id,
+                    decision: CullingUserDecision::Review,
+                }],
+            )
+            .unwrap();
+
+        store.set(asset_id, CullingUserDecision::Keep).unwrap();
+        assert!(matches!(
+            store.undo_moment_quick_cull(operation.operation_id),
+            Err(CullingReviewStoreError::OperationStale(id)) if id == operation.operation_id
+        ));
+        assert_eq!(
+            store.get(asset_id).unwrap().unwrap().decision,
+            CullingUserDecision::Keep
+        );
+    }
+
+    #[test]
+    fn quick_cull_history_is_scoped_to_batch() {
+        let dir = tempdir().unwrap();
+        let store = CullingReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let first_batch = Uuid::new_v4();
+        let second_batch = Uuid::new_v4();
+        let first = store
+            .set_many_as_moment_quick_cull(
+                first_batch,
+                &[Uuid::new_v4()],
+                &[CullingReview {
+                    asset_id: Uuid::new_v4(),
+                    decision: CullingUserDecision::Keep,
+                }],
+            )
+            .unwrap();
+        let second = store
+            .set_many_as_moment_quick_cull(
+                second_batch,
+                &[Uuid::new_v4()],
+                &[CullingReview {
+                    asset_id: Uuid::new_v4(),
+                    decision: CullingUserDecision::Review,
+                }],
+            )
+            .unwrap();
+
+        assert_eq!(
+            store.latest_moment_quick_cull(first_batch).unwrap(),
+            Some(first)
+        );
+        assert_eq!(
+            store.latest_moment_quick_cull(second_batch).unwrap(),
+            Some(second)
         );
     }
 

@@ -14,6 +14,7 @@ import App, {
   type BackendLightroomHandoffPreflight,
   type BackendLightroomHandoffResult,
   type BackendMomentQuickCullBatchResult,
+  type BackendMomentQuickCullOperation,
   type BackendPhotoContext,
   type BackendRawImportResult,
   type BackendReferenceBatchItem,
@@ -83,6 +84,10 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendGroupCullingResult[]>("batch_culling", { batchId }),
   loadCullingReviews: (batchId) =>
     invoke<BackendCullingReview[]>("batch_culling_reviews", { batchId }),
+  loadLatestMomentQuickCull: (batchId) =>
+    invoke<BackendMomentQuickCullOperation | null>("batch_latest_moment_quick_cull", {
+      batchId,
+    }),
   setCullingReview: (assetId, decision) =>
     invoke<void>("set_culling_review", { assetId, decision }),
   setCullingReviews: (reviews) =>
@@ -91,6 +96,11 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendMomentQuickCullBatchResult>("confirm_moment_quick_cull", {
       batchId,
       groupIds,
+    }),
+  undoMomentQuickCull: (batchId, operationId) =>
+    invoke<BackendMomentQuickCullOperation>("undo_moment_quick_cull", {
+      batchId,
+      operationId,
     }),
   loadReferenceBindings: (batchId) =>
     invoke<BackendReferenceBinding[]>("batch_reference_bindings", { batchId }),

@@ -11,6 +11,7 @@ import {
   type BackendLightroomHandoffPreflight,
   type BackendLightroomHandoffResult,
   type BackendMomentQuickCullBatchResult,
+  type BackendMomentQuickCullOperation,
   type BackendPhotoContext,
   type BackendRawMetadataEvidence,
   type BackendReferenceBatchItem,
@@ -26,6 +27,7 @@ import {
   type BackendSemanticRefinementReport,
   type BackendWorkflowStatus,
   type BackendStyleProfile,
+  type BackendSceneTag,
   type BatchJob,
   type BatchStage,
   type CullingDecision,
@@ -46,6 +48,7 @@ export type {
   BackendLightroomHandoffPreflight,
   BackendLightroomHandoffResult,
   BackendMomentQuickCullBatchResult,
+  BackendMomentQuickCullOperation,
   BackendPhotoContext,
   BackendRawImportResult,
   BackendReferenceBatchItem,
@@ -202,6 +205,18 @@ function cullingReasonLabel(reason: CullingReason) {
   return labels[reason];
 }
 
+function sceneTagLabel(tag: BackendSceneTag) {
+  const labels: Record<BackendSceneTag, string> = {
+    LANDSCAPE: "Landscape",
+    ARCHITECTURE: "Architecture",
+    FOOD: "Food",
+    NIGHT: "Night",
+    DOCUMENT: "Document",
+    OTHER: "Other",
+  };
+  return labels[tag];
+}
+
 function signed(value: number, decimals = 1) {
   return `${value > 0 ? "+" : ""}${value.toFixed(decimals)}`;
 }
@@ -287,6 +302,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [cullBatchUpdating, setCullBatchUpdating] = useState(false);
   const [momentQuickCullTargets, setMomentQuickCullTargets] = useState<string[]>([]);
   const [momentQuickCullUpdating, setMomentQuickCullUpdating] = useState(false);
+  const [momentQuickCullUndoing, setMomentQuickCullUndoing] = useState(false);
+  const [latestMomentQuickCull, setLatestMomentQuickCull] =
+    useState<BackendMomentQuickCullOperation | null>(null);
   const [momentQuickCullNote, setMomentQuickCullNote] = useState<string | null>(null);
   const [groupRevision, setGroupRevision] = useState(0);
   const [groupRefining, setGroupRefining] = useState(false);
@@ -463,6 +481,27 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         setCullingReviews(
           Object.fromEntries(reviews.map((review) => [review.asset_id, review.decision])),
         );
+      })
+      .catch((error: unknown) => {
+        if (!disposed) setBackendError(String(error));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [activeBatchId, bridge, groupRevision]);
+
+  useEffect(() => {
+    if (!bridge?.loadLatestMomentQuickCull || !activeBatchId) {
+      setLatestMomentQuickCull(null);
+      return;
+    }
+
+    let disposed = false;
+    bridge
+      .loadLatestMomentQuickCull(activeBatchId)
+      .then((operation) => {
+        if (!disposed) setLatestMomentQuickCull(operation);
       })
       .catch((error: unknown) => {
         if (!disposed) setBackendError(String(error));
@@ -906,21 +945,35 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const selectedMomentQuickCullGroups = momentQuickCullEligibleGroups.filter((group) =>
     momentQuickCullTargets.includes(group.group_id),
   );
-  const selectedMomentQuickCullPhotoCount = selectedMomentQuickCullGroups.reduce(
+  const selectedMomentQuickCullCounts = selectedMomentQuickCullGroups.reduce(
     (total, group) => {
       const plan = group.moment_quick_cull!;
-      return total +
-        plan.keep_asset_ids.length +
-        plan.review_asset_ids.length +
-        plan.reject_asset_ids.length;
+      total.keep += plan.keep_asset_ids.length;
+      total.review += plan.review_asset_ids.length;
+      total.reject += plan.reject_asset_ids.length;
+      return total;
     },
-    0,
+    { keep: 0, review: 0, reject: 0 },
   );
+  const selectedMomentQuickCullPhotoCount =
+    selectedMomentQuickCullCounts.keep +
+    selectedMomentQuickCullCounts.review +
+    selectedMomentQuickCullCounts.reject;
   const momentQuickCullPeopleGroupCount = momentQuickCullEligibleGroups.filter(
     (group) => group.moment_quick_cull?.contains_people,
   ).length;
+  const momentQuickCullLandscapeGroupCount = momentQuickCullEligibleGroups.filter(
+    (group) => group.moment_quick_cull?.shared_scene_tags.includes("LANDSCAPE"),
+  ).length;
   const momentQuickCullConservativeGroupCount = momentQuickCullEligibleGroups.filter(
-    (group) => group.moment_quick_cull?.people_evidence_complete === false,
+    (group) => {
+      const plan = group.moment_quick_cull;
+      return !!plan && (
+        !plan.people_evidence_complete ||
+        !plan.scene_evidence_complete ||
+        (!plan.contains_people && !plan.scene_consistent)
+      );
+    },
   ).length;
 
   const visibleCulling = useMemo(() => {
@@ -1297,6 +1350,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         ),
       }));
       setMomentQuickCullTargets([]);
+      setLatestMomentQuickCull(result.operation);
       const keepCount = result.reviews.filter((review) => review.decision === "KEEP").length;
       const reviewCount = result.reviews.filter((review) => review.decision === "REVIEW").length;
       const rejectCount = result.reviews.filter((review) => review.decision === "REJECT").length;
@@ -1309,6 +1363,45 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       setBackendError(String(error));
     } finally {
       setMomentQuickCullUpdating(false);
+    }
+  };
+
+  const undoLatestMomentQuickCull = async () => {
+    if (
+      !bridge?.undoMomentQuickCull ||
+      !activeBatch ||
+      !latestMomentQuickCull
+    ) {
+      return;
+    }
+
+    setMomentQuickCullUndoing(true);
+    setMomentQuickCullNote(null);
+    try {
+      const undone = await bridge.undoMomentQuickCull(
+        activeBatch.id,
+        latestMomentQuickCull.operation_id,
+      );
+      setCullingReviews((current) => {
+        const next = { ...current };
+        undone.reviews.forEach((review) => delete next[review.asset_id]);
+        return next;
+      });
+      setLatestMomentQuickCull(
+        bridge.loadLatestMomentQuickCull
+          ? await bridge.loadLatestMomentQuickCull(activeBatch.id)
+          : null,
+      );
+      setMomentQuickCullTargets([]);
+      setMomentQuickCullNote(
+        `Undid Quick Cull for ${undone.group_ids.length} moments and restored ${undone.reviews.length} photos to AI suggestions.`,
+      );
+      setEditedPreviews({});
+      setBackendError(null);
+    } catch (error) {
+      setBackendError(String(error));
+    } finally {
+      setMomentQuickCullUndoing(false);
     }
   };
 
@@ -2045,7 +2138,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         </div>
         {mode === "workstation" &&
           bridge?.confirmMomentQuickCull &&
-          momentQuickCullEligibleGroups.length > 0 && (
+          (momentQuickCullEligibleGroups.length > 0 || latestMomentQuickCull) && (
             <div className="reference-batch-setup">
               <div className="reference-batch-setup-head">
                 <div>
@@ -2053,22 +2146,30 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   <strong>Best frame → Keep · uncertain alternates → Review · only clear non-people duplicates → Reject</strong>
                 </div>
                 <small>
-                  Uses the existing group-relative Cull evidence only. People/family alternates are never batch-Rejected here, HDR brackets and analysis-pending groups are excluded, and any group with an existing photographer decision or Reference stays individual work.
+                  Uses the existing group-relative Cull evidence only. People/family alternates are never batch-Rejected. Landscape and other scene photos can be auto-Rejected only when scene evidence agrees, embedding similarity is at least 98.5%, and the primary has a material quality lead. HDR brackets and analysis-pending groups remain individual work.
                 </small>
               </div>
               <div className="reference-batch-setup-status">
                 <span>{momentQuickCullEligibleGroups.length} eligible moments</span>
-                <span>{momentQuickCullPeopleGroupCount} people-safe</span>
+                <span>{momentQuickCullPeopleGroupCount} people-protected</span>
+                <span>{momentQuickCullLandscapeGroupCount} landscape moments</span>
                 {momentQuickCullConservativeGroupCount > 0 && (
-                  <span>{momentQuickCullConservativeGroupCount} people evidence incomplete · no auto Reject</span>
+                  <span>{momentQuickCullConservativeGroupCount} conservative · alternates stay Review</span>
                 )}
                 <span>{selectedMomentQuickCullGroups.length} selected</span>
-                <span>{selectedMomentQuickCullPhotoCount} photos affected</span>
+                <span>
+                  {selectedMomentQuickCullPhotoCount} photos · {selectedMomentQuickCullCounts.keep} Keep / {selectedMomentQuickCullCounts.review} Review / {selectedMomentQuickCullCounts.reject} Reject
+                </span>
+                {latestMomentQuickCull && (
+                  <span>
+                    Undo available · {latestMomentQuickCull.group_ids.length} moments / {latestMomentQuickCull.reviews.length} photos
+                  </span>
+                )}
               </div>
               <div className="batch-look-actions reference-batch-actions">
                 <button
                   className="review-choice clear"
-                  disabled={momentQuickCullUpdating}
+                  disabled={momentQuickCullUpdating || momentQuickCullEligibleGroups.length === 0}
                   onClick={() =>
                     setMomentQuickCullTargets(
                       momentQuickCullEligibleGroups.map((group) => group.group_id),
@@ -2088,6 +2189,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   className="button primary"
                   disabled={
                     momentQuickCullUpdating ||
+                    momentQuickCullUndoing ||
                     selectedMomentQuickCullGroups.length === 0
                   }
                   onClick={() => void confirmSelectedMomentQuickCull()}
@@ -2096,13 +2198,23 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     ? "Quick-culling selected moments…"
                     : `Apply to ${selectedMomentQuickCullGroups.length} moments`}
                 </button>
+                {latestMomentQuickCull && bridge?.undoMomentQuickCull && (
+                  <button
+                    className="review-choice clear"
+                    disabled={momentQuickCullUpdating || momentQuickCullUndoing}
+                    onClick={() => void undoLatestMomentQuickCull()}
+                    title="Undo is transactional and is blocked if any Quick Cull decision, group membership, or downstream Reference changed."
+                  >
+                    {momentQuickCullUndoing ? "Undoing…" : "Undo last Quick Cull"}
+                  </button>
+                )}
               </div>
               {momentQuickCullNote && (
                 <small className="success-text">{momentQuickCullNote}</small>
               )}
             </div>
           )}
-        {momentQuickCullNote && momentQuickCullEligibleGroups.length === 0 && (
+        {momentQuickCullNote && momentQuickCullEligibleGroups.length === 0 && !latestMomentQuickCull && (
           <div className="group-refine-note">{momentQuickCullNote}</div>
         )}
         {cullingLoading && <div className="panel-note">Refreshing cached culling evidence…</div>}
@@ -2144,9 +2256,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       Quick-cull moment
                       {group.moment_quick_cull?.contains_people
                         ? " · people alternates stay Review"
-                        : group.moment_quick_cull?.people_evidence_complete === false
-                          ? " · people evidence incomplete · alternates stay Review"
-                          : ""}
+                        : !group.moment_quick_cull?.scene_evidence_complete
+                          ? " · scene evidence incomplete · alternates stay Review"
+                          : !group.moment_quick_cull?.scene_consistent
+                            ? " · mixed/unknown scene · alternates stay Review"
+                            : group.moment_quick_cull?.shared_scene_tags.includes("LANDSCAPE")
+                              ? " · landscape guard · only ≥98.5% near duplicates can Reject"
+                              : ` · scene guard: ${(group.moment_quick_cull?.shared_scene_tags ?? []).map(sceneTagLabel).join(", ")}`}
                     </span>
                   </label>
                 )}
@@ -2176,6 +2292,16 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         {!!item.reasons?.length && (
                           <small className="cull-reasons">
                             {item.reasons.map(cullingReasonLabel).join(" · ")}
+                          </small>
+                        )}
+                        {item.duplicate_similarity != null && (
+                          <small>
+                            Near-match evidence {Math.round(item.duplicate_similarity * 1000) / 10}%
+                          </small>
+                        )}
+                        {!!item.scene_tags?.length && (
+                          <small>
+                            Scene {item.scene_tags.map(sceneTagLabel).join(" · ")}
                           </small>
                         )}
                         {item.portrait_evidence && (

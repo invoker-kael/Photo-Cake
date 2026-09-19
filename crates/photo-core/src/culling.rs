@@ -7,7 +7,7 @@
 use crate::{
     detect_exposure_brackets, embedding_similarity, AnalysisCache, AnalysisCacheError,
     ClassificationSignals, ExposureBracketError, ExposureBracketSet, ImageEmbedding, InferenceTask,
-    PhotoGroup,
+    PhotoGroup, SceneTag,
 };
 use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const QUICK_CULL_DUPLICATE_QUALITY_GAP: f32 = 0.08;
+const QUICK_CULL_SCENE_DUPLICATE_SIMILARITY: f32 = 0.985;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CullingScore {
@@ -96,6 +97,10 @@ pub struct CullingRecommendation {
     pub reasons: Vec<CullingReason>,
     #[serde(default)]
     pub portrait_evidence: Option<CullingPortraitEvidence>,
+    #[serde(default)]
+    pub duplicate_similarity: Option<f32>,
+    #[serde(default)]
+    pub scene_tags: Vec<SceneTag>,
 }
 
 pub fn suggest_decision(score: &CullingScore) -> CullingDecision {
@@ -172,6 +177,8 @@ pub fn rank_group_candidates(candidates: &[CullingCandidate]) -> Vec<CullingReco
                 group_rank: rank + 1,
                 reasons: recommendation_reasons(&candidate.score, decision),
                 portrait_evidence: None,
+                duplicate_similarity: candidate.score.duplicate_similarity,
+                scene_tags: Vec::new(),
             }
         })
         .collect()
@@ -288,6 +295,10 @@ pub struct MomentQuickCullPlan {
     pub reject_asset_ids: Vec<Uuid>,
     pub contains_people: bool,
     pub people_evidence_complete: bool,
+    pub scene_evidence_complete: bool,
+    pub scene_consistent: bool,
+    #[serde(default)]
+    pub shared_scene_tags: Vec<SceneTag>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -308,6 +319,7 @@ pub fn build_moment_quick_cull_plan(
     pending_asset_ids: &[Uuid],
     exposure_brackets: &[ExposureBracketSet],
     people_evidence_complete: bool,
+    scene_evidence_complete: bool,
 ) -> Option<MomentQuickCullPlan> {
     if recommendations.len() < 2
         || !pending_asset_ids.is_empty()
@@ -328,6 +340,11 @@ pub fn build_moment_quick_cull_plan(
             evidence.person_count > 0 || evidence.face_count > 0
         })
     });
+    let mut shared_scene_tags = primary.scene_tags.clone();
+    for item in recommendations {
+        shared_scene_tags.retain(|tag| item.scene_tags.contains(tag));
+    }
+    let scene_consistent = scene_evidence_complete && !shared_scene_tags.is_empty();
     let mut review_asset_ids = Vec::new();
     let mut reject_asset_ids = Vec::new();
 
@@ -341,10 +358,23 @@ pub fn build_moment_quick_cull_plan(
         let duplicate_with_material_gap =
             item.reasons.contains(&CullingReason::NearDuplicate)
                 && item.decision != CullingDecision::Keep
+                && item
+                    .duplicate_similarity
+                    .is_some_and(|value| value >= QUICK_CULL_SCENE_DUPLICATE_SIMILARITY)
                 && primary.quality_score - item.quality_score
                     >= QUICK_CULL_DUPLICATE_QUALITY_GAP;
+        let same_supported_scene = scene_consistent
+            && item
+                .scene_tags
+                .iter()
+                .any(|tag| shared_scene_tags.contains(tag));
 
-        if people_evidence_complete && !contains_people && duplicate_with_material_gap {
+        if people_evidence_complete
+            && scene_evidence_complete
+            && !contains_people
+            && same_supported_scene
+            && duplicate_with_material_gap
+        {
             reject_asset_ids.push(item.asset_id);
         } else {
             review_asset_ids.push(item.asset_id);
@@ -359,6 +389,9 @@ pub fn build_moment_quick_cull_plan(
         reject_asset_ids,
         contains_people,
         people_evidence_complete,
+        scene_evidence_complete,
+        scene_consistent,
+        shared_scene_tags,
     })
 }
 
@@ -385,7 +418,9 @@ pub fn build_group_culling_result(
     let mut candidates = Vec::new();
     let mut embeddings = Vec::new();
     let mut portrait_evidence = HashMap::new();
+    let mut scene_tags = HashMap::new();
     let mut people_evidence_complete = true;
+    let mut scene_evidence_complete = true;
     let mut pending_asset_ids = Vec::new();
 
     for asset_id in &group.asset_ids {
@@ -435,6 +470,7 @@ pub fn build_group_culling_result(
                         asset_id: *asset_id,
                         source,
                     })?;
+                scene_tags.insert(*asset_id, signals.scene_tags.clone());
                 if signals.detected_person_count > 0 || signals.detected_face_count > 0 {
                     portrait_evidence.insert(
                         *asset_id,
@@ -447,7 +483,10 @@ pub fn build_group_culling_result(
                     );
                 }
             }
-            None => people_evidence_complete = false,
+            None => {
+                people_evidence_complete = false;
+                scene_evidence_complete = false;
+            }
         }
     }
 
@@ -460,6 +499,10 @@ pub fn build_group_culling_result(
         recommendation.portrait_evidence = portrait_evidence
             .get(&recommendation.asset_id)
             .cloned();
+        recommendation.scene_tags = scene_tags
+            .get(&recommendation.asset_id)
+            .cloned()
+            .unwrap_or_default();
     }
 
     let exposure_brackets = detect_exposure_brackets(cache, group)?;
@@ -470,6 +513,7 @@ pub fn build_group_culling_result(
         &pending_asset_ids,
         &exposure_brackets,
         people_evidence_complete,
+        scene_evidence_complete,
     );
 
     Ok(GroupCullingResult {
@@ -603,6 +647,7 @@ mod tests {
             .find(|item| item.asset_id == near_duplicate)
             .unwrap();
         assert_eq!(duplicate.decision, CullingDecision::Review);
+        assert!(duplicate.duplicate_similarity.is_some_and(|value| value >= 0.98));
         let distinct = ranked.iter().find(|item| item.asset_id == different).unwrap();
         assert_eq!(distinct.decision, CullingDecision::Keep);
     }
@@ -805,13 +850,21 @@ mod tests {
             quality_score,
             decision,
             group_rank: rank,
-            reasons,
+            reasons: reasons.clone(),
             portrait_evidence: people.then_some(CullingPortraitEvidence {
                 person_count: 1,
                 face_count: 1,
                 primary_subject_ratio: 0.4,
                 people_confidence: 0.95,
             }),
+            duplicate_similarity: reasons
+                .contains(&CullingReason::NearDuplicate)
+                .then_some(0.995),
+            scene_tags: if people {
+                Vec::new()
+            } else {
+                vec![SceneTag::Landscape]
+            },
         }
     }
 
@@ -852,6 +905,7 @@ mod tests {
             &[],
             &[],
             true,
+            true,
         )
         .unwrap();
 
@@ -860,6 +914,59 @@ mod tests {
         assert_eq!(plan.reject_asset_ids, vec![duplicate]);
         assert_eq!(plan.review_asset_ids, vec![alternate]);
         assert!(!plan.contains_people);
+        assert!(plan.scene_consistent);
+        assert_eq!(plan.shared_scene_tags, vec![SceneTag::Landscape]);
+    }
+
+    #[test]
+    fn quick_cull_keeps_scene_changes_and_weaker_similarity_for_review() {
+        let group_id = Uuid::new_v4();
+        let best = Uuid::new_v4();
+        let changed_scene = Uuid::new_v4();
+        let weak_match = Uuid::new_v4();
+        let mut changed = recommendation(
+            changed_scene,
+            0.78,
+            CullingDecision::Review,
+            2,
+            vec![CullingReason::NearDuplicate],
+            false,
+        );
+        changed.scene_tags = vec![SceneTag::Architecture];
+        let mut weak = recommendation(
+            weak_match,
+            0.76,
+            CullingDecision::Review,
+            3,
+            vec![CullingReason::NearDuplicate],
+            false,
+        );
+        weak.duplicate_similarity = Some(0.982);
+
+        let plan = build_moment_quick_cull_plan(
+            group_id,
+            &[
+                recommendation(
+                    best,
+                    0.96,
+                    CullingDecision::Keep,
+                    1,
+                    vec![CullingReason::StrongTechnicalCandidate],
+                    false,
+                ),
+                changed,
+                weak,
+            ],
+            &[],
+            &[],
+            true,
+            true,
+        )
+        .unwrap();
+
+        assert!(plan.reject_asset_ids.is_empty());
+        assert_eq!(plan.review_asset_ids, vec![changed_scene, weak_match]);
+        assert!(!plan.scene_consistent);
     }
 
     #[test]
@@ -889,6 +996,7 @@ mod tests {
             ],
             &[],
             &[],
+            true,
             true,
         )
         .unwrap();
@@ -927,10 +1035,12 @@ mod tests {
             &[],
             &[],
             false,
+            false,
         )
         .unwrap();
 
         assert!(!plan.people_evidence_complete);
+        assert!(!plan.scene_evidence_complete);
         assert!(plan.reject_asset_ids.is_empty());
         assert_eq!(plan.review_asset_ids, vec![duplicate]);
     }
@@ -965,6 +1075,7 @@ mod tests {
             &[Uuid::new_v4()],
             &[],
             true,
+            true,
         )
         .is_none());
 
@@ -980,6 +1091,7 @@ mod tests {
             &recommendations,
             &[],
             &[bracket],
+            true,
             true,
         )
         .is_none());

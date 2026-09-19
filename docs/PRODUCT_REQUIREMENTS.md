@@ -504,3 +504,12 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - The first implemented risks cover low-confidence exposure evidence, preview clipping, large Exposure, aggressive Highlights/Shadows, stressed Whites/Blacks, strong Contrast, strong Saturation/Vibrance, and positive color pressure on already highly saturated imagery.
 - The gate MUST remain scene-neutral and usable for portraits, family, landscape, architecture, night, food and mixed travel sets.
 - Batch clear-group confirmation MUST exclude any photo currently flagged by the quality gate.
+
+### Adaptive tone structure protection
+
+- Positive shadow recovery SHOULD reduce automatically when the target's projected low-percentile luminance is near black or shadow clipping is material.
+- A wide source tone span MUST limit simultaneous positive Shadows and negative Highlights so automatic matching does not flatten natural scene contrast.
+- Positive Blacks SHOULD preserve a deep-black anchor in low-key/night imagery instead of automatically lifting the floor toward the Reference.
+- Positive Whites SHOULD back off as the target approaches its preview white endpoint or highlight clipping increases.
+- The quality gate MUST separately identify excessive deep-shadow opening and excessive wide-range compression after the final effective Recipe is assembled.
+- These protections MUST use the same scene-neutral Reference -> adaptive Recipe -> Review -> XMP workflow for people, landscape, architecture, night and mixed travel work.

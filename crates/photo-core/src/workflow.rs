@@ -49,6 +49,8 @@ pub enum RecipeQualityRisk {
     AggressiveToneRecovery,
     EndpointPressure,
     StrongContrastShift,
+    DeepShadowLift,
+    DynamicRangeCompression,
     SaturatedColorPressure,
     StrongColorShift,
 }
@@ -75,8 +77,35 @@ pub fn assess_recipe_quality_risk(
         return Some(RecipeQualityRisk::LargeExposureCorrection);
     }
 
-    let highlights = adjustments.highlights.unwrap_or(0.0).abs();
-    let shadows = adjustments.shadows.unwrap_or(0.0).abs();
+    let highlight_value = adjustments.highlights.unwrap_or(0.0);
+    let shadow_value = adjustments.shadows.unwrap_or(0.0);
+    if let Some(exposure) = exposure {
+        let exposure_factor =
+            2.0_f32.powf(adjustments.exposure.unwrap_or(0.0).clamp(-5.0, 5.0));
+        let projected_shadow = exposure
+            .luminance_p10
+            .map(|value| (value * exposure_factor).clamp(0.0, 1.0));
+        let projected_highlight = exposure
+            .luminance_p90
+            .map(|value| (value * exposure_factor).clamp(0.0, 1.0));
+
+        let shadow_opening =
+            shadow_value.max(0.0) + adjustments.blacks.unwrap_or(0.0).max(0.0) * 0.6;
+        if projected_shadow.is_some_and(|value| value < 0.055) && shadow_opening > 28.0 {
+            return Some(RecipeQualityRisk::DeepShadowLift);
+        }
+
+        if let Some((shadow, highlight)) = projected_shadow.zip(projected_highlight) {
+            let source_span = (highlight - shadow).max(0.0);
+            let opposing_compression = shadow_value.max(0.0) + (-highlight_value).max(0.0);
+            if source_span > 0.72 && opposing_compression > 60.0 {
+                return Some(RecipeQualityRisk::DynamicRangeCompression);
+            }
+        }
+    }
+
+    let highlights = highlight_value.abs();
+    let shadows = shadow_value.abs();
     if highlights.max(shadows) > 55.0 || highlights + shadows > 90.0 {
         return Some(RecipeQualityRisk::AggressiveToneRecovery);
     }
@@ -435,6 +464,50 @@ mod tests {
         assert_eq!(
             recipe_review_attention_reason(&signal),
             Some(RecipeReviewAttentionReason::QualityRisk)
+        );
+    }
+
+    #[test]
+    fn recipe_quality_gate_flags_deep_shadow_lift_and_range_compression() {
+        let asset_id = Uuid::new_v4();
+        let exposure = PhotoExposureAnalysis {
+            asset_id,
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 0.9,
+            luminance_p02: Some(0.01),
+            luminance_p10: Some(0.03),
+            luminance_p50: Some(0.45),
+            luminance_p90: Some(0.90),
+            luminance_p98: Some(0.98),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.3),
+            colorfulness_p25: Some(0.1),
+            colorfulness_p75: Some(0.5),
+        };
+        let mut recipe = Recipe {
+            id: Uuid::new_v4(),
+            name: "quality".into(),
+            target_asset_id: Some(asset_id),
+            source_reference_ids: Vec::new(),
+            adjustments: crate::EditAdjustments::default(),
+        };
+        recipe.adjustments.shadows = Some(35.0);
+        assert_eq!(
+            assess_recipe_quality_risk(&recipe, Some(&exposure)),
+            Some(RecipeQualityRisk::DeepShadowLift)
+        );
+
+        recipe.adjustments.shadows = Some(32.0);
+        recipe.adjustments.highlights = Some(-32.0);
+        let mut wide = exposure.clone();
+        wide.luminance_p10 = Some(0.10);
+        wide.luminance_p90 = Some(0.90);
+        assert_eq!(
+            assess_recipe_quality_risk(&recipe, Some(&wide)),
+            Some(RecipeQualityRisk::DynamicRangeCompression)
         );
     }
 

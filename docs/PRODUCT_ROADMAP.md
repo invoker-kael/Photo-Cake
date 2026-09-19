@@ -239,3 +239,9 @@ Prepared after white/black point control: ExposureAnalysis v6 adds colorfulness 
 Completed after protected adaptive color recovery: canonical Recipe Review now adds a quality-first guard before batch confirmation. Risky generated edits—large exposure/tone/endpoint/contrast/color moves, clipped or low-confidence preview evidence, and extra color pressure on already-saturated scenes—return to exception Review instead of joining the clear cohort.
 
 This intentionally copies only the useful workflow principle from mature batch editors: automate the standard images, then spend human attention on exceptions. The gate is shared by people and scenery, does not create a portrait-only branch, and does not weaken the existing Direct Export readiness boundary.
+
+### Core editing quality: low-light and dynamic-range protection
+
+Completed after the quality-first exception gate: adaptive tone matching now protects deep shadows, black anchors, white headroom and naturally wide scene contrast before a Recipe reaches Review. The generator backs off shadow opening in low-key frames, limits opposing Highlights/Shadows compression on wide-range scenes, avoids casually lifting deep blacks, and reduces positive Whites near the endpoint.
+
+The quality preflight adds explicit deep-shadow-lift and dynamic-range-compression risks for manual overrides, legacy Recipes or remaining edge cases. This improves night, landscape, architecture and mixed travel work while staying on the same Reference-driven engine used for people photography.

@@ -556,3 +556,14 @@ Reference -> adaptive per-photo Recipe -> quality gate -> exception-first Review
 ```
 
 Direct Export remains outside the production path until RAW demosaic, canonical Recipe rendering, color management and metadata handling are trustworthy.
+
+## Adaptive tone safety guards
+
+The Reference-relative tone engine now protects photographic structure before Review:
+
+- positive Shadows are attenuated as projected P10 approaches black or shadow clipping rises;
+- wide-range images cap simultaneous shadow lift + highlight pull so landscape, architecture and night frames do not drift into a flat pseudo-HDR look;
+- positive Blacks are damped when the source already has a strong deep-black anchor;
+- positive Whites are damped when P98 is already close to the preview endpoint or highlight clipping is present.
+
+These are conservative preview-evidence guards, not claims about recoverable sensor data. They change the generated Recipe itself, then the existing quality-first preflight still routes unusually strong manual or legacy edits to exception Review. Lightroom/Camera Raw remains the authoritative RAW renderer.

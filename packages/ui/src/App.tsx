@@ -1027,6 +1027,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       AGGRESSIVE_TONE_RECOVERY: "aggressive highlight/shadow recovery",
       ENDPOINT_PRESSURE: "strong white/black point pressure",
       STRONG_CONTRAST_SHIFT: "strong contrast shift",
+      DEEP_SHADOW_LIFT: "deep shadows would be opened too aggressively",
+      DYNAMIC_RANGE_COMPRESSION: "wide dynamic range would be flattened too much",
       SATURATED_COLOR_PRESSURE: "already-saturated colors need protection",
       STRONG_COLOR_SHIFT: "strong saturation/vibrance shift",
     };

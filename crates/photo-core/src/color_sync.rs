@@ -165,6 +165,33 @@ pub fn reference_relative_tone_adjustments(
         (reference_highlight - projected_highlight) * 180.0 * confidence
         - excess_highlight_clip * 400.0 * confidence;
 
+    // Opening extremely dark preview shadows aggressively is a poor default:
+    // embedded JPEGs do not tell us how much clean RAW shadow detail is really
+    // recoverable. Keep the direction of the Reference match, but preserve a
+    // stronger black anchor as projected P10 approaches black or clipping rises.
+    if shadows > 0.0 {
+        let dark_shadow_guard =
+            (0.55 + ((projected_shadow - 0.02) / 0.10).clamp(0.0, 1.0) * 0.45)
+                .clamp(0.55, 1.0);
+        let clip_guard = (1.0 - target_shadow_clip * 8.0).clamp(0.55, 1.0);
+        shadows *= dark_shadow_guard.min(clip_guard);
+    }
+
+    // Preserve naturally wide dynamic range. Simultaneously lifting shadows and
+    // pulling highlights is useful up to a point, but excessive opposing moves
+    // create the flat "HDR" look that hurts night, landscape and architecture.
+    let target_span = (projected_highlight - projected_shadow).max(0.0);
+    let opposing_compression = shadows.max(0.0) + (-highlights).max(0.0);
+    if target_span > 0.70 && opposing_compression > 0.0 {
+        let wide_range = ((target_span - 0.70) / 0.22).clamp(0.0, 1.0);
+        let max_compression = 85.0 - wide_range * 20.0;
+        if opposing_compression > max_compression {
+            let scale = max_compression / opposing_compression;
+            shadows *= scale;
+            highlights *= scale;
+        }
+    }
+
     if shadows.abs() < 2.0 {
         shadows = 0.0;
     }
@@ -213,6 +240,32 @@ pub fn reference_relative_endpoint_adjustments(
     let mut whites =
         (reference_white - projected_white) * 220.0 * confidence
         - excess_highlight_clip * 350.0 * confidence;
+
+    // Positive Blacks can quickly wash out night scenes. Retain more of the
+    // target's deep-black anchor when P10/P02 are already near black.
+    if blacks > 0.0 {
+        let projected_p10 = target
+            .luminance_p10
+            .map(|value| (value * exposure_factor).clamp(0.0, 1.0))
+            .unwrap_or(projected_black);
+        let black_anchor_guard =
+            (0.45 + ((projected_p10 - 0.015) / 0.08).clamp(0.0, 1.0) * 0.55)
+                .clamp(0.45, 1.0);
+        let clip_guard =
+            (1.0 - target.shadow_clip_ratio.unwrap_or(0.0) * 10.0).clamp(0.45, 1.0);
+        blacks *= black_anchor_guard.min(clip_guard);
+    }
+
+    // Do not push Whites hard when the target is already near its preview
+    // endpoint. This protects bright clouds, snow, speculars and saturated skies
+    // from unnecessary additional endpoint pressure.
+    if whites > 0.0 {
+        let endpoint_headroom = (1.0 - projected_white).clamp(0.0, 1.0);
+        let headroom_guard = (endpoint_headroom / 0.08).clamp(0.35, 1.0);
+        let clip_guard =
+            (1.0 - target.highlight_clip_ratio.unwrap_or(0.0) * 12.0).clamp(0.35, 1.0);
+        whites *= headroom_guard.min(clip_guard);
+    }
 
     if blacks.abs() < 1.5 {
         blacks = 0.0;
@@ -756,6 +809,179 @@ mod tests {
         assert!((plan.resolved[0].exposure_delta_ev - 0.7).abs() < 1e-6);
         assert_eq!(plan.resolved[0].temperature_delta_k, Some(600.0));
         assert_eq!(plan.resolved[0].tint_delta, Some(2.0));
+    }
+
+    #[test]
+    fn deep_shadow_guard_avoids_aggressive_default_lift() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.02),
+            luminance_p10: Some(0.20),
+            luminance_p50: Some(0.45),
+            luminance_p90: Some(0.75),
+            luminance_p98: Some(0.95),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.005),
+            luminance_p10: Some(0.02),
+            luminance_p50: Some(0.40),
+            luminance_p90: Some(0.74),
+            luminance_p98: Some(0.94),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+
+        let (_, shadows) =
+            reference_relative_tone_adjustments(&reference, &target, 0.0).unwrap();
+        assert!(shadows > 0.0);
+        assert!(shadows < 25.0);
+    }
+
+    #[test]
+    fn wide_dynamic_range_caps_opposing_tone_compression() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.03),
+            luminance_p10: Some(0.30),
+            luminance_p50: Some(0.48),
+            luminance_p90: Some(0.65),
+            luminance_p98: Some(0.96),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.005),
+            luminance_p10: Some(0.03),
+            luminance_p50: Some(0.48),
+            luminance_p90: Some(0.98),
+            luminance_p98: Some(1.0),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+
+        let (highlights, shadows) =
+            reference_relative_tone_adjustments(&reference, &target, 0.0).unwrap();
+        assert!(highlights < 0.0);
+        assert!(shadows > 0.0);
+        assert!(shadows + (-highlights) <= 66.0);
+    }
+
+    #[test]
+    fn deep_black_anchor_damps_positive_blacks() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.12),
+            luminance_p10: Some(0.18),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.80),
+            luminance_p98: Some(0.95),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.01),
+            luminance_p10: Some(0.02),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.80),
+            luminance_p98: Some(0.95),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+
+        let (_, blacks) =
+            reference_relative_endpoint_adjustments(&reference, &target, 0.0).unwrap();
+        assert!(blacks > 0.0);
+        assert!(blacks < 15.0);
+    }
+
+    #[test]
+    fn near_white_endpoint_damps_positive_whites() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.03),
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.82),
+            luminance_p98: Some(1.0),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p02: Some(0.03),
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.82),
+            luminance_p98: Some(0.94),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+            colorfulness_p25: None,
+            colorfulness_p75: None,
+        };
+
+        let (whites, _) =
+            reference_relative_endpoint_adjustments(&reference, &target, 0.0).unwrap();
+        assert!(whites > 0.0);
+        assert!(whites < 12.0);
     }
 
     #[test]

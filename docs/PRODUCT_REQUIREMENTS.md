@@ -442,3 +442,23 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Edited preview SHOULD visualize Highlights/Shadows direction without claiming RAW-engine parity.
 - Lightroom XMP handoff MUST preserve the generated or manually adjusted Highlights/Shadows values.
 - White balance MUST continue to remain unset when reliable RAW/metadata evidence is unavailable.
+
+
+### Reference-relative contrast and saturation
+
+- Adaptive Recipe generation SHOULD normalize per-photo tonal separation against the selected Reference after exposure alignment.
+- Positive automatic Contrast correction MUST back off when the target already contains material highlight or shadow clipping.
+- Analyze SHOULD record a relative preview colorfulness signal for within-shoot/reference matching; it MUST NOT present that signal as sensor-linear colorimetry.
+- Adaptive Recipe generation MAY add a bounded per-photo Saturation correction on top of the shared StyleProfile preference.
+- Missing legacy colorfulness evidence MUST preserve the prior saturation behavior rather than fabricate a value.
+- Photographer Contrast/Saturation exceptions remain authoritative after automatic matching.
+
+
+### Exposure robustness and preview fidelity
+
+- The existing robust exposure estimate MUST remain the primary adaptive exposure signal.
+- P50 MAY refine per-photo exposure only as a bounded secondary correction and MUST NOT erase the photographer's StyleProfile exposure bias.
+- Positive P50-based exposure refinement MUST respect highlight headroom using the Reference and target upper luminance evidence.
+- Automatic exposure refinement MUST remain conservative when evidence confidence is low.
+- Edited preview MUST apply Exposure in linear-light rather than directly multiplying gamma-encoded sRGB values.
+- Preview rendering remains an approximation and MUST NOT be presented as equivalent to Lightroom/Camera Raw demosaic, tone mapping or color management.

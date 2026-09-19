@@ -8,7 +8,9 @@ use uuid::Uuid;
 /// pipeline, so this value is intentionally used only as a relative group
 /// signal. It is not camera-metering EV and it never claims RAW white balance.
 pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoExposureAnalysis {
-    let gray = image.thumbnail(384, 384).to_luma8();
+    let thumbnail = image.thumbnail(384, 384);
+    let gray = thumbnail.to_luma8();
+    let rgb = thumbnail.to_rgb8();
     let mut values = gray
         .pixels()
         .map(|pixel| pixel[0])
@@ -26,6 +28,7 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
             luminance_p90: None,
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
+            colorfulness: None,
         };
     }
 
@@ -55,6 +58,18 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
         values.iter().filter(|value| **value >= 251).count() as f32 / total as f32;
     let clipped = shadow_clip_ratio + highlight_clip_ratio;
     let confidence = (1.0 - clipped * 2.5).clamp(0.15, 1.0);
+    let mut chroma_sum = 0.0_f32;
+    let mut chroma_count = 0_u32;
+    for pixel in rgb.pixels() {
+        let max = pixel[0].max(pixel[1]).max(pixel[2]);
+        if max < 16 {
+            continue;
+        }
+        let min = pixel[0].min(pixel[1]).min(pixel[2]);
+        chroma_sum += f32::from(max - min) / f32::from(max);
+        chroma_count += 1;
+    }
+    let colorfulness = (chroma_count > 0).then_some(chroma_sum / chroma_count as f32);
 
     PhotoExposureAnalysis {
         asset_id,
@@ -67,6 +82,7 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
         luminance_p90: Some(percentile(0.90)),
         shadow_clip_ratio: Some(shadow_clip_ratio),
         highlight_clip_ratio: Some(highlight_clip_ratio),
+        colorfulness,
     }
 }
 
@@ -100,6 +116,48 @@ mod tests {
             analyze_preview_exposure(Uuid::new_v4(), &DynamicImage::ImageLuma8(image));
         assert!(analysis.luminance_p10.unwrap() < analysis.luminance_p50.unwrap());
         assert!(analysis.luminance_p90.unwrap() > analysis.luminance_p50.unwrap());
+    }
+
+    #[test]
+    fn colorful_preview_has_more_colorfulness_than_gray_preview() {
+        let gray = DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
+            64,
+            64,
+            image::Rgb([120, 120, 120]),
+        ));
+        let red = DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
+            64,
+            64,
+            image::Rgb([220, 40, 40]),
+        ));
+        let gray_value = analyze_preview_exposure(Uuid::new_v4(), &gray)
+            .colorfulness
+            .unwrap();
+        let red_value = analyze_preview_exposure(Uuid::new_v4(), &red)
+            .colorfulness
+            .unwrap();
+        assert!(red_value > gray_value);
+    }
+
+    #[test]
+    fn colorfulness_is_stable_across_exposure_for_same_rgb_ratio() {
+        let bright = DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
+            64,
+            64,
+            image::Rgb([220, 40, 40]),
+        ));
+        let dark = DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
+            64,
+            64,
+            image::Rgb([110, 20, 20]),
+        ));
+        let bright_value = analyze_preview_exposure(Uuid::new_v4(), &bright)
+            .colorfulness
+            .unwrap();
+        let dark_value = analyze_preview_exposure(Uuid::new_v4(), &dark)
+            .colorfulness
+            .unwrap();
+        assert!((bright_value - dark_value).abs() < 0.01);
     }
 
     #[test]

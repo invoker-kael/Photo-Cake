@@ -74,7 +74,8 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
         ];
 
         for channel in &mut rgb {
-            *channel = (*channel * exposure_factor).clamp(0.0, 1.0);
+            let linear = srgb_to_linear(*channel);
+            *channel = linear_to_srgb((linear * exposure_factor).clamp(0.0, 1.0));
             *channel = ((*channel - 0.5) * contrast_factor + 0.5).clamp(0.0, 1.0);
         }
 
@@ -106,6 +107,22 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
     }
 
     DynamicImage::ImageRgb8(output)
+}
+
+fn srgb_to_linear(value: f32) -> f32 {
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(value: f32) -> f32 {
+    if value <= 0.003_130_8 {
+        value * 12.92
+    } else {
+        1.055 * value.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 fn constrain_long_edge(image: DynamicImage, edge: u32) -> DynamicImage {
@@ -179,6 +196,26 @@ mod tests {
         ));
         let edited = apply_preview_adjustments(source, &recipe(1.0, 0.0, 0.0));
         assert!(edited.to_rgb8().get_pixel(0, 0)[0] > 64);
+    }
+
+    #[test]
+    fn one_stop_exposure_uses_linear_light_instead_of_gamma_doubling() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(
+            1,
+            1,
+            Rgb([128, 128, 128]),
+        ));
+        let edited = apply_preview_adjustments(source, &recipe(1.0, 0.0, 0.0)).to_rgb8();
+        let value = edited.get_pixel(0, 0)[0];
+        assert!((170..=180).contains(&value));
+    }
+
+    #[test]
+    fn srgb_linear_round_trip_is_stable() {
+        for value in [0.0, 0.02, 0.18, 0.5, 0.9, 1.0] {
+            let round_trip = linear_to_srgb(srgb_to_linear(value));
+            assert!((round_trip - value).abs() < 1e-5);
+        }
     }
 
     #[test]

@@ -501,3 +501,17 @@ Reference-driven Recipe generation first resolves the normal per-photo exposure 
 Old ExposureAnalysis payloads remain readable. If percentile evidence is absent, tone matching is skipped and the previous exposure-only behavior remains intact.
 
 Recipe Review preview now approximates Highlights/Shadows in addition to Exposure/Contrast/Saturation. The preview remains an embedded-JPEG approximation; Lightroom/Camera Raw remains authoritative for RAW rendering. Per-photo exceptions can adjust and selectively synchronize Exposure, Highlights, Shadows, Contrast and Saturation. XMP already carries Highlights/Shadows through the existing non-destructive handoff path.
+
+
+### Reference-relative contrast and color intensity
+
+The same evidence path extends tonal matching without adding another workflow. ExposureAnalysis v3 records a bounded relative colorfulness statistic alongside luminance percentiles. After per-photo exposure alignment, Recipe generation compares the target's P10–P90 span with the selected Reference to derive a small per-photo Contrast correction. Positive contrast is reduced as shadow/highlight clipping increases.
+
+Colorfulness is also compared against the Reference to derive a bounded per-photo Saturation correction. The shared StyleProfile Contrast/Saturation values remain the photographer's intentional look; the adaptive corrections are added on top only to normalize target-to-target variation. Old cached evidence without colorfulness simply skips the new saturation correction.
+
+
+### Median exposure refinement and preview transfer function
+
+Reference-relative exposure keeps the existing trimmed-mean signal as its primary estimate, then uses preview P50 only as a bounded secondary correction. The correction is limited to ±0.60 EV and is prevented from brightening when the target's projected P90 has no headroom relative to the selected Reference. StyleProfile exposure bias remains part of the desired target and is not normalized away.
+
+Edited preview applies Exposure in linear-light sRGB rather than multiplying gamma-encoded channel values. It then converts back to sRGB before the existing perceptual Contrast, Highlights/Shadows and Saturation approximation. This materially improves visual review fidelity while keeping Lightroom/Camera Raw authoritative for final RAW rendering.

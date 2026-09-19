@@ -1,7 +1,9 @@
 use crate::bracketing::ExposureBracketSet;
 use crate::classification::SceneTag;
 use crate::color_sync::{
-    build_adaptive_group_plan, reference_relative_tone_adjustments, ColorSyncError,
+    build_adaptive_group_plan, reference_relative_contrast_adjustment,
+    reference_relative_exposure_correction, reference_relative_saturation_adjustment,
+    reference_relative_tone_adjustments, ColorSyncError,
     GroupColorIntent, GroupColorSyncPlan, GroupSyncMode, PhotoColorAnalysis,
     PhotoExposureAnalysis,
 };
@@ -499,7 +501,16 @@ impl ReferenceSet {
             let Some(target) = evidence.iter().find(|item| item.asset_id == asset_id) else {
                 continue;
             };
-            let exposure_delta = recipe.adjustments.exposure.unwrap_or(0.0);
+            let mut exposure_delta = recipe.adjustments.exposure.unwrap_or(0.0);
+            if let Some(exposure_correction) = reference_relative_exposure_correction(
+                &reference_evidence,
+                target,
+                exposure_delta,
+                self.style_profile.exposure_bias_ev.unwrap_or(0.0),
+            ) {
+                exposure_delta = (exposure_delta + exposure_correction).clamp(-4.0, 4.0);
+                recipe.adjustments.exposure = Some(exposure_delta);
+            }
             if let Some((highlights, shadows)) = reference_relative_tone_adjustments(
                 &reference_evidence,
                 target,
@@ -507,6 +518,22 @@ impl ReferenceSet {
             ) {
                 recipe.adjustments.highlights = Some(highlights);
                 recipe.adjustments.shadows = Some(shadows);
+            }
+            if let Some(contrast_delta) = reference_relative_contrast_adjustment(
+                &reference_evidence,
+                target,
+                exposure_delta,
+            ) {
+                let baseline = recipe.adjustments.contrast.unwrap_or(0.0);
+                recipe.adjustments.contrast =
+                    Some((baseline + contrast_delta).clamp(-100.0, 100.0));
+            }
+            if let Some(saturation_delta) =
+                reference_relative_saturation_adjustment(&reference_evidence, target)
+            {
+                let baseline = recipe.adjustments.saturation.unwrap_or(0.0);
+                recipe.adjustments.saturation =
+                    Some((baseline + saturation_delta).clamp(-100.0, 100.0));
             }
         }
         Ok(result)
@@ -924,6 +951,7 @@ mod tests {
                     luminance_p90: None,
                     shadow_clip_ratio: None,
                     highlight_clip_ratio: None,
+                    colorfulness: None,
                 }).unwrap(),
             })
             .unwrap();
@@ -1004,6 +1032,7 @@ mod tests {
                 luminance_p90: Some(0.78),
                 shadow_clip_ratio: Some(0.0),
                 highlight_clip_ratio: Some(0.0),
+                colorfulness: None,
             },
             PhotoExposureAnalysis {
                 asset_id: target,
@@ -1016,6 +1045,7 @@ mod tests {
                 luminance_p90: Some(0.96),
                 shadow_clip_ratio: Some(0.03),
                 highlight_clip_ratio: Some(0.04),
+                colorfulness: None,
             },
         ] {
             cache
@@ -1048,6 +1078,140 @@ mod tests {
         let recipe = &result.recipes[0];
         assert!(recipe.adjustments.highlights.unwrap() < -20.0);
         assert!(recipe.adjustments.shadows.unwrap() > 20.0);
+    }
+
+    #[test]
+    fn cached_reference_refines_exposure_with_median_and_highlight_headroom() {
+        let dir = tempdir().unwrap();
+        let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
+        let reference_id = Uuid::new_v4();
+        let dark = Uuid::new_v4();
+
+        for evidence in [
+            PhotoExposureAnalysis {
+                asset_id: reference_id,
+                exposure_ev: 0.0,
+                temperature_k: None,
+                tint: None,
+                confidence: 1.0,
+                luminance_p10: Some(0.15),
+                luminance_p50: Some(0.50),
+                luminance_p90: Some(0.85),
+                shadow_clip_ratio: Some(0.0),
+                highlight_clip_ratio: Some(0.0),
+                colorfulness: Some(0.20),
+            },
+            PhotoExposureAnalysis {
+                asset_id: dark,
+                exposure_ev: 0.0,
+                temperature_k: None,
+                tint: None,
+                confidence: 1.0,
+                luminance_p10: Some(0.08),
+                luminance_p50: Some(0.25),
+                luminance_p90: Some(0.45),
+                shadow_clip_ratio: Some(0.0),
+                highlight_clip_ratio: Some(0.0),
+                colorfulness: Some(0.20),
+            },
+        ] {
+            cache
+                .put(&AnalysisArtifact {
+                    key: AnalysisCacheKey {
+                        asset_id: evidence.asset_id,
+                        source_fingerprint: "raw-v3".into(),
+                        preview_revision: "preview-v1".into(),
+                        task: InferenceTask::ExposureAnalysis,
+                        model_id: "preview-relative-exposure".into(),
+                        model_version: "3".into(),
+                        config_hash: "trimmed-luma-percentiles-color-relative-v3".into(),
+                    },
+                    payload_json: serde_json::to_value(evidence).unwrap(),
+                })
+                .unwrap();
+        }
+
+        let group = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Similar,
+            basis: GroupingBasis::SemanticSimilarity,
+            asset_ids: vec![dark],
+            manual_locked: false,
+        };
+        let references = ReferenceSet::from_photos("reference", vec![reference_id]);
+        let result = references
+            .resolve_group_from_cache(&cache, &group, reference_id, 1)
+            .unwrap();
+        assert!(result.recipes[0].adjustments.exposure.unwrap() > 0.30);
+    }
+
+    #[test]
+    fn cached_reference_adapts_contrast_and_saturation_per_photo() {
+        let dir = tempdir().unwrap();
+        let cache = AnalysisCache::open(dir.path().join("project.sqlite3")).unwrap();
+        let reference_id = Uuid::new_v4();
+        let flat_muted = Uuid::new_v4();
+
+        for evidence in [
+            PhotoExposureAnalysis {
+                asset_id: reference_id,
+                exposure_ev: 0.0,
+                temperature_k: None,
+                tint: None,
+                confidence: 1.0,
+                luminance_p10: Some(0.15),
+                luminance_p50: Some(0.50),
+                luminance_p90: Some(0.85),
+                shadow_clip_ratio: Some(0.0),
+                highlight_clip_ratio: Some(0.0),
+                colorfulness: Some(0.30),
+            },
+            PhotoExposureAnalysis {
+                asset_id: flat_muted,
+                exposure_ev: 0.0,
+                temperature_k: None,
+                tint: None,
+                confidence: 1.0,
+                luminance_p10: Some(0.30),
+                luminance_p50: Some(0.50),
+                luminance_p90: Some(0.70),
+                shadow_clip_ratio: Some(0.0),
+                highlight_clip_ratio: Some(0.0),
+                colorfulness: Some(0.10),
+            },
+        ] {
+            cache
+                .put(&AnalysisArtifact {
+                    key: AnalysisCacheKey {
+                        asset_id: evidence.asset_id,
+                        source_fingerprint: "raw-v3".into(),
+                        preview_revision: "preview-v1".into(),
+                        task: InferenceTask::ExposureAnalysis,
+                        model_id: "preview-relative-exposure".into(),
+                        model_version: "3".into(),
+                        config_hash: "trimmed-luma-percentiles-color-relative-v3".into(),
+                    },
+                    payload_json: serde_json::to_value(evidence).unwrap(),
+                })
+                .unwrap();
+        }
+
+        let group = PhotoGroup {
+            id: Uuid::new_v4(),
+            kind: PhotoGroupKind::Similar,
+            basis: GroupingBasis::SemanticSimilarity,
+            asset_ids: vec![flat_muted],
+            manual_locked: false,
+        };
+        let mut references = ReferenceSet::from_photos("reference", vec![reference_id]);
+        references.style_profile.contrast_preference = Some(5.0);
+        references.style_profile.saturation_preference = Some(3.0);
+        let result = references
+            .resolve_group_from_cache(&cache, &group, reference_id, 1)
+            .unwrap();
+        let recipe = &result.recipes[0];
+        assert!(recipe.adjustments.contrast.unwrap() > 15.0);
+        assert!(recipe.adjustments.saturation.unwrap() > 13.0);
     }
 
     #[test]

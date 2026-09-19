@@ -100,6 +100,8 @@ pub struct PhotoExposureAnalysis {
     pub shadow_clip_ratio: Option<f32>,
     #[serde(default)]
     pub highlight_clip_ratio: Option<f32>,
+    #[serde(default)]
+    pub colorfulness: Option<f32>,
 }
 
 impl PhotoExposureAnalysis {
@@ -150,6 +152,112 @@ pub fn reference_relative_tone_adjustments(
         highlights.clamp(-70.0, 70.0),
         shadows.clamp(-70.0, 70.0),
     ))
+}
+
+/// Refine the base preview-relative exposure match with median luminance while
+/// respecting highlight headroom. The base trimmed-mean signal remains the
+/// primary exposure estimate; this function only adds a bounded correction.
+pub fn reference_relative_exposure_correction(
+    reference: &PhotoExposureAnalysis,
+    target: &PhotoExposureAnalysis,
+    current_delta_ev: f32,
+    style_bias_ev: f32,
+) -> Option<f32> {
+    let reference_median = reference.luminance_p50?;
+    let target_median = target.luminance_p50?;
+    if reference_median <= 0.0 || target_median <= 0.0 {
+        return None;
+    }
+
+    let confidence = reference
+        .confidence
+        .min(target.confidence)
+        .clamp(0.2, 1.0);
+    let current_factor = 2.0_f32.powf(current_delta_ev.clamp(-5.0, 5.0));
+    let style_factor = 2.0_f32.powf(style_bias_ev.clamp(-2.0, 2.0));
+    let projected_median = (target_median * current_factor).max(1.0 / 255.0);
+    let desired_median = (reference_median * style_factor).max(1.0 / 255.0);
+
+    let mut correction =
+        (desired_median / projected_median).log2() * 0.35 * confidence;
+
+    if correction > 0.0 {
+        if let (Some(reference_highlight), Some(target_highlight)) =
+            (reference.luminance_p90, target.luminance_p90)
+        {
+            let projected_highlight = target_highlight * current_factor;
+            let allowed_highlight = (reference_highlight * style_factor).clamp(0.80, 0.98);
+            if projected_highlight >= allowed_highlight {
+                correction = 0.0;
+            } else if projected_highlight > 0.0 {
+                let headroom_ev = (allowed_highlight / projected_highlight).log2().max(0.0);
+                correction = correction.min(headroom_ev);
+            }
+        }
+    }
+
+    if correction.abs() < 0.03 {
+        correction = 0.0;
+    }
+    Some(correction.clamp(-0.60, 0.60))
+}
+
+/// Match the Reference's overall tonal separation after per-photo exposure
+/// alignment. Positive contrast backs off as clipping increases.
+pub fn reference_relative_contrast_adjustment(
+    reference: &PhotoExposureAnalysis,
+    target: &PhotoExposureAnalysis,
+    exposure_delta_ev: f32,
+) -> Option<f32> {
+    let (reference_shadow, reference_highlight) = reference.tone_percentiles()?;
+    let (target_shadow, target_highlight) = target.tone_percentiles()?;
+    let exposure_factor = 2.0_f32.powf(exposure_delta_ev.clamp(-5.0, 5.0));
+    let projected_shadow = (target_shadow * exposure_factor).clamp(0.0, 1.0);
+    let projected_highlight = (target_highlight * exposure_factor).clamp(0.0, 1.0);
+    let reference_span = (reference_highlight - reference_shadow).max(0.0);
+    let target_span = (projected_highlight - projected_shadow).max(0.0);
+
+    let confidence = reference
+        .confidence
+        .min(target.confidence)
+        .clamp(0.2, 1.0);
+    let clipping = target
+        .shadow_clip_ratio
+        .unwrap_or(0.0)
+        .max(target.highlight_clip_ratio.unwrap_or(0.0))
+        .clamp(0.0, 1.0);
+    let positive_headroom = (1.0 - clipping * 20.0).clamp(0.0, 1.0);
+
+    let mut correction = (reference_span - target_span) * 80.0 * confidence;
+    if correction > 0.0 {
+        correction *= positive_headroom;
+    }
+    if correction.abs() < 1.0 {
+        correction = 0.0;
+    }
+    Some(correction.clamp(-25.0, 25.0))
+}
+
+/// Match overall color intensity to the selected Reference while retaining the
+/// shared StyleProfile saturation preference. Embedded previews already include
+/// camera color, so this correction is intentionally small and bounded.
+pub fn reference_relative_saturation_adjustment(
+    reference: &PhotoExposureAnalysis,
+    target: &PhotoExposureAnalysis,
+) -> Option<f32> {
+    let reference_colorfulness = reference.colorfulness?;
+    let target_colorfulness = target.colorfulness?;
+    let confidence = reference
+        .confidence
+        .min(target.confidence)
+        .clamp(0.2, 1.0);
+
+    let mut correction =
+        (reference_colorfulness - target_colorfulness) * 70.0 * confidence;
+    if correction.abs() < 1.0 {
+        correction = 0.0;
+    }
+    Some(correction.clamp(-20.0, 20.0))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -553,6 +661,7 @@ mod tests {
             luminance_p90: Some(0.78),
             shadow_clip_ratio: Some(0.0),
             highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
         };
         let target = PhotoExposureAnalysis {
             asset_id: Uuid::new_v4(),
@@ -565,6 +674,7 @@ mod tests {
             luminance_p90: Some(0.96),
             shadow_clip_ratio: Some(0.04),
             highlight_clip_ratio: Some(0.05),
+            colorfulness: None,
         };
 
         let (highlights, shadows) =
@@ -586,6 +696,7 @@ mod tests {
             luminance_p90: Some(0.80),
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
+            colorfulness: None,
         };
         let target = PhotoExposureAnalysis {
             asset_id: Uuid::new_v4(),
@@ -598,12 +709,271 @@ mod tests {
             luminance_p90: Some(0.40),
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
+            colorfulness: None,
         };
 
         let (highlights, shadows) =
             reference_relative_tone_adjustments(&reference, &target, 1.0).unwrap();
         assert_eq!(highlights, 0.0);
         assert_eq!(shadows, 0.0);
+    }
+
+    #[test]
+    fn median_refinement_nudges_underexposed_target_without_replacing_base_signal() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.85),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.08),
+            luminance_p50: Some(0.25),
+            luminance_p90: Some(0.45),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+
+        let correction =
+            reference_relative_exposure_correction(&reference, &target, 0.0, 0.0).unwrap();
+        assert!(correction > 0.30);
+        assert!(correction <= 0.60);
+    }
+
+    #[test]
+    fn exposure_refinement_refuses_to_brighten_when_highlights_have_no_headroom() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.85),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.05),
+            luminance_p50: Some(0.25),
+            luminance_p90: Some(0.95),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+
+        let correction =
+            reference_relative_exposure_correction(&reference, &target, 0.0, 0.0).unwrap();
+        assert_eq!(correction, 0.0);
+    }
+
+    #[test]
+    fn exposure_refinement_preserves_style_bias_target() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.40),
+            luminance_p90: Some(0.70),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.40),
+            luminance_p90: Some(0.70),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+
+        // A +0.5 EV style bias is already represented in current_delta_ev, so
+        // the median refinement should not pull it back toward the raw Reference.
+        let correction =
+            reference_relative_exposure_correction(&reference, &target, 0.5, 0.5).unwrap();
+        assert_eq!(correction, 0.0);
+    }
+
+    #[test]
+    fn flat_target_gets_modest_positive_contrast() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.85),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.30),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.70),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let contrast =
+            reference_relative_contrast_adjustment(&reference, &target, 0.0).unwrap();
+        assert!(contrast > 10.0);
+        assert!(contrast <= 25.0);
+    }
+
+    #[test]
+    fn clipped_target_does_not_get_aggressive_positive_contrast() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.10),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.90),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.30),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.70),
+            shadow_clip_ratio: Some(0.04),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let contrast =
+            reference_relative_contrast_adjustment(&reference, &target, 0.0).unwrap();
+        assert!(contrast >= 0.0);
+        assert!(contrast < 7.0);
+    }
+
+    #[test]
+    fn overly_hard_target_gets_negative_contrast() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.20),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.80),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.02),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.98),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: None,
+        };
+        let contrast =
+            reference_relative_contrast_adjustment(&reference, &target, 0.0).unwrap();
+        assert!(contrast < -10.0);
+    }
+
+    #[test]
+    fn muted_target_gets_small_positive_saturation_match() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: None,
+            luminance_p50: None,
+            luminance_p90: None,
+            shadow_clip_ratio: None,
+            highlight_clip_ratio: None,
+            colorfulness: Some(0.30),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: None,
+            luminance_p50: None,
+            luminance_p90: None,
+            shadow_clip_ratio: None,
+            highlight_clip_ratio: None,
+            colorfulness: Some(0.10),
+        };
+        let saturation =
+            reference_relative_saturation_adjustment(&reference, &target).unwrap();
+        assert!(saturation > 10.0);
+        assert!(saturation <= 20.0);
+    }
+
+    #[test]
+    fn old_color_evidence_skips_saturation_matching() {
+        let evidence = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: None,
+            luminance_p50: None,
+            luminance_p90: None,
+            shadow_clip_ratio: None,
+            highlight_clip_ratio: None,
+            colorfulness: None,
+        };
+        assert!(reference_relative_saturation_adjustment(&evidence, &evidence).is_none());
     }
 
     #[test]
@@ -619,6 +989,7 @@ mod tests {
             luminance_p90: None,
             shadow_clip_ratio: None,
             highlight_clip_ratio: None,
+            colorfulness: None,
         };
         assert!(reference_relative_tone_adjustments(&reference, &reference, 0.0).is_none());
     }

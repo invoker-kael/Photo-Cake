@@ -62,7 +62,9 @@ pub use color_sync::{
     derive_auto_group_intent, promote_group_reference, ColorSyncError, GroupColorIntent,
     GroupColorInvalidation, GroupColorInvalidationScope, GroupColorSyncPlan, GroupSyncMode,
     PhotoColorAnalysis, PhotoExposureAnalysis, ResolvedColorEdit, SemanticColorIntent,
-    SemanticRegion, reference_relative_tone_adjustments,
+    SemanticRegion, reference_relative_contrast_adjustment,
+    reference_relative_exposure_correction, reference_relative_saturation_adjustment,
+    reference_relative_tone_adjustments,
 };
 pub use culling::{
     build_group_culling_result, build_moment_quick_cull_plan, rank_group_candidates,

@@ -208,3 +208,13 @@ Mixed travel sets remain first-class: scene context is visible for landscape/arc
 Completed: the core Reference → adaptive Recipe path now goes beyond exposure-only matching. ExposureAnalysis v2 records preview luminance percentiles and clipping evidence, then generates bounded per-photo Highlights/Shadows after exposure alignment. This improves mixed travel, landscape, architecture, night and people sets without creating scene-specific duplicate pipelines.
 
 Recipe Review now previews those tone adjustments and lets the photographer override or synchronize Highlights/Shadows per photo. Existing Lightroom XMP delivery carries the values directly. Legacy projects continue with exposure-only fallback when percentile evidence is unavailable.
+
+
+### Core editing quality: contrast and color consistency
+
+Prepared after adaptive highlight/shadow matching: extend the same Reference-relative evidence path to per-photo Contrast and Saturation. Flat targets receive modest contrast toward the Reference, overly hard targets are softened, clipped targets are protected from aggressive contrast, and muted/over-saturated targets receive bounded color-intensity normalization. No additional workflow layer is introduced.
+
+
+### Core editing quality: exposure and preview fidelity
+
+Prepared in the same batch: P50 now acts as a conservative secondary exposure refinement with P90 highlight-headroom protection, while preserving the Reference/StyleProfile exposure target. The lightweight edited preview applies Exposure in linear-light sRGB before its perceptual tone/color approximation, making Review decisions substantially closer to a real photographic exposure adjustment without claiming RAW-engine parity.

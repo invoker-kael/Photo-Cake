@@ -53,9 +53,17 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
             .clamp(0.0, total.saturating_sub(1) as f32) as usize;
         f32::from(values[index]) / 255.0
     };
-    let shadow_clip_ratio = values.iter().filter(|value| **value <= 4).count() as f32 / total as f32;
-    let highlight_clip_ratio =
-        values.iter().filter(|value| **value >= 251).count() as f32 / total as f32;
+    let rgb_total = (u64::from(rgb.width()) * u64::from(rgb.height())).max(1) as f32;
+    let shadow_clip_ratio = rgb
+        .pixels()
+        .filter(|pixel| pixel[0] <= 4 && pixel[1] <= 4 && pixel[2] <= 4)
+        .count() as f32
+        / rgb_total;
+    let highlight_clip_ratio = rgb
+        .pixels()
+        .filter(|pixel| pixel[0] >= 251 || pixel[1] >= 251 || pixel[2] >= 251)
+        .count() as f32
+        / rgb_total;
     let clipped = shadow_clip_ratio + highlight_clip_ratio;
     let confidence = (1.0 - clipped * 2.5).clamp(0.15, 1.0);
     let mut chroma_sum = 0.0_f32;
@@ -158,6 +166,29 @@ mod tests {
             .colorfulness
             .unwrap();
         assert!((bright_value - dark_value).abs() < 0.01);
+    }
+
+    #[test]
+    fn single_channel_clipping_is_detected_even_when_luma_is_not_white() {
+        let image = DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
+            64,
+            64,
+            image::Rgb([255, 80, 80]),
+        ));
+        let analysis = analyze_preview_exposure(Uuid::new_v4(), &image);
+        assert_eq!(analysis.highlight_clip_ratio, Some(1.0));
+        assert!(analysis.luminance_p90.unwrap() < 0.8);
+    }
+
+    #[test]
+    fn saturated_dark_color_is_not_misclassified_as_black_clip() {
+        let image = DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
+            64,
+            64,
+            image::Rgb([0, 0, 24]),
+        ));
+        let analysis = analyze_preview_exposure(Uuid::new_v4(), &image);
+        assert_eq!(analysis.shadow_clip_ratio, Some(0.0));
     }
 
     #[test]

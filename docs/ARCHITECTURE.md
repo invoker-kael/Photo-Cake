@@ -515,3 +515,12 @@ Colorfulness is also compared against the Reference to derive a bounded per-phot
 Reference-relative exposure keeps the existing trimmed-mean signal as its primary estimate, then uses preview P50 only as a bounded secondary correction. The correction is limited to ±0.60 EV and is prevented from brightening when the target's projected P90 has no headroom relative to the selected Reference. StyleProfile exposure bias remains part of the desired target and is not normalized away.
 
 Edited preview applies Exposure in linear-light sRGB rather than multiplying gamma-encoded channel values. It then converts back to sRGB before the existing perceptual Contrast, Highlights/Shadows and Saturation approximation. This materially improves visual review fidelity while keeping Lightroom/Camera Raw authoritative for final RAW rendering.
+
+
+### Channel-aware clipping evidence and tone preview
+
+ExposureAnalysis v4 keeps the existing luminance percentiles but changes clipping evidence to be RGB-aware. Highlight clipping is counted when any preview RGB channel reaches the clipping threshold, so saturated sunsets, neon and skin highlights are no longer missed just because their combined luminance is below white. Shadow clipping is counted only when all RGB channels are near black, avoiding false black-clip classification for dark saturated colors.
+
+Reference-relative Highlights, Exposure refinement and positive Contrast correction all consume this clipping evidence. Excess target highlight clipping versus the selected Reference pushes Highlights down and suppresses automatic brightening; existing clipped targets also receive less automatic positive Contrast.
+
+Edited preview tone recovery now remaps luminance toward white or black while preserving channel relationships instead of adding the same RGB offset to every channel. This reduces hue/chroma washout in colored highlights and shadows while remaining a lightweight preview approximation.

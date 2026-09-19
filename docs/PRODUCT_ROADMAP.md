@@ -218,3 +218,8 @@ Prepared after adaptive highlight/shadow matching: extend the same Reference-rel
 ### Core editing quality: exposure and preview fidelity
 
 Prepared in the same batch: P50 now acts as a conservative secondary exposure refinement with P90 highlight-headroom protection, while preserving the Reference/StyleProfile exposure target. The lightweight edited preview applies Exposure in linear-light sRGB before its perceptual tone/color approximation, making Review decisions substantially closer to a real photographic exposure adjustment without claiming RAW-engine parity.
+
+
+### Core editing quality: channel-aware highlight protection
+
+Prepared as the next quality batch: ExposureAnalysis v4 makes clipping RGB-channel-aware, then feeds that evidence into adaptive Exposure, Highlights and Contrast. Review preview tone recovery also moves from equal RGB offsets to hue-friendlier luminance remapping. This specifically improves saturated sunsets, neon, stage lighting, colored architecture and skin/specular highlights.

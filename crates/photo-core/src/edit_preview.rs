@@ -85,9 +85,7 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
         let tone_delta =
             (shadows / 100.0) * shadow_mask * 0.28
             + (highlights / 100.0) * highlight_mask * 0.28;
-        for channel in &mut rgb {
-            *channel = (*channel + tone_delta).clamp(0.0, 1.0);
-        }
+        remap_luminance_preserving_hue(&mut rgb, luminance, tone_delta);
 
         let toned_luminance = (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
         for channel in &mut rgb {
@@ -107,6 +105,30 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
     }
 
     DynamicImage::ImageRgb8(output)
+}
+
+fn remap_luminance_preserving_hue(rgb: &mut [f32; 3], luminance: f32, delta: f32) {
+    let target = (luminance + delta).clamp(0.0, 1.0);
+    if (target - luminance).abs() < 1e-6 {
+        return;
+    }
+
+    if target > luminance {
+        let denominator = (1.0 - luminance).max(1e-6);
+        let amount = ((target - luminance) / denominator).clamp(0.0, 1.0);
+        for channel in rgb {
+            *channel = (*channel + (1.0 - *channel) * amount).clamp(0.0, 1.0);
+        }
+    } else {
+        let scale = if luminance <= 1e-6 {
+            0.0
+        } else {
+            (target / luminance).clamp(0.0, 1.0)
+        };
+        for channel in rgb {
+            *channel = (*channel * scale).clamp(0.0, 1.0);
+        }
+    }
 }
 
 fn srgb_to_linear(value: f32) -> f32 {
@@ -244,6 +266,41 @@ mod tests {
         let dark_drop = 40 - i16::from(edited.get_pixel(0, 0)[0]);
         let bright_drop = 230 - i16::from(edited.get_pixel(1, 0)[0]);
         assert!(bright_drop > dark_drop);
+    }
+
+    #[test]
+    fn negative_highlights_preserve_colored_highlight_channel_ratios() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(
+            1,
+            1,
+            Rgb([240, 160, 80]),
+        ));
+        let edited = apply_preview_adjustments(
+            source,
+            &recipe_with_tone(0.0, 0.0, -50.0, 0.0, 0.0),
+        )
+        .to_rgb8();
+        let pixel = edited.get_pixel(0, 0).0;
+        let rg = f32::from(pixel[0]) / f32::from(pixel[1].max(1));
+        let gb = f32::from(pixel[1]) / f32::from(pixel[2].max(1));
+        assert!((rg - 1.5).abs() < 0.08);
+        assert!((gb - 2.0).abs() < 0.12);
+    }
+
+    #[test]
+    fn lifted_colored_shadows_keep_channel_order() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(
+            1,
+            1,
+            Rgb([70, 35, 18]),
+        ));
+        let edited = apply_preview_adjustments(
+            source,
+            &recipe_with_tone(0.0, 0.0, 0.0, 60.0, 0.0),
+        )
+        .to_rgb8();
+        let pixel = edited.get_pixel(0, 0).0;
+        assert!(pixel[0] > pixel[1] && pixel[1] > pixel[2]);
     }
 
     #[test]

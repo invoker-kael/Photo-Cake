@@ -20,8 +20,8 @@ const QUALITY_MODEL_ID: &str = "deterministic-preview-quality";
 const QUALITY_MODEL_VERSION: &str = "1";
 const QUALITY_CONFIG_HASH: &str = "laplacian-clipping-v1";
 const EXPOSURE_MODEL_ID: &str = "preview-relative-exposure";
-const EXPOSURE_MODEL_VERSION: &str = "3";
-const EXPOSURE_CONFIG_HASH: &str = "trimmed-luma-percentiles-color-relative-v3";
+const EXPOSURE_MODEL_VERSION: &str = "4";
+const EXPOSURE_CONFIG_HASH: &str = "trimmed-luma-rgb-clipping-color-relative-v4";
 
 #[derive(Debug, Error)]
 pub enum AnalyzeError {

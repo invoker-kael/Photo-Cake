@@ -462,3 +462,13 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Automatic exposure refinement MUST remain conservative when evidence confidence is low.
 - Edited preview MUST apply Exposure in linear-light rather than directly multiplying gamma-encoded sRGB values.
 - Preview rendering remains an approximation and MUST NOT be presented as equivalent to Lightroom/Camera Raw demosaic, tone mapping or color management.
+
+
+### Channel-aware clipping protection
+
+- Highlight clipping evidence MUST detect single-channel RGB clipping, not only near-white luminance.
+- Shadow clipping evidence SHOULD represent true multi-channel black clipping rather than dark saturated color.
+- Automatic positive Exposure refinement MUST back off when the target has materially more channel clipping than its Reference.
+- Adaptive Highlights SHOULD compensate for excess target clipping even when luminance percentiles alone look similar.
+- Positive adaptive Contrast MUST remain conservative on clipped targets.
+- Edited preview Highlights/Shadows SHOULD preserve colored-region channel relationships better than an equal RGB offset.

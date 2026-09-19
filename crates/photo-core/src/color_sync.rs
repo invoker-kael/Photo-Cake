@@ -138,8 +138,20 @@ pub fn reference_relative_tone_adjustments(
         .min(target.confidence)
         .clamp(0.2, 1.0);
 
-    let mut shadows = (reference_shadow - projected_shadow) * 180.0 * confidence;
-    let mut highlights = (reference_highlight - projected_highlight) * 180.0 * confidence;
+    let reference_shadow_clip = reference.shadow_clip_ratio.unwrap_or(0.0);
+    let target_shadow_clip = target.shadow_clip_ratio.unwrap_or(0.0);
+    let reference_highlight_clip = reference.highlight_clip_ratio.unwrap_or(0.0);
+    let target_highlight_clip = target.highlight_clip_ratio.unwrap_or(0.0);
+
+    let excess_shadow_clip = (target_shadow_clip - reference_shadow_clip).max(0.0);
+    let excess_highlight_clip = (target_highlight_clip - reference_highlight_clip).max(0.0);
+
+    let mut shadows =
+        (reference_shadow - projected_shadow) * 180.0 * confidence
+        + excess_shadow_clip * 400.0 * confidence;
+    let mut highlights =
+        (reference_highlight - projected_highlight) * 180.0 * confidence
+        - excess_highlight_clip * 400.0 * confidence;
 
     if shadows.abs() < 2.0 {
         shadows = 0.0;
@@ -182,6 +194,11 @@ pub fn reference_relative_exposure_correction(
         (desired_median / projected_median).log2() * 0.35 * confidence;
 
     if correction > 0.0 {
+        let reference_clip = reference.highlight_clip_ratio.unwrap_or(0.0);
+        let target_clip = target.highlight_clip_ratio.unwrap_or(0.0);
+        let excess_clip = (target_clip - reference_clip).max(0.0);
+        correction *= (1.0 - excess_clip * 20.0).clamp(0.0, 1.0);
+
         if let (Some(reference_highlight), Some(target_highlight)) =
             (reference.luminance_p90, target.luminance_p90)
         {
@@ -716,6 +733,75 @@ mod tests {
             reference_relative_tone_adjustments(&reference, &target, 1.0).unwrap();
         assert_eq!(highlights, 0.0);
         assert_eq!(shadows, 0.0);
+    }
+
+    #[test]
+    fn channel_clip_excess_pushes_highlights_down_even_with_similar_luma_percentiles() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.80),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.2),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.80),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.05),
+            colorfulness: Some(0.2),
+        };
+
+        let (highlights, shadows) =
+            reference_relative_tone_adjustments(&reference, &target, 0.0).unwrap();
+        assert!(highlights <= -19.0);
+        assert_eq!(shadows, 0.0);
+    }
+
+    #[test]
+    fn excess_channel_clipping_blocks_median_brightening() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.15),
+            luminance_p50: Some(0.50),
+            luminance_p90: Some(0.90),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.2),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(),
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 1.0,
+            luminance_p10: Some(0.08),
+            luminance_p50: Some(0.25),
+            luminance_p90: Some(0.45),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.05),
+            colorfulness: Some(0.2),
+        };
+
+        let correction =
+            reference_relative_exposure_correction(&reference, &target, 0.0, 0.0).unwrap();
+        assert_eq!(correction, 0.0);
     }
 
     #[test]

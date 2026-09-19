@@ -575,3 +575,11 @@ Reference synchronization now separates look intent from how hard a particular f
 The strength scales median exposure refinement plus adaptive Highlights/Shadows, Whites/Blacks, Contrast, Saturation and Vibrance. The base per-photo exposure alignment and explicit photographer StyleProfile preferences remain intact. This means a backlit landscape or low-key night frame can still belong to the same batch without being forced to mimic the Reference's local tone distribution.
 
 Recipe Review exposes the same strength as a percentage. Very weak fits below 62% become a REFERENCE_MISMATCH quality exception rather than silently joining the clear batch cohort. Missing legacy percentile evidence preserves the previous full-strength behavior.
+
+## Low-light and saturated-highlight color safety
+
+Adaptive Vibrance now treats positive color recovery as a quality-sensitive operation rather than a generic gain. Reference-relative muted-color recovery still uses mean/P25 deficits, but it is attenuated when the target preview is genuinely low-key (P10/P50 plus shadow clipping) because embedded JPEG evidence cannot distinguish recoverable RAW chroma from low-light color noise.
+
+A second guard uses absolute P75 colorfulness plus highlight clipping. This matters for sunsets, neon, stage lighting and similar frames where both the Reference and target may already be colorful: relative color difference alone is not enough to protect hue/chroma near the highlight boundary.
+
+Recipe Review adds dedicated LOW_LIGHT_COLOR_LIFT and SATURATED_HIGHLIGHT_COLOR quality exceptions when a final Recipe still requests material positive Saturation/Vibrance under those conditions. Lightroom/Camera Raw remains the authoritative RAW renderer.

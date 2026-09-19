@@ -251,3 +251,9 @@ The quality preflight adds explicit deep-shadow-lift and dynamic-range-compressi
 Completed after low-light/dynamic-range protection: Reference synchronization now measures whether a target frame differs only in exposure or differs materially in tonal/color structure. Exposure-only variants stay near full synchronization strength; scene outliers automatically receive a softer version of the Reference-relative tone, endpoint, contrast and color corrections.
 
 Review surfaces the exact adaptation percentage, and very weak fits become explicit REFERENCE_MISMATCH exceptions. This moves the workflow closer to the useful mature batch-editor pattern—one trusted standard image, strong automation for ordinary variants, conservative treatment of scene outliers, and human attention only where the shared look stops being trustworthy.
+
+### Core editing quality: low-light color integrity
+
+Completed after adaptive Reference strength: automatic color recovery now protects two failure modes common in travel and family work—lifting chroma noise in genuinely dark frames, and over-driving already saturated highlight colors in neon, sunsets and stage lighting.
+
+The adaptive Vibrance path now tapers its own strength from preview evidence before Recipe materialization, while Recipe Review retains specialized quality exceptions if a final edit remains risky. The goal is fewer visibly dirty night shadows and fewer clipped/unnatural saturated highlights without turning off useful batch color matching.

@@ -466,8 +466,38 @@ pub fn reference_relative_vibrance_adjustment(
     let saturated_tail_excess = (target_p75 - reference_p75).max(0.0);
     let saturated_headroom = (1.0 - saturated_tail_excess * 8.0).clamp(0.0, 1.0);
 
-    let mut correction =
-        (mean_deficit * 45.0 + muted_deficit * 65.0) * confidence * saturated_headroom;
+    // A dark embedded preview cannot prove that lifted chroma is clean RAW
+    // detail rather than low-light color noise. Preserve muted-color recovery,
+    // but taper positive Vibrance when the frame is genuinely low-key.
+    let low_light_mid_guard = target
+        .luminance_p50
+        .map(|mid| 0.35 + ((mid - 0.10) / 0.20).clamp(0.0, 1.0) * 0.65)
+        .unwrap_or(1.0);
+    let low_light_shadow_guard = target
+        .luminance_p10
+        .map(|shadow| 0.45 + ((shadow - 0.02) / 0.08).clamp(0.0, 1.0) * 0.55)
+        .unwrap_or(1.0);
+    let shadow_clip_guard =
+        (1.0 - target.shadow_clip_ratio.unwrap_or(0.0) * 10.0).clamp(0.45, 1.0);
+    let low_light_guard = low_light_mid_guard
+        .min(low_light_shadow_guard)
+        .min(shadow_clip_guard);
+
+    // Absolute saturated-tail pressure matters even when the Reference itself
+    // is colorful (sunset, neon, stage lighting). Moderate channel clipping
+    // further reduces positive Vibrance so hue/chroma does not pile up at the
+    // highlight boundary.
+    let absolute_tail_pressure = ((target_p75 - 0.72) / 0.23).clamp(0.0, 1.0);
+    let saturated_tail_guard = (1.0 - absolute_tail_pressure * 0.55).clamp(0.45, 1.0);
+    let highlight_clip_guard =
+        (1.0 - target.highlight_clip_ratio.unwrap_or(0.0) * 25.0).clamp(0.35, 1.0);
+    let highlight_color_guard = saturated_tail_guard.min(highlight_clip_guard);
+
+    let mut correction = (mean_deficit * 45.0 + muted_deficit * 65.0)
+        * confidence
+        * saturated_headroom
+        * low_light_guard
+        * highlight_color_guard;
     if correction.abs() < 1.0 {
         correction = 0.0;
     }
@@ -1612,6 +1642,52 @@ mod tests {
             reference_relative_vibrance_adjustment(&reference, &target).unwrap();
         assert!(vibrance > 10.0);
         assert!(vibrance <= 25.0);
+    }
+
+    #[test]
+    fn low_light_guard_damps_positive_vibrance_without_disabling_it() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: Some(0.01), luminance_p10: Some(0.10),
+            luminance_p50: Some(0.32), luminance_p90: Some(0.72), luminance_p98: Some(0.90),
+            shadow_clip_ratio: Some(0.0), highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.35), colorfulness_p25: Some(0.20), colorfulness_p75: Some(0.50),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: Some(0.003), luminance_p10: Some(0.02),
+            luminance_p50: Some(0.12), luminance_p90: Some(0.55), luminance_p98: Some(0.80),
+            shadow_clip_ratio: Some(0.01), highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.15), colorfulness_p25: Some(0.05), colorfulness_p75: Some(0.30),
+        };
+
+        let vibrance =
+            reference_relative_vibrance_adjustment(&reference, &target).unwrap();
+        assert!(vibrance > 4.0);
+        assert!(vibrance < 10.0);
+    }
+
+    #[test]
+    fn saturated_highlight_guard_damps_color_lift_for_neon_like_tail() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: Some(0.03), luminance_p10: Some(0.12),
+            luminance_p50: Some(0.45), luminance_p90: Some(0.82), luminance_p98: Some(0.96),
+            shadow_clip_ratio: Some(0.0), highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.60), colorfulness_p25: Some(0.30), colorfulness_p75: Some(0.90),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: Some(0.03), luminance_p10: Some(0.12),
+            luminance_p50: Some(0.45), luminance_p90: Some(0.88), luminance_p98: Some(0.99),
+            shadow_clip_ratio: Some(0.0), highlight_clip_ratio: Some(0.02),
+            colorfulness: Some(0.35), colorfulness_p25: Some(0.10), colorfulness_p75: Some(0.82),
+        };
+
+        let vibrance =
+            reference_relative_vibrance_adjustment(&reference, &target).unwrap();
+        assert!(vibrance > 8.0);
+        assert!(vibrance < 14.0);
     }
 
     #[test]

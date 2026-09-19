@@ -52,6 +52,8 @@ pub enum RecipeQualityRisk {
     DeepShadowLift,
     DynamicRangeCompression,
     ReferenceMismatch,
+    LowLightColorLift,
+    SaturatedHighlightColor,
     SaturatedColorPressure,
     StrongColorShift,
 }
@@ -123,6 +125,21 @@ pub fn assess_recipe_quality_risk(
 
     let saturation = adjustments.saturation.unwrap_or(0.0);
     let vibrance = adjustments.vibrance.unwrap_or(0.0);
+    let positive_color_lift = saturation.max(0.0) + vibrance.max(0.0);
+    if exposure.is_some_and(|value| {
+        value.luminance_p10.is_some_and(|shadow| shadow < 0.055)
+            && value.luminance_p50.is_some_and(|mid| mid < 0.18)
+            && positive_color_lift > 8.0
+    }) {
+        return Some(RecipeQualityRisk::LowLightColorLift);
+    }
+    if exposure.is_some_and(|value| {
+        value.highlight_clip_ratio.unwrap_or(0.0) > 0.008
+            && value.colorfulness_p75.is_some_and(|p75| p75 > 0.78)
+            && positive_color_lift > 6.0
+    }) {
+        return Some(RecipeQualityRisk::SaturatedHighlightColor);
+    }
     if exposure
         .and_then(|value| value.colorfulness_p75)
         .is_some_and(|p75| p75 > 0.82)
@@ -513,6 +530,58 @@ mod tests {
         assert_eq!(
             assess_recipe_quality_risk(&recipe, Some(&wide)),
             Some(RecipeQualityRisk::DynamicRangeCompression)
+        );
+    }
+
+    #[test]
+    fn recipe_quality_gate_flags_low_light_and_saturated_highlight_color_lift() {
+        let asset_id = Uuid::new_v4();
+        let mut recipe = Recipe {
+            id: Uuid::new_v4(),
+            name: "color-risk".into(),
+            target_asset_id: Some(asset_id),
+            source_reference_ids: Vec::new(),
+            adjustments: crate::EditAdjustments::default(),
+        };
+        recipe.adjustments.vibrance = Some(10.0);
+
+        let low_light = PhotoExposureAnalysis {
+            asset_id,
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 0.9,
+            luminance_p02: Some(0.005),
+            luminance_p10: Some(0.03),
+            luminance_p50: Some(0.14),
+            luminance_p90: Some(0.60),
+            luminance_p98: Some(0.85),
+            shadow_clip_ratio: Some(0.01),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.25),
+            colorfulness_p25: Some(0.08),
+            colorfulness_p75: Some(0.45),
+        };
+        assert_eq!(
+            assess_recipe_quality_risk(&recipe, Some(&low_light)),
+            Some(RecipeQualityRisk::LowLightColorLift)
+        );
+
+        let saturated_highlight = PhotoExposureAnalysis {
+            luminance_p10: Some(0.12),
+            luminance_p50: Some(0.42),
+            luminance_p90: Some(0.90),
+            luminance_p98: Some(0.99),
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.015),
+            colorfulness: Some(0.55),
+            colorfulness_p25: Some(0.20),
+            colorfulness_p75: Some(0.86),
+            ..low_light
+        };
+        assert_eq!(
+            assess_recipe_quality_risk(&recipe, Some(&saturated_highlight)),
+            Some(RecipeQualityRisk::SaturatedHighlightColor)
         );
     }
 

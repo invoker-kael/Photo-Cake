@@ -523,3 +523,12 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Recipe Review MUST expose the computed Reference adaptation percentage for each photo.
 - A computed strength below 62% MUST route the photo to quality Review as REFERENCE_MISMATCH.
 - Legacy evidence without the required percentiles MUST retain the existing behavior rather than being rejected or silently assigned an invented score.
+
+### Low-light and saturated-highlight color integrity
+
+- Positive adaptive Vibrance MUST be attenuated for genuinely low-key targets using available P10/P50 and shadow-clipping evidence.
+- The guard MUST reduce—not blindly disable—muted-color recovery so night photographs can still receive useful color normalization.
+- Absolute high-tail colorfulness plus moderate highlight clipping MUST attenuate positive Vibrance even when the selected Reference is itself highly colorful.
+- Final Recipes that still apply more than modest positive color lift to deep low-light frames MUST enter quality Review as LOW_LIGHT_COLOR_LIFT.
+- Final Recipes that apply positive color lift to strongly saturated, moderately clipped highlights MUST enter quality Review as SATURATED_HIGHLIGHT_COLOR.
+- Existing generic SATURATED_COLOR_PRESSURE and STRONG_COLOR_SHIFT checks remain fallback quality gates.

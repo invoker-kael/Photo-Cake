@@ -54,6 +54,7 @@ pub enum RecipeQualityRisk {
     ReferenceMismatch,
     LowLightColorLift,
     SaturatedHighlightColor,
+    LocalizedColorDesaturation,
     SaturatedColorPressure,
     StrongColorShift,
 }
@@ -139,6 +140,13 @@ pub fn assess_recipe_quality_risk(
             && positive_color_lift > 6.0
     }) {
         return Some(RecipeQualityRisk::SaturatedHighlightColor);
+    }
+    if exposure.is_some_and(|value| {
+        let p25 = value.colorfulness_p25.unwrap_or(0.0);
+        let p75 = value.colorfulness_p75.unwrap_or(p25);
+        saturation < -8.0 && p25 < 0.22 && p75 > 0.70 && p75 - p25 > 0.45
+    }) {
+        return Some(RecipeQualityRisk::LocalizedColorDesaturation);
     }
     if exposure
         .and_then(|value| value.colorfulness_p75)
@@ -582,6 +590,40 @@ mod tests {
         assert_eq!(
             assess_recipe_quality_risk(&recipe, Some(&saturated_highlight)),
             Some(RecipeQualityRisk::SaturatedHighlightColor)
+        );
+    }
+
+    #[test]
+    fn recipe_quality_gate_flags_localized_tail_desaturation() {
+        let asset_id = Uuid::new_v4();
+        let mut recipe = Recipe {
+            id: Uuid::new_v4(),
+            name: "localized-color".into(),
+            target_asset_id: Some(asset_id),
+            source_reference_ids: Vec::new(),
+            adjustments: crate::EditAdjustments::default(),
+        };
+        recipe.adjustments.saturation = Some(-12.0);
+        let exposure = PhotoExposureAnalysis {
+            asset_id,
+            exposure_ev: 0.0,
+            temperature_k: None,
+            tint: None,
+            confidence: 0.9,
+            luminance_p02: None,
+            luminance_p10: None,
+            luminance_p50: None,
+            luminance_p90: None,
+            luminance_p98: None,
+            shadow_clip_ratio: Some(0.0),
+            highlight_clip_ratio: Some(0.0),
+            colorfulness: Some(0.35),
+            colorfulness_p25: Some(0.12),
+            colorfulness_p75: Some(0.78),
+        };
+        assert_eq!(
+            assess_recipe_quality_risk(&recipe, Some(&exposure)),
+            Some(RecipeQualityRisk::LocalizedColorDesaturation)
         );
     }
 

@@ -1032,6 +1032,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       REFERENCE_MISMATCH: "this frame differs materially from the Reference look",
       LOW_LIGHT_COLOR_LIFT: "low-light color lift may amplify chroma noise",
       SATURATED_HIGHLIGHT_COLOR: "saturated highlights need gentler color lift",
+      LOCALIZED_COLOR_DESATURATION: "global desaturation may wash out an otherwise muted frame",
       SATURATED_COLOR_PRESSURE: "already-saturated colors need protection",
       STRONG_COLOR_SHIFT: "strong saturation/vibrance shift",
     };

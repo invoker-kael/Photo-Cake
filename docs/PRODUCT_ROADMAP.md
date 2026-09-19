@@ -269,3 +269,9 @@ This does not replace RAW rendering. It makes the exception-review surface more 
 Completed after preview perceptual fidelity: Reference-driven Contrast now follows both sides of the midtone in exposure-invariant log space. This improves batch consistency when images have similar brightness but different local tonal shape.
 
 Asymmetric scenes no longer receive an unnecessarily strong global Contrast move simply because one tonal side differs from the Reference, and endpoint pressure further limits positive hardening near black/white boundaries.
+
+### Core editing quality: color-distribution-aware saturation
+
+Completed after midtone structure consistency: global Saturation matching now differentiates broadly over-colorful frames from otherwise muted images that contain only a small saturated tail.
+
+This reduces a common batch-editing artifact where neon signs, flowers or sunset highlights cause the whole image—including skin, walls and muted backgrounds—to be desaturated. Strong manual/style-driven desaturation on the same mixed distribution is surfaced as a Review exception instead of silently batch-confirming.

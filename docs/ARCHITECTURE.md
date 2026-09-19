@@ -599,3 +599,11 @@ Reference-relative Contrast now compares tonal separation on both sides of P50 i
 Global Contrast is applied strongly only when both sides support the same direction. If one side is flatter while the other is already harder than the Reference, the global correction is damped and the existing Highlights/Shadows path remains responsible for the asymmetric difference. Positive Contrast is further reduced when P02/P98 show little endpoint headroom.
 
 This keeps group tonality closer to the selected Reference while avoiding a common batch-editing failure mode: fixing one tonal region by making the entire frame too hard or too flat.
+
+## Distribution-aware Reference color matching
+
+Reference-relative color matching now uses the full preview colorfulness distribution rather than treating mean colorfulness as sufficient evidence for global Saturation changes. P25 represents how colorful the broader/muted portion of the frame is, while P75 describes the saturated tail.
+
+A target whose mean and P25 are both materially above the Reference can still receive a meaningful global Saturation reduction. When P25 remains near the Reference but P75 is much higher, the excess is treated as localized saturated content—such as neon, flowers, signage or sunset accents—and global desaturation is strongly attenuated so muted regions are not washed out.
+
+P25 also contributes to Reference adaptation match strength, so a materially different muted-color distribution lowers how strongly secondary Reference-relative corrections propagate. Recipe Review adds LOCALIZED_COLOR_DESATURATION when a final Recipe still requests strong global desaturation on a frame with a muted lower quartile and a very saturated upper tail.

@@ -158,13 +158,19 @@ pub fn reference_relative_match_strength(
 
     let color_distance = match (reference.colorfulness, target.colorfulness) {
         (Some(reference_mean), Some(target_mean)) => {
+            let muted = match (reference.colorfulness_p25, target.colorfulness_p25) {
+                (Some(reference_muted), Some(target_muted)) => {
+                    (reference_muted - target_muted).abs() * 0.35
+                }
+                _ => 0.0,
+            };
             let tail = match (reference.colorfulness_p75, target.colorfulness_p75) {
                 (Some(reference_tail), Some(target_tail)) => {
                     (reference_tail - target_tail).abs() * 0.5
                 }
                 _ => 0.0,
             };
-            (reference_mean - target_mean).abs() + tail
+            (reference_mean - target_mean).abs() + muted + tail
         }
         _ => 0.0,
     };
@@ -470,17 +476,47 @@ pub fn reference_relative_saturation_adjustment(
 ) -> Option<f32> {
     let reference_colorfulness = reference.colorfulness?;
     let target_colorfulness = target.colorfulness?;
+    let mean_excess = (target_colorfulness - reference_colorfulness).max(0.0);
+    if mean_excess <= 0.0 {
+        return Some(0.0);
+    }
+
     let confidence = reference
         .confidence
         .min(target.confidence)
         .clamp(0.2, 1.0);
 
-    let mut correction =
-        ((reference_colorfulness - target_colorfulness) * 70.0 * confidence).min(0.0);
-    if correction.abs() < 1.0 {
-        correction = 0.0;
+    // Mean colorfulness alone cannot tell whether the whole frame is too
+    // colorful or whether a small neon/flower/sunset region creates a strong
+    // saturated tail. Use P25 as evidence that the broader image really is
+    // more colorful before committing to a strong global desaturation.
+    let broad_excess = match (reference.colorfulness_p25, target.colorfulness_p25) {
+        (Some(reference_p25), Some(target_p25)) => (target_p25 - reference_p25).max(0.0),
+        _ => {
+            let mut legacy = -(mean_excess * 70.0 * confidence);
+            if legacy.abs() < 1.0 {
+                legacy = 0.0;
+            }
+            return Some(legacy.clamp(-20.0, 0.0));
+        }
+    };
+    let tail_excess = match (reference.colorfulness_p75, target.colorfulness_p75) {
+        (Some(reference_p75), Some(target_p75)) => (target_p75 - reference_p75).max(0.0),
+        _ => broad_excess,
+    };
+
+    let mut magnitude = (mean_excess * 45.0 + broad_excess * 55.0) * confidence;
+    let localized_tail = broad_excess < 0.045 && tail_excess > broad_excess + 0.10;
+    if localized_tail {
+        magnitude *= 0.35;
+    } else if broad_excess < 0.08 && tail_excess > broad_excess + 0.06 {
+        magnitude *= 0.65;
     }
-    Some(correction.clamp(-20.0, 0.0))
+
+    if magnitude < 1.0 {
+        magnitude = 0.0;
+    }
+    Some((-magnitude).clamp(-20.0, 0.0))
 }
 
 /// Lift muted colors toward the selected Reference without applying the same
@@ -1903,6 +1939,51 @@ mod tests {
         let vibrance =
             reference_relative_vibrance_adjustment(&reference, &target).unwrap();
         assert!(vibrance < 3.0);
+    }
+
+    #[test]
+    fn localized_saturated_tail_does_not_desaturate_muted_frame_aggressively() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.22), colorfulness_p25: Some(0.10),
+            colorfulness_p75: Some(0.38),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.34), colorfulness_p25: Some(0.10),
+            colorfulness_p75: Some(0.70),
+        };
+
+        let saturation =
+            reference_relative_saturation_adjustment(&reference, &target).unwrap();
+        assert!(saturation < 0.0);
+        assert!(saturation > -4.0);
+    }
+
+    #[test]
+    fn broadly_colorful_target_still_gets_meaningful_global_desaturation() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.20), colorfulness_p25: Some(0.10),
+            colorfulness_p75: Some(0.35),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.45), colorfulness_p25: Some(0.25),
+            colorfulness_p75: Some(0.65),
+        };
+
+        let saturation =
+            reference_relative_saturation_adjustment(&reference, &target).unwrap();
+        assert!(saturation < -15.0);
     }
 
     #[test]

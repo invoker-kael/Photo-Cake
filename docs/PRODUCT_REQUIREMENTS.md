@@ -550,3 +550,12 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Positive Contrast MUST back off when clipping is present.
 - Positive Contrast SHOULD also back off when P02/P98 indicate limited endpoint headroom.
 - The existing per-photo Reference adaptation strength remains authoritative over the final adaptive correction magnitude.
+
+### Distribution-aware Reference color matching
+
+- Reference-relative Saturation MUST distinguish broad colorfulness excess from a localized saturated tail.
+- Mean colorfulness MUST NOT by itself justify strong global desaturation when target P25 remains near the Reference and only P75 is materially higher.
+- Broad excess supported by both mean and P25 SHOULD still receive meaningful global Saturation correction.
+- Missing legacy P25 evidence MUST preserve the previous mean-based behavior rather than silently disabling color matching.
+- Reference adaptation strength SHOULD include lower-quartile colorfulness when available.
+- A final Recipe with strong negative Saturation on a frame that has low P25, high P75 and a large P75-P25 spread MUST enter quality Review as LOCALIZED_COLOR_DESATURATION.

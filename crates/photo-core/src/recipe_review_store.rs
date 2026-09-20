@@ -681,7 +681,6 @@ mod tests {
                 contrast: false,
                 saturation: true,
                 vibrance: true,
-                color_mixer_saturation: None,
             },
         );
 

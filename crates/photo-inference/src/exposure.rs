@@ -29,17 +29,24 @@ fn rgb_hue_degrees(red: u8, green: u8, blue: u8) -> Option<(f32, f32)> {
     Some((hue, saturation))
 }
 
-fn hue_bin_index(hue: f32) -> usize {
-    match hue {
-        value if value < 15.0 || value >= 330.0 => 0, // red
-        value if value < 45.0 => 1,                   // orange
-        value if value < 90.0 => 2,                   // yellow
-        value if value < 150.0 => 3,                  // green
-        value if value < 210.0 => 4,                  // aqua
-        value if value < 255.0 => 5,                  // blue
-        value if value < 285.0 => 6,                  // purple
-        _ => 7,                                       // magenta
+const HUE_CENTERS: [f32; 8] = [0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 270.0, 300.0];
+
+fn hue_bin_weights(hue: f32) -> [(usize, f32); 2] {
+    let hue = hue.rem_euclid(360.0);
+    for index in 0..HUE_CENTERS.len() {
+        let start = HUE_CENTERS[index];
+        let (next_index, end) = if index + 1 < HUE_CENTERS.len() {
+            (index + 1, HUE_CENTERS[index + 1])
+        } else {
+            (0, 360.0)
+        };
+        if hue >= start && hue < end {
+            let width = (end - start).max(1e-6);
+            let t = ((hue - start) / width).clamp(0.0, 1.0);
+            return [(index, 1.0 - t), (next_index, t)];
+        }
     }
+    [(0, 1.0), (0, 0.0)]
 }
 
 fn analyze_hue_distribution(rgb: &image::RgbImage) -> HueColorDistribution {
@@ -48,24 +55,28 @@ fn analyze_hue_distribution(rgb: &image::RgbImage) -> HueColorDistribution {
         .filter(|pixel| pixel[0].max(pixel[1]).max(pixel[2]) >= 16)
         .count()
         .max(1) as f32;
-    let mut counts = [0usize; 8];
+    let mut weight_sum = [0.0f32; 8];
     let mut saturation_sum = [0.0f32; 8];
 
     for pixel in rgb.pixels() {
         let Some((hue, saturation)) = rgb_hue_degrees(pixel[0], pixel[1], pixel[2]) else {
             continue;
         };
-        let index = hue_bin_index(hue);
-        counts[index] += 1;
-        saturation_sum[index] += saturation;
+        for (index, weight) in hue_bin_weights(hue) {
+            if weight <= 0.0 {
+                continue;
+            }
+            weight_sum[index] += weight;
+            saturation_sum[index] += saturation * weight;
+        }
     }
 
     let bin = |index: usize| HueColorBin {
-        coverage: counts[index] as f32 / visible,
-        saturation: if counts[index] == 0 {
+        coverage: weight_sum[index] / visible,
+        saturation: if weight_sum[index] <= 1e-6 {
             0.0
         } else {
-            saturation_sum[index] / counts[index] as f32
+            saturation_sum[index] / weight_sum[index]
         },
     };
 
@@ -276,6 +287,22 @@ mod tests {
         assert!(hues.blue.coverage > 0.35);
         assert!(hues.red.saturation > 0.70);
         assert!(hues.blue.saturation > 0.60);
+    }
+
+    #[test]
+    fn hue_distribution_feathers_boundary_colors_across_adjacent_centers() {
+        let image = DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
+            64,
+            64,
+            image::Rgb([220, 170, 40]),
+        ));
+        let hues = analyze_preview_exposure(Uuid::new_v4(), &image)
+            .hue_color_distribution
+            .unwrap();
+
+        assert!(hues.orange.coverage > 0.25);
+        assert!(hues.yellow.coverage > 0.25);
+        assert!(hues.orange.coverage + hues.yellow.coverage > 0.95);
     }
 
     #[test]

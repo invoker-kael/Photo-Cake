@@ -287,3 +287,11 @@ Mixed distributions that are dull in muted regions but excessively saturated in 
 Completed after coordinated global color controls: mixed-color conflict frames can now receive a conservative eight-zone Color Mixer Saturation starting point instead of relying only on global Saturation/Vibrance.
 
 The implementation adds hue-distribution evidence, cache versioning, Reference-relative selective saturation, Lightroom XMP round-trip support, perceptual preview approximation, and Review visibility. Conflict frames remain exception-first and still require photographer confirmation. Hue and Luminance Color Mixer automation remain intentionally out of scope until stronger evidence is available.
+
+### Core editing quality: stable selective hue matching
+
+Completed after selective Reference Color Mixer saturation: hue evidence now feathers pixels across adjacent mixer centers instead of using hard boundaries, including circular Magenta→Red interpolation.
+
+Selective corrections are also coverage-aware. A hue that occupies materially different portions of Reference and target is treated as a likely composition difference and skipped, while small regions receive reduced authority. Red/Orange positive lift is intentionally tighter than desaturation so family, portrait and warm indoor photographs are less likely to receive excessive warm-color saturation from an automatic Reference match.
+
+ExposureAnalysis moves to v8 so existing libraries recompute this evidence instead of silently reusing the older hard-bin cache.

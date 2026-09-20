@@ -691,19 +691,32 @@ fn selective_saturation_delta(
     reference: HueColorBin,
     target: HueColorBin,
     confidence: f32,
-    max_abs: f32,
+    max_negative_abs: f32,
+    max_positive: f32,
 ) -> Option<f32> {
-    if reference.coverage < 0.02 || target.coverage < 0.02 {
+    let min_coverage = reference.coverage.min(target.coverage);
+    let max_coverage = reference.coverage.max(target.coverage);
+    if min_coverage < 0.015 {
         return None;
     }
-    let coverage_overlap =
-        reference.coverage.min(target.coverage) / reference.coverage.max(target.coverage).max(1e-6);
-    let strength = 0.45 + coverage_overlap.clamp(0.0, 1.0) * 0.55;
+
+    // A hue that occupies very different amounts of the two frames is more
+    // likely a different object/scene composition than a style mismatch.
+    let coverage_overlap = min_coverage / max_coverage.max(1e-6);
+    if coverage_overlap < 0.25 {
+        return None;
+    }
+
+    // Small-but-real hue regions remain usable, but they receive less authority
+    // than broad, well-supported regions.
+    let coverage_reliability = ((min_coverage - 0.015) / 0.08).clamp(0.0, 1.0);
+    let strength = (0.35 + coverage_overlap.clamp(0.0, 1.0) * 0.65)
+        * (0.55 + coverage_reliability * 0.45);
     let delta = (reference.saturation - target.saturation) * 55.0 * confidence * strength;
     if delta.abs() < 2.0 {
         None
     } else {
-        Some(delta.clamp(-max_abs, max_abs))
+        Some(delta.clamp(-max_negative_abs, max_positive))
     }
 }
 
@@ -725,14 +738,16 @@ pub fn reference_relative_color_mixer_saturation(
     let confidence = reference.confidence.min(target.confidence).clamp(0.2, 1.0);
 
     let result = ColorMixerSaturation {
-        red: selective_saturation_delta(reference_hues.red, target_hues.red, confidence, 10.0),
-        orange: selective_saturation_delta(reference_hues.orange, target_hues.orange, confidence, 8.0),
-        yellow: selective_saturation_delta(reference_hues.yellow, target_hues.yellow, confidence, 16.0),
-        green: selective_saturation_delta(reference_hues.green, target_hues.green, confidence, 16.0),
-        aqua: selective_saturation_delta(reference_hues.aqua, target_hues.aqua, confidence, 16.0),
-        blue: selective_saturation_delta(reference_hues.blue, target_hues.blue, confidence, 16.0),
-        purple: selective_saturation_delta(reference_hues.purple, target_hues.purple, confidence, 14.0),
-        magenta: selective_saturation_delta(reference_hues.magenta, target_hues.magenta, confidence, 12.0),
+        // Positive warm-hue lift is deliberately tighter than desaturation:
+        // red/orange frequently carry skin, wood and indoor warm light.
+        red: selective_saturation_delta(reference_hues.red, target_hues.red, confidence, 10.0, 6.0),
+        orange: selective_saturation_delta(reference_hues.orange, target_hues.orange, confidence, 8.0, 5.0),
+        yellow: selective_saturation_delta(reference_hues.yellow, target_hues.yellow, confidence, 16.0, 12.0),
+        green: selective_saturation_delta(reference_hues.green, target_hues.green, confidence, 16.0, 16.0),
+        aqua: selective_saturation_delta(reference_hues.aqua, target_hues.aqua, confidence, 16.0, 16.0),
+        blue: selective_saturation_delta(reference_hues.blue, target_hues.blue, confidence, 16.0, 16.0),
+        purple: selective_saturation_delta(reference_hues.purple, target_hues.purple, confidence, 14.0, 14.0),
+        magenta: selective_saturation_delta(reference_hues.magenta, target_hues.magenta, confidence, 12.0, 10.0),
     };
     (!result.is_empty()).then_some(result)
 }
@@ -2368,6 +2383,59 @@ mod tests {
         };
         reference.hue_color_distribution = Some(HueColorDistribution::default());
         assert!(reference_relative_color_mixer_saturation(&reference, &target).is_none());
+    }
+
+    #[test]
+    fn selective_color_mixer_skips_hues_with_large_coverage_mismatch() {
+        let mut reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.30), colorfulness_p25: Some(0.20),
+            colorfulness_p75: Some(0.48), hue_color_distribution: None,
+        };
+        let mut target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.34), colorfulness_p25: Some(0.10),
+            colorfulness_p75: Some(0.68), hue_color_distribution: None,
+        };
+        let mut reference_hues = HueColorDistribution::default();
+        reference_hues.blue = HueColorBin { coverage: 0.03, saturation: 0.45 };
+        let mut target_hues = HueColorDistribution::default();
+        target_hues.blue = HueColorBin { coverage: 0.20, saturation: 0.78 };
+        reference.hue_color_distribution = Some(reference_hues);
+        target.hue_color_distribution = Some(target_hues);
+
+        assert!(reference_relative_color_mixer_saturation(&reference, &target).is_none());
+    }
+
+    #[test]
+    fn selective_color_mixer_caps_positive_orange_lift_for_warm_subjects() {
+        let mut reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.30), colorfulness_p25: Some(0.20),
+            colorfulness_p75: Some(0.48), hue_color_distribution: None,
+        };
+        let mut target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.34), colorfulness_p25: Some(0.10),
+            colorfulness_p75: Some(0.68), hue_color_distribution: None,
+        };
+        let mut reference_hues = HueColorDistribution::default();
+        reference_hues.orange = HueColorBin { coverage: 0.25, saturation: 0.85 };
+        let mut target_hues = HueColorDistribution::default();
+        target_hues.orange = HueColorBin { coverage: 0.25, saturation: 0.35 };
+        reference.hue_color_distribution = Some(reference_hues);
+        target.hue_color_distribution = Some(target_hues);
+
+        let mixer = reference_relative_color_mixer_saturation(&reference, &target).unwrap();
+        assert!((mixer.orange.unwrap() - 5.0).abs() < 0.001);
     }
 
     #[test]

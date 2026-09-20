@@ -618,10 +618,18 @@ A separate color-distribution conflict detector compares Reference and target P2
 
 ## Selective Color Mixer saturation
 
-Photo-Cake now has a deliberately narrow selective-color path for frames already identified as COLOR_DISTRIBUTION_CONFLICT. Analyze records an eight-zone preview hue distribution (Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta) with per-zone coverage and mean saturation. This evidence is versioned as ExposureAnalysis v7 so older cached analyses cannot be mistaken for hue-aware evidence.
+Photo-Cake now has a deliberately narrow selective-color path for frames already identified as COLOR_DISTRIBUTION_CONFLICT. Analyze records an eight-zone preview hue distribution (Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta) with per-zone coverage and mean saturation. This evidence is versioned as ExposureAnalysis v8 so older cached analyses cannot be mistaken for the current hue-aware evidence.
 
 For conflict frames only, Reference matching may generate conservative Color Mixer Saturation corrections. A hue zone is eligible only when both Reference and target contain meaningful coverage; correction strength is reduced when zone coverage differs, and Red/Orange are capped more tightly because those zones frequently include skin. Missing hue evidence returns no selective correction.
 
 The resulting Recipe writes only Adobe Camera Raw Color Mixer saturation attributes (for example SaturationAdjustmentBlue). Hue and Luminance mixer controls remain unsupported because Photo-Cake does not yet have evidence strong enough to infer them safely. The Review preview approximates these saturation corrections with smooth interpolation between adjacent hue centers, while Lightroom/Camera Raw remains the authoritative RAW renderer.
 
 COLOR_DISTRIBUTION_CONFLICT still requires photographer Review even when a selective starting correction is generated. The goal is a better starting point, not silent auto-acceptance of a mixed-color scene.
+
+## Stable selective hue evidence
+
+ExposureAnalysis v8 replaces hard hue-bin assignment with feathered weighting between adjacent Red/Orange/Yellow/Green/Aqua/Blue/Purple/Magenta centers. Every colorful preview pixel contributes to at most two neighboring zones with weights summing to one, including the Magenta→Red wrap. This prevents small white-balance, exposure or JPEG changes near a hue boundary from moving an entire region abruptly into a different Color Mixer channel.
+
+Selective Reference matching now treats hue coverage as scene-composition evidence as well as confidence. Very small zones are attenuated, and zones whose Reference/target coverage overlap is below 25% are skipped because they are more likely to represent a different object than a style mismatch. Positive Red/Orange saturation lift is capped more tightly than desaturation to reduce unintended pressure on skin and other warm subjects.
+
+The existing COLOR_DISTRIBUTION_CONFLICT Review gate remains authoritative. These changes improve the automatic starting point and its stability; they do not silently auto-approve mixed-color scenes.

@@ -601,6 +601,20 @@ mod tests {
     }
 
     #[test]
+    fn color_mixer_wraps_smoothly_from_magenta_to_red() {
+        let mixer = ColorMixerSaturation {
+            red: Some(20.0),
+            magenta: Some(0.0),
+            ..ColorMixerSaturation::default()
+        };
+        let halfway = color_mixer_saturation_for_hue(&mixer, 330.0);
+        let near_red = color_mixer_saturation_for_hue(&mixer, 359.0);
+        assert!((halfway - 10.0).abs() < 0.01);
+        assert!(near_red > halfway);
+        assert!(near_red < 20.0);
+    }
+
+    #[test]
     fn negative_saturation_moves_color_toward_gray() {
         let source = DynamicImage::ImageRgb8(ImageBuffer::from_pixel(
             8,

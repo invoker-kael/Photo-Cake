@@ -584,3 +584,14 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - COLOR_DISTRIBUTION_CONFLICT MUST remain a Review condition; selective Color Mixer output is a conservative starting point, not an automatic approval signal.
 - HueAdjustment and LuminanceAdjustment controls MUST remain absent until dedicated trustworthy evidence exists.
 - Recipes without Color Mixer adjustments MUST serialize identically for review fingerprint purposes so existing confirmations are not invalidated unnecessarily.
+
+### Stable selective hue evidence
+
+- Hue-aware ExposureAnalysis MUST use a cache/model revision that changes whenever hue-distribution semantics change; the feathered implementation is v8.
+- A colorful sample near a hue boundary MUST be distributed between adjacent Color Mixer centers instead of being assigned wholly to one hard bin.
+- Adjacent hue weights for one sample MUST sum to one, including the Magenta-to-Red circular boundary.
+- Automatic selective correction MUST skip a hue when Reference/target coverage overlap is below 25%, because materially different coverage is treated as scene-composition evidence.
+- Small-but-valid hue regions SHOULD be attenuated rather than receiving the same authority as broad regions.
+- Positive Red/Orange automatic Saturation lift MUST use stricter bounds than negative correction to reduce unintended changes to skin and warm subjects.
+- Preview Color Mixer interpolation MUST remain continuous through the Magenta-to-Red wrap.
+- These safeguards MUST NOT remove the COLOR_DISTRIBUTION_CONFLICT photographer Review requirement.

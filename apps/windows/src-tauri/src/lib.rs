@@ -3,7 +3,7 @@ use photo_core::{
     build_companion_snapshot as build_companion_snapshot_core, build_group_culling_result,
     assess_recipe_quality_risk, build_recipe_review_group_preflight, build_reference_readiness_plan,
     build_style_sync_group_context, build_style_sync_preflight, derive_workflow_status,
-    reference_relative_match_strength,
+    reference_relative_color_distribution_conflict, reference_relative_match_strength,
     preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
     route_exposure_bracket_sources, write_group_sidecars, write_sidecar_batch, AnalysisCache,
     AssetMetadataEvidence, AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor,
@@ -493,6 +493,15 @@ fn recipe_review_preflight_for_group(
             .map(|strength| (strength * 100.0).round().clamp(0.0, 100.0) as u8);
         let quality_risk = recipe
             .and_then(|recipe| assess_recipe_quality_risk(recipe, analysis.as_ref()))
+            .or_else(|| {
+                reference_analysis
+                    .as_ref()
+                    .zip(analysis.as_ref())
+                    .is_some_and(|(reference, target)| {
+                        reference_relative_color_distribution_conflict(reference, target)
+                    })
+                    .then_some(RecipeQualityRisk::ColorDistributionConflict)
+            })
             .or_else(|| {
                 reference_match_strength
                     .is_some_and(|strength| strength < 0.62)

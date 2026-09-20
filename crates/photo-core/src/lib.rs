@@ -63,6 +63,7 @@ pub use color_sync::{
     GroupColorInvalidation, GroupColorInvalidationScope, GroupColorSyncPlan, GroupSyncMode,
     PhotoColorAnalysis, PhotoExposureAnalysis, ResolvedColorEdit, SemanticColorIntent,
     SemanticRegion, reference_relative_contrast_adjustment,
+    reference_relative_color_adjustments, reference_relative_color_distribution_conflict,
     reference_relative_endpoint_adjustments, reference_relative_exposure_correction,
     reference_relative_match_strength, reference_relative_saturation_adjustment,
     reference_relative_tone_adjustments, reference_relative_vibrance_adjustment,

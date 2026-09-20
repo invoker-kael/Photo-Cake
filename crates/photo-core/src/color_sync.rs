@@ -584,6 +584,66 @@ pub fn reference_relative_vibrance_adjustment(
     Some(correction.clamp(0.0, 25.0))
 }
 
+pub fn reference_relative_color_adjustments(
+    reference: &PhotoExposureAnalysis,
+    target: &PhotoExposureAnalysis,
+) -> (Option<f32>, Option<f32>) {
+    let mut saturation = reference_relative_saturation_adjustment(reference, target);
+    let mut vibrance = reference_relative_vibrance_adjustment(reference, target);
+
+    if let (Some(saturation_value), Some(vibrance_value)) = (saturation, vibrance) {
+        if saturation_value < 0.0 && vibrance_value > 0.0 {
+            let muted_deficit = reference
+                .colorfulness_p25
+                .zip(target.colorfulness_p25)
+                .map(|(reference_p25, target_p25)| (reference_p25 - target_p25).max(0.0))
+                .unwrap_or(0.0);
+
+            // Negative global Saturation and positive Vibrance can partially
+            // cancel each other while changing the distribution in opposite
+            // directions. When the lower quartile is genuinely deficient,
+            // keep the selective Vibrance path and avoid globally washing it
+            // out. If the lower quartile is effectively already matched,
+            // prefer the global desaturation and skip the redundant Vibrance.
+            if muted_deficit >= 0.03 {
+                saturation = Some(0.0);
+                vibrance = Some(vibrance_value.min(12.0));
+            } else {
+                vibrance = Some(0.0);
+            }
+        }
+    }
+
+    (saturation, vibrance)
+}
+
+pub fn reference_relative_color_distribution_conflict(
+    reference: &PhotoExposureAnalysis,
+    target: &PhotoExposureAnalysis,
+) -> bool {
+    let Some((reference_p25, target_p25)) =
+        reference.colorfulness_p25.zip(target.colorfulness_p25)
+    else {
+        return false;
+    };
+    let Some((reference_p75, target_p75)) =
+        reference.colorfulness_p75.zip(target.colorfulness_p75)
+    else {
+        return false;
+    };
+
+    let muted_deficit = (reference_p25 - target_p25).max(0.0);
+    let tail_excess = (target_p75 - reference_p75).max(0.0);
+    let reference_spread = (reference_p75 - reference_p25).max(0.0);
+    let target_spread = (target_p75 - target_p25).max(0.0);
+
+    muted_deficit > 0.05
+        && tail_excess > 0.08
+        && target_spread > reference_spread + 0.16
+        && target_spread > 0.42
+}
+
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResolvedColorEdit {
     pub asset_id: Uuid,
@@ -2030,6 +2090,72 @@ mod tests {
             reference_relative_vibrance_adjustment(&reference, &target),
             Some(0.0)
         );
+    }
+
+    #[test]
+    fn coordinated_color_adjustment_prefers_vibrance_for_muted_deficit() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.30), colorfulness_p25: Some(0.20),
+            colorfulness_p75: Some(0.50),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.34), colorfulness_p25: Some(0.12),
+            colorfulness_p75: Some(0.54),
+        };
+
+        let (saturation, vibrance) =
+            reference_relative_color_adjustments(&reference, &target);
+        assert_eq!(saturation, Some(0.0));
+        assert!(vibrance.unwrap() > 0.0);
+    }
+
+    #[test]
+    fn coordinated_color_adjustment_prefers_desaturation_without_muted_deficit() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.20), colorfulness_p25: Some(0.10),
+            colorfulness_p75: Some(0.35),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.42), colorfulness_p25: Some(0.18),
+            colorfulness_p75: Some(0.60),
+        };
+
+        let (saturation, vibrance) =
+            reference_relative_color_adjustments(&reference, &target);
+        assert!(saturation.unwrap() < 0.0);
+        assert_eq!(vibrance, Some(0.0));
+    }
+
+    #[test]
+    fn mixed_color_distribution_is_detected_as_global_control_conflict() {
+        let reference = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.30), colorfulness_p25: Some(0.20),
+            colorfulness_p75: Some(0.48),
+        };
+        let target = PhotoExposureAnalysis {
+            asset_id: Uuid::new_v4(), exposure_ev: 0.0, temperature_k: None, tint: None,
+            confidence: 1.0, luminance_p02: None, luminance_p10: None, luminance_p50: None,
+            luminance_p90: None, luminance_p98: None, shadow_clip_ratio: None,
+            highlight_clip_ratio: None, colorfulness: Some(0.34), colorfulness_p25: Some(0.10),
+            colorfulness_p75: Some(0.68),
+        };
+
+        assert!(reference_relative_color_distribution_conflict(&reference, &target));
     }
 
     #[test]

@@ -275,3 +275,9 @@ Asymmetric scenes no longer receive an unnecessarily strong global Contrast move
 Completed after midtone structure consistency: global Saturation matching now differentiates broadly over-colorful frames from otherwise muted images that contain only a small saturated tail.
 
 This reduces a common batch-editing artifact where neon signs, flowers or sunset highlights cause the whole image—including skin, walls and muted backgrounds—to be desaturated. Strong manual/style-driven desaturation on the same mixed distribution is surfaced as a Review exception instead of silently batch-confirming.
+
+### Core editing quality: coordinated color controls
+
+Completed after distribution-aware Saturation: adaptive color matching now resolves Saturation and Vibrance as one decision instead of allowing opposite global/selective controls to fight each other.
+
+Mixed distributions that are dull in muted regions but excessively saturated in the tail are recognized as cases that need more selective color tools than Photo-Cake currently exposes. They are kept conservative and routed to Review rather than being silently batch-corrected with contradictory slider values.

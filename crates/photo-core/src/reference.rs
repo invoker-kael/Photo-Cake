@@ -3,8 +3,8 @@ use crate::classification::SceneTag;
 use crate::color_sync::{
     build_adaptive_group_plan, reference_relative_contrast_adjustment,
     reference_relative_endpoint_adjustments, reference_relative_exposure_correction,
-    reference_relative_match_strength, reference_relative_saturation_adjustment,
-    reference_relative_tone_adjustments, reference_relative_vibrance_adjustment, ColorSyncError,
+    reference_relative_color_adjustments, reference_relative_match_strength,
+    reference_relative_tone_adjustments, ColorSyncError,
     GroupColorIntent, GroupColorSyncPlan, GroupSyncMode, PhotoColorAnalysis,
     PhotoExposureAnalysis,
 };
@@ -540,16 +540,14 @@ impl ReferenceSet {
                 recipe.adjustments.contrast =
                     Some((baseline + contrast_delta * match_strength).clamp(-100.0, 100.0));
             }
-            if let Some(saturation_delta) =
-                reference_relative_saturation_adjustment(&reference_evidence, target)
-            {
+            let (saturation_delta, vibrance_delta) =
+                reference_relative_color_adjustments(&reference_evidence, target);
+            if let Some(saturation_delta) = saturation_delta {
                 let baseline = recipe.adjustments.saturation.unwrap_or(0.0);
                 recipe.adjustments.saturation =
                     Some((baseline + saturation_delta * match_strength).clamp(-100.0, 100.0));
             }
-            if let Some(vibrance_delta) =
-                reference_relative_vibrance_adjustment(&reference_evidence, target)
-            {
+            if let Some(vibrance_delta) = vibrance_delta {
                 recipe.adjustments.vibrance =
                     Some((vibrance_delta * match_strength).clamp(-100.0, 100.0));
             }

@@ -559,3 +559,13 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Missing legacy P25 evidence MUST preserve the previous mean-based behavior rather than silently disabling color matching.
 - Reference adaptation strength SHOULD include lower-quartile colorfulness when available.
 - A final Recipe with strong negative Saturation on a frame that has low P25, high P75 and a large P75-P25 spread MUST enter quality Review as LOCALIZED_COLOR_DESATURATION.
+
+### Coordinated Reference color controls
+
+- Reference-relative Saturation and Vibrance MUST be coordinated before Recipe materialization.
+- The engine MUST avoid applying meaningful negative Saturation and positive Vibrance simultaneously when both are reactions to the same Reference color mismatch.
+- When target P25 is materially below Reference P25, the selective Vibrance path SHOULD be preferred over global desaturation.
+- When P25 is already effectively matched, global desaturation MAY remain and redundant positive Vibrance SHOULD be suppressed.
+- A target with both a material muted-color deficit and a material saturated-tail excess, plus a substantially wider P75-P25 spread than the Reference, MUST be treated as a global-control conflict.
+- Such mixed color distributions MUST enter Recipe Review as COLOR_DISTRIBUTION_CONFLICT when sufficient evidence exists.
+- Missing legacy P25/P75 evidence MUST not create a false conflict.

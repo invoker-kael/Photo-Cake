@@ -55,6 +55,7 @@ pub enum RecipeQualityRisk {
     LowLightColorLift,
     SaturatedHighlightColor,
     LocalizedColorDesaturation,
+    ColorDistributionConflict,
     SaturatedColorPressure,
     StrongColorShift,
 }

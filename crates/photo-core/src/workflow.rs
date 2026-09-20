@@ -517,6 +517,7 @@ mod tests {
             colorfulness: Some(0.3),
             colorfulness_p25: Some(0.1),
             colorfulness_p75: Some(0.5),
+            hue_color_distribution: None,
         };
         let mut recipe = Recipe {
             id: Uuid::new_v4(),
@@ -570,6 +571,7 @@ mod tests {
             colorfulness: Some(0.25),
             colorfulness_p25: Some(0.08),
             colorfulness_p75: Some(0.45),
+            hue_color_distribution: None,
         };
         assert_eq!(
             assess_recipe_quality_risk(&recipe, Some(&low_light)),
@@ -586,6 +588,7 @@ mod tests {
             colorfulness: Some(0.55),
             colorfulness_p25: Some(0.20),
             colorfulness_p75: Some(0.86),
+            hue_color_distribution: None,
             ..low_light
         };
         assert_eq!(
@@ -621,6 +624,7 @@ mod tests {
             colorfulness: Some(0.35),
             colorfulness_p25: Some(0.12),
             colorfulness_p75: Some(0.78),
+            hue_color_distribution: None,
         };
         assert_eq!(
             assess_recipe_quality_risk(&recipe, Some(&exposure)),
@@ -662,6 +666,7 @@ mod tests {
             colorfulness: Some(0.6),
             colorfulness_p25: Some(0.2),
             colorfulness_p75: Some(0.9),
+            hue_color_distribution: None,
         };
         assert_eq!(
             assess_recipe_quality_risk(&recipe, Some(&exposure)),

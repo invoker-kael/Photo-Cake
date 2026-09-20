@@ -332,6 +332,17 @@ export interface BackendStyleSyncPreflight {
   targets: BackendStyleSyncTargetPlan[];
 }
 
+export interface BackendColorMixerSaturation {
+  red: number | null;
+  orange: number | null;
+  yellow: number | null;
+  green: number | null;
+  aqua: number | null;
+  blue: number | null;
+  purple: number | null;
+  magenta: number | null;
+}
+
 export interface BackendEditAdjustments {
   exposure: number | null;
   contrast: number | null;
@@ -343,6 +354,7 @@ export interface BackendEditAdjustments {
   tint: number | null;
   saturation: number | null;
   vibrance: number | null;
+  color_mixer_saturation: BackendColorMixerSaturation | null;
 }
 
 export interface BackendRecipe {

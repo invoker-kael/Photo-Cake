@@ -118,7 +118,7 @@ Current mapped adjustments:
 
 XMP stores Recipe/target identity for traceability. Group sidecar output matches target-bound Recipes back to catalog RAW assets. At preview and handoff time, Photo-Cake regenerates the base Recipe from the current ReferenceSet/StyleProfile/evidence and then applies the persisted per-photo review override, so preview and XMP share the same final values. Newly written XMP is parsed back and validated before success; a failed validation removes the new sidecar and group writing rolls back sidecars created by that operation. The workstation writes sidecars only after an explicit user action, excludes only photographer-confirmed Reject photos, and preflights the entire group so an existing XMP prevents any partial write. RAW bytes are never changed. After all missing sidecars are created, the core immediately re-preflights the complete target set and requires every existing sidecar to match the current effective Recipe state. A missing or externally changed sidecar fails the handoff and removes sidecars created by that operation; batch handoff propagates the same failure so earlier newly-created groups are rolled back.
 
-Future mappings such as HSL, tone curve, masks and richer skin/color controls extend the Recipe/XMP model rather than creating a second editing model.
+Selective Color Mixer Saturation now extends the Recipe/XMP model. Future mappings such as Color Mixer Hue/Luminance, tone curve, masks and richer skin/color controls must extend the same model rather than creating a second editing model.
 
 ## Storage and Safety
 
@@ -615,3 +615,13 @@ Reference-relative Saturation and Vibrance are now resolved together instead of 
 If both controls would otherwise move in opposite directions, the resolver uses lower-quartile colorfulness as the deciding evidence. A real muted-color deficit keeps the selective Vibrance correction and suppresses global desaturation; when the lower quartile is already matched, Vibrance is suppressed and the global Saturation correction remains.
 
 A separate color-distribution conflict detector compares Reference and target P25/P75 spreads. When the target simultaneously has materially duller muted regions and a materially stronger saturated tail, the mismatch cannot be safely solved with global Saturation/Vibrance alone. The adaptive Recipe stays conservative and Recipe Review reports COLOR_DISTRIBUTION_CONFLICT for photographer attention rather than hiding the limitation behind cancelling slider values.
+
+## Selective Color Mixer saturation
+
+Photo-Cake now has a deliberately narrow selective-color path for frames already identified as COLOR_DISTRIBUTION_CONFLICT. Analyze records an eight-zone preview hue distribution (Red, Orange, Yellow, Green, Aqua, Blue, Purple, Magenta) with per-zone coverage and mean saturation. This evidence is versioned as ExposureAnalysis v7 so older cached analyses cannot be mistaken for hue-aware evidence.
+
+For conflict frames only, Reference matching may generate conservative Color Mixer Saturation corrections. A hue zone is eligible only when both Reference and target contain meaningful coverage; correction strength is reduced when zone coverage differs, and Red/Orange are capped more tightly because those zones frequently include skin. Missing hue evidence returns no selective correction.
+
+The resulting Recipe writes only Adobe Camera Raw Color Mixer saturation attributes (for example SaturationAdjustmentBlue). Hue and Luminance mixer controls remain unsupported because Photo-Cake does not yet have evidence strong enough to infer them safely. The Review preview approximates these saturation corrections with smooth interpolation between adjacent hue centers, while Lightroom/Camera Raw remains the authoritative RAW renderer.
+
+COLOR_DISTRIBUTION_CONFLICT still requires photographer Review even when a selective starting correction is generated. The goal is a better starting point, not silent auto-acceptance of a mixed-color scene.

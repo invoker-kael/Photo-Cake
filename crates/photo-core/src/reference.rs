@@ -3,8 +3,8 @@ use crate::classification::SceneTag;
 use crate::color_sync::{
     build_adaptive_group_plan, reference_relative_contrast_adjustment,
     reference_relative_endpoint_adjustments, reference_relative_exposure_correction,
-    reference_relative_color_adjustments, reference_relative_match_strength,
-    reference_relative_tone_adjustments, ColorSyncError,
+    reference_relative_color_adjustments, reference_relative_color_mixer_saturation,
+    reference_relative_match_strength, reference_relative_tone_adjustments, ColorSyncError,
     GroupColorIntent, GroupColorSyncPlan, GroupSyncMode, PhotoColorAnalysis,
     PhotoExposureAnalysis,
 };
@@ -551,6 +551,25 @@ impl ReferenceSet {
                 recipe.adjustments.vibrance =
                     Some((vibrance_delta * match_strength).clamp(-100.0, 100.0));
             }
+            if let Some(mut color_mixer) =
+                reference_relative_color_mixer_saturation(&reference_evidence, target)
+            {
+                for value in [
+                    &mut color_mixer.red,
+                    &mut color_mixer.orange,
+                    &mut color_mixer.yellow,
+                    &mut color_mixer.green,
+                    &mut color_mixer.aqua,
+                    &mut color_mixer.blue,
+                    &mut color_mixer.purple,
+                    &mut color_mixer.magenta,
+                ] {
+                    if let Some(current) = value.as_mut() {
+                        *current = (*current * match_strength).clamp(-100.0, 100.0);
+                    }
+                }
+                recipe.adjustments.color_mixer_saturation = Some(color_mixer);
+            }
         }
         Ok(result)
     }
@@ -972,6 +991,7 @@ mod tests {
                     colorfulness: None,
                     colorfulness_p25: None,
                     colorfulness_p75: None,
+                    hue_color_distribution: None,
                 }).unwrap(),
             })
             .unwrap();
@@ -1057,6 +1077,7 @@ mod tests {
                 colorfulness: None,
                 colorfulness_p25: None,
                 colorfulness_p75: None,
+                hue_color_distribution: None,
             },
             PhotoExposureAnalysis {
                 asset_id: target,
@@ -1074,6 +1095,7 @@ mod tests {
                 colorfulness: None,
                 colorfulness_p25: None,
                 colorfulness_p75: None,
+                hue_color_distribution: None,
             },
         ] {
             cache
@@ -1134,6 +1156,7 @@ mod tests {
                 colorfulness: Some(0.20),
                 colorfulness_p25: None,
                 colorfulness_p75: None,
+                hue_color_distribution: None,
             },
             PhotoExposureAnalysis {
                 asset_id: dark,
@@ -1151,6 +1174,7 @@ mod tests {
                 colorfulness: Some(0.20),
                 colorfulness_p25: None,
                 colorfulness_p75: None,
+                hue_color_distribution: None,
             },
         ] {
             cache
@@ -1207,6 +1231,7 @@ mod tests {
                 colorfulness: Some(0.30),
                 colorfulness_p25: Some(0.18),
                 colorfulness_p75: Some(0.45),
+                hue_color_distribution: None,
             },
             PhotoExposureAnalysis {
                 asset_id: flat_muted,
@@ -1224,6 +1249,7 @@ mod tests {
                 colorfulness: Some(0.10),
                 colorfulness_p25: Some(0.04),
                 colorfulness_p75: Some(0.24),
+                hue_color_distribution: None,
             },
         ] {
             cache
@@ -1285,6 +1311,7 @@ mod tests {
                 colorfulness: Some(0.2),
                 colorfulness_p25: None,
                 colorfulness_p75: None,
+                hue_color_distribution: None,
             },
             PhotoExposureAnalysis {
                 asset_id: target,
@@ -1302,6 +1329,7 @@ mod tests {
                 colorfulness: Some(0.2),
                 colorfulness_p25: None,
                 colorfulness_p75: None,
+                hue_color_distribution: None,
             },
         ] {
             cache

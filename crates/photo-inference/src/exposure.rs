@@ -1,6 +1,85 @@
 use image::DynamicImage;
-use photo_core::PhotoExposureAnalysis;
+use photo_core::{HueColorBin, HueColorDistribution, PhotoExposureAnalysis};
 use uuid::Uuid;
+
+fn rgb_hue_degrees(red: u8, green: u8, blue: u8) -> Option<(f32, f32)> {
+    let r = f32::from(red) / 255.0;
+    let g = f32::from(green) / 255.0;
+    let b = f32::from(blue) / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    if max < 16.0 / 255.0 || delta <= 1e-6 {
+        return None;
+    }
+    let saturation = (delta / max).clamp(0.0, 1.0);
+    if saturation < 0.05 {
+        return None;
+    }
+    let mut hue = if (max - r).abs() < 1e-6 {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if (max - g).abs() < 1e-6 {
+        60.0 * (((b - r) / delta) + 2.0)
+    } else {
+        60.0 * (((r - g) / delta) + 4.0)
+    };
+    if hue < 0.0 {
+        hue += 360.0;
+    }
+    Some((hue, saturation))
+}
+
+fn hue_bin_index(hue: f32) -> usize {
+    match hue {
+        value if value < 15.0 || value >= 330.0 => 0, // red
+        value if value < 45.0 => 1,                   // orange
+        value if value < 90.0 => 2,                   // yellow
+        value if value < 150.0 => 3,                  // green
+        value if value < 210.0 => 4,                  // aqua
+        value if value < 255.0 => 5,                  // blue
+        value if value < 285.0 => 6,                  // purple
+        _ => 7,                                       // magenta
+    }
+}
+
+fn analyze_hue_distribution(rgb: &image::RgbImage) -> HueColorDistribution {
+    let visible = rgb
+        .pixels()
+        .filter(|pixel| pixel[0].max(pixel[1]).max(pixel[2]) >= 16)
+        .count()
+        .max(1) as f32;
+    let mut counts = [0usize; 8];
+    let mut saturation_sum = [0.0f32; 8];
+
+    for pixel in rgb.pixels() {
+        let Some((hue, saturation)) = rgb_hue_degrees(pixel[0], pixel[1], pixel[2]) else {
+            continue;
+        };
+        let index = hue_bin_index(hue);
+        counts[index] += 1;
+        saturation_sum[index] += saturation;
+    }
+
+    let bin = |index: usize| HueColorBin {
+        coverage: counts[index] as f32 / visible,
+        saturation: if counts[index] == 0 {
+            0.0
+        } else {
+            saturation_sum[index] / counts[index] as f32
+        },
+    };
+
+    HueColorDistribution {
+        red: bin(0),
+        orange: bin(1),
+        yellow: bin(2),
+        green: bin(3),
+        aqua: bin(4),
+        blue: bin(5),
+        purple: bin(6),
+        magenta: bin(7),
+    }
+}
 
 /// Measure a robust, preview-relative exposure signal.
 ///
@@ -33,6 +112,7 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
             colorfulness: None,
             colorfulness_p25: None,
             colorfulness_p75: None,
+            hue_color_distribution: None,
         };
     }
 
@@ -108,6 +188,7 @@ pub fn analyze_preview_exposure(asset_id: Uuid, image: &DynamicImage) -> PhotoEx
         colorfulness,
         colorfulness_p25: chroma_percentile(0.25),
         colorfulness_p75: chroma_percentile(0.75),
+        hue_color_distribution: Some(analyze_hue_distribution(&rgb)),
     }
 }
 
@@ -178,6 +259,37 @@ mod tests {
         let analysis = analyze_preview_exposure(Uuid::new_v4(), &image);
         assert!(analysis.colorfulness_p25.unwrap() < 0.25);
         assert!(analysis.colorfulness_p75.unwrap() > 0.70);
+    }
+
+    #[test]
+    fn hue_distribution_separates_red_and_blue_regions() {
+        let image = DynamicImage::ImageRgb8(image::ImageBuffer::from_fn(100, 1, |x, _| {
+            if x < 60 {
+                image::Rgb([220, 40, 40])
+            } else {
+                image::Rgb([40, 70, 220])
+            }
+        }));
+        let analysis = analyze_preview_exposure(Uuid::new_v4(), &image);
+        let hues = analysis.hue_color_distribution.unwrap();
+        assert!(hues.red.coverage > 0.55);
+        assert!(hues.blue.coverage > 0.35);
+        assert!(hues.red.saturation > 0.70);
+        assert!(hues.blue.saturation > 0.60);
+    }
+
+    #[test]
+    fn gray_pixels_do_not_create_unstable_hue_evidence() {
+        let gray = DynamicImage::ImageRgb8(image::ImageBuffer::from_pixel(
+            64,
+            64,
+            image::Rgb([128, 128, 128]),
+        ));
+        let hues = analyze_preview_exposure(Uuid::new_v4(), &gray)
+            .hue_color_distribution
+            .unwrap();
+        assert_eq!(hues.red.coverage, 0.0);
+        assert_eq!(hues.blue.coverage, 0.0);
     }
 
     #[test]

@@ -526,6 +526,7 @@ mod tests {
                 tint: None,
                 saturation: Some(3.0),
                 vibrance: None,
+                color_mixer_saturation: None,
             },
         }
     }
@@ -680,6 +681,7 @@ mod tests {
                 contrast: false,
                 saturation: true,
                 vibrance: true,
+                color_mixer_saturation: None,
             },
         );
 

@@ -569,3 +569,18 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - A target with both a material muted-color deficit and a material saturated-tail excess, plus a substantially wider P75-P25 spread than the Reference, MUST be treated as a global-control conflict.
 - Such mixed color distributions MUST enter Recipe Review as COLOR_DISTRIBUTION_CONFLICT when sufficient evidence exists.
 - Missing legacy P25/P75 evidence MUST not create a false conflict.
+
+### Selective Color Mixer saturation
+
+- Analyze MUST version hue-aware color evidence separately from older ExposureAnalysis cache entries.
+- Hue evidence MUST contain per-zone coverage and mean saturation for Red, Orange, Yellow, Green, Aqua, Blue, Purple and Magenta.
+- Neutral/near-gray pixels MUST NOT create unstable hue evidence.
+- Automatic Color Mixer Saturation MUST be generated only when the existing color-distribution conflict gate proves that global Saturation/Vibrance cannot safely satisfy both muted and saturated regions.
+- A hue zone MUST be skipped when either Reference or target has insufficient coverage.
+- Red and Orange automatic corrections MUST use tighter bounds than other zones to reduce unintended skin-color changes.
+- Generated selective saturation MUST be attenuated by the same per-photo Reference adaptation strength as other secondary adaptive corrections.
+- Lightroom XMP round-trip validation MUST include every emitted Color Mixer saturation attribute.
+- Review preview SHOULD approximate selective saturation without hard hue-boundary discontinuities.
+- COLOR_DISTRIBUTION_CONFLICT MUST remain a Review condition; selective Color Mixer output is a conservative starting point, not an automatic approval signal.
+- HueAdjustment and LuminanceAdjustment controls MUST remain absent until dedicated trustworthy evidence exists.
+- Recipes without Color Mixer adjustments MUST serialize identically for review fingerprint purposes so existing confirmations are not invalidated unnecessarily.

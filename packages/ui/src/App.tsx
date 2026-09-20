@@ -3,6 +3,7 @@ import {
   demoJobs,
   type BackendBatch,
   type BackendBatchItem,
+  type BackendColorMixerSaturation,
   type BackendCullingReview,
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
@@ -260,6 +261,25 @@ function sceneTagLabel(tag: BackendSceneTag) {
 function signed(value: number, decimals = 1) {
   return `${value > 0 ? "+" : ""}${value.toFixed(decimals)}`;
 }
+
+function colorMixerSummary(mixer: BackendColorMixerSaturation | null | undefined) {
+  if (!mixer) return null;
+  const values = [
+    ["R", mixer.red],
+    ["O", mixer.orange],
+    ["Y", mixer.yellow],
+    ["G", mixer.green],
+    ["A", mixer.aqua],
+    ["B", mixer.blue],
+    ["P", mixer.purple],
+    ["M", mixer.magenta],
+  ] as const;
+  const active = values
+    .filter(([, value]) => value != null && Math.abs(value) >= 0.5)
+    .map(([label, value]) => `${label} ${signed(value!, 0)}`);
+  return active.length ? active.join(" · ") : null;
+}
+
 
 function sameOptionalNumber(left: number | null, right: number | null) {
   if (left == null || right == null) return left === right;
@@ -3690,6 +3710,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                             ? ` · overrides H ${signed(review.highlights_delta, 0)} / S ${signed(review.shadows_delta, 0)} / W ${signed(review.whites_delta, 0)} / B ${signed(review.blacks_delta, 0)} / V ${signed(review.vibrance_delta, 0)}`
                             : ""}
                         </small>
+                        {colorMixerSummary(recipe.adjustments.color_mixer_saturation) && (
+                          <small>
+                            Color Mixer Sat · {colorMixerSummary(recipe.adjustments.color_mixer_saturation)}
+                          </small>
+                        )}
                       </div>
                       <small className="recipe-preview-note">
                         Edited preview is a perceptual embedded-JPEG approximation of the canonical Recipe; Lightroom/RAW rendering remains authoritative.

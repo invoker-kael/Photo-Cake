@@ -4,7 +4,7 @@
 //! supported non-destructive adjustments into small Adobe Camera Raw /
 //! Lightroom-compatible sidecars without touching source RAW bytes.
 
-use crate::{RawAsset, Recipe};
+use crate::{ColorMixerSaturation, RawAsset, Recipe};
 use quick_xml::{events::Event, Reader};
 use std::fs::OpenOptions;
 use std::io::{self, Write};
@@ -26,6 +26,7 @@ pub struct XmpEditState {
     pub tint: Option<f32>,
     pub saturation: Option<f32>,
     pub vibrance: Option<f32>,
+    pub color_mixer_saturation: Option<ColorMixerSaturation>,
 }
 
 #[derive(Debug, Error)]
@@ -105,6 +106,7 @@ impl XmpEditState {
             tint,
             saturation: recipe.adjustments.saturation,
             vibrance: recipe.adjustments.vibrance,
+            color_mixer_saturation: recipe.adjustments.color_mixer_saturation.clone(),
         }
     }
 
@@ -131,6 +133,16 @@ impl XmpEditState {
         push_attr(&mut attributes, "crs:Tint", self.tint);
         push_attr(&mut attributes, "crs:Saturation", self.saturation);
         push_attr(&mut attributes, "crs:Vibrance", self.vibrance);
+        if let Some(mixer) = &self.color_mixer_saturation {
+            push_attr(&mut attributes, "crs:SaturationAdjustmentRed", mixer.red);
+            push_attr(&mut attributes, "crs:SaturationAdjustmentOrange", mixer.orange);
+            push_attr(&mut attributes, "crs:SaturationAdjustmentYellow", mixer.yellow);
+            push_attr(&mut attributes, "crs:SaturationAdjustmentGreen", mixer.green);
+            push_attr(&mut attributes, "crs:SaturationAdjustmentAqua", mixer.aqua);
+            push_attr(&mut attributes, "crs:SaturationAdjustmentBlue", mixer.blue);
+            push_attr(&mut attributes, "crs:SaturationAdjustmentPurple", mixer.purple);
+            push_attr(&mut attributes, "crs:SaturationAdjustmentMagenta", mixer.magenta);
+        }
 
         format!(
             "<?xpacket begin='\u{feff}' id='W5M0MpCehiHzreSzNTczkc9d'?>\n\
@@ -161,6 +173,7 @@ impl XmpEditState {
             tint: None,
             saturation: None,
             vibrance: None,
+            color_mixer_saturation: None,
         };
 
         loop {
@@ -213,6 +226,38 @@ fn assign_xmp_attribute(
         "Tint" => state.tint = Some(parse_xmp_number(name, value)?),
         "Saturation" => state.saturation = Some(parse_xmp_number(name, value)?),
         "Vibrance" => state.vibrance = Some(parse_xmp_number(name, value)?),
+        "SaturationAdjustmentRed" => {
+            state.color_mixer_saturation.get_or_insert_with(Default::default).red =
+                Some(parse_xmp_number(name, value)?)
+        }
+        "SaturationAdjustmentOrange" => {
+            state.color_mixer_saturation.get_or_insert_with(Default::default).orange =
+                Some(parse_xmp_number(name, value)?)
+        }
+        "SaturationAdjustmentYellow" => {
+            state.color_mixer_saturation.get_or_insert_with(Default::default).yellow =
+                Some(parse_xmp_number(name, value)?)
+        }
+        "SaturationAdjustmentGreen" => {
+            state.color_mixer_saturation.get_or_insert_with(Default::default).green =
+                Some(parse_xmp_number(name, value)?)
+        }
+        "SaturationAdjustmentAqua" => {
+            state.color_mixer_saturation.get_or_insert_with(Default::default).aqua =
+                Some(parse_xmp_number(name, value)?)
+        }
+        "SaturationAdjustmentBlue" => {
+            state.color_mixer_saturation.get_or_insert_with(Default::default).blue =
+                Some(parse_xmp_number(name, value)?)
+        }
+        "SaturationAdjustmentPurple" => {
+            state.color_mixer_saturation.get_or_insert_with(Default::default).purple =
+                Some(parse_xmp_number(name, value)?)
+        }
+        "SaturationAdjustmentMagenta" => {
+            state.color_mixer_saturation.get_or_insert_with(Default::default).magenta =
+                Some(parse_xmp_number(name, value)?)
+        }
         _ => {}
     }
     Ok(())
@@ -251,6 +296,12 @@ pub fn validate_recipe_xmp(recipe: &Recipe, document: &str) -> Result<(), XmpPar
             return Err(XmpParseError::Invalid(format!("{name} mismatch")));
         }
     }
+    if !same_color_mixer_saturation(
+        expected.color_mixer_saturation.as_ref(),
+        actual.color_mixer_saturation.as_ref(),
+    ) {
+        return Err(XmpParseError::Invalid("color mixer saturation mismatch".to_string()));
+    }
     Ok(())
 }
 
@@ -278,6 +329,32 @@ pub fn xmp_document_matches_recipe_state(recipe: &Recipe, document: &str) -> boo
     ]
     .into_iter()
     .all(|(left, right)| same_xmp_number(left, right))
+        && same_color_mixer_saturation(
+            expected.color_mixer_saturation.as_ref(),
+            actual.color_mixer_saturation.as_ref(),
+        )
+}
+
+fn same_color_mixer_saturation(
+    left: Option<&ColorMixerSaturation>,
+    right: Option<&ColorMixerSaturation>,
+) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => [
+            (left.red, right.red),
+            (left.orange, right.orange),
+            (left.yellow, right.yellow),
+            (left.green, right.green),
+            (left.aqua, right.aqua),
+            (left.blue, right.blue),
+            (left.purple, right.purple),
+            (left.magenta, right.magenta),
+        ]
+        .into_iter()
+        .all(|(left, right)| same_xmp_number(left, right)),
+        _ => false,
+    }
 }
 
 fn same_xmp_number(left: Option<f32>, right: Option<f32>) -> bool {
@@ -546,6 +623,7 @@ mod tests {
                 tint: None,
                 saturation: None,
                 vibrance: None,
+                color_mixer_saturation: None,
             },
         }
     }
@@ -614,6 +692,33 @@ mod tests {
         assert_eq!(parsed.temperature, Some(6100.0));
         assert_eq!(parsed.tint, Some(-3.0));
         assert_eq!(parsed.vibrance, Some(14.0));
+    }
+
+    #[test]
+    fn color_mixer_saturation_serializes_and_round_trips() {
+        let mut source = recipe(Some(Uuid::new_v4()));
+        source.id = Uuid::new_v4();
+        source.adjustments.color_mixer_saturation = Some(ColorMixerSaturation {
+            red: Some(-4.0),
+            orange: None,
+            yellow: None,
+            green: Some(6.0),
+            aqua: None,
+            blue: Some(-12.0),
+            purple: None,
+            magenta: Some(3.0),
+        });
+
+        let document = XmpEditState::from_recipe(&source).to_xmp_document();
+        assert!(document.contains(r#"crs:SaturationAdjustmentRed="-4""#));
+        assert!(document.contains(r#"crs:SaturationAdjustmentBlue="-12""#));
+        assert!(!document.contains("crs:SaturationAdjustmentOrange"));
+        validate_recipe_xmp(&source, &document).unwrap();
+
+        let parsed = XmpEditState::from_xmp_document(&document).unwrap();
+        let mixer = parsed.color_mixer_saturation.unwrap();
+        assert_eq!(mixer.green, Some(6.0));
+        assert_eq!(mixer.magenta, Some(3.0));
     }
 
     #[test]

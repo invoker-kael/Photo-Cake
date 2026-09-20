@@ -281,3 +281,9 @@ This reduces a common batch-editing artifact where neon signs, flowers or sunset
 Completed after distribution-aware Saturation: adaptive color matching now resolves Saturation and Vibrance as one decision instead of allowing opposite global/selective controls to fight each other.
 
 Mixed distributions that are dull in muted regions but excessively saturated in the tail are recognized as cases that need more selective color tools than Photo-Cake currently exposes. They are kept conservative and routed to Review rather than being silently batch-corrected with contradictory slider values.
+
+### Core editing quality: selective Color Mixer saturation
+
+Completed after coordinated global color controls: mixed-color conflict frames can now receive a conservative eight-zone Color Mixer Saturation starting point instead of relying only on global Saturation/Vibrance.
+
+The implementation adds hue-distribution evidence, cache versioning, Reference-relative selective saturation, Lightroom XMP round-trip support, perceptual preview approximation, and Review visibility. Conflict frames remain exception-first and still require photographer confirmation. Hue and Luminance Color Mixer automation remain intentionally out of scope until stronger evidence is available.

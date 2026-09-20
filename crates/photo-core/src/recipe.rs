@@ -1,4 +1,4 @@
-use crate::color_sync::{GroupColorSyncPlan, ResolvedColorEdit};
+use crate::color_sync::{ColorMixerSaturation, GroupColorSyncPlan, ResolvedColorEdit};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -24,6 +24,8 @@ pub struct EditAdjustments {
     pub tint: Option<f32>,
     pub saturation: Option<f32>,
     pub vibrance: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_mixer_saturation: Option<ColorMixerSaturation>,
 }
 
 impl Recipe {
@@ -70,6 +72,7 @@ impl Recipe {
                 tint,
                 saturation: Some(resolved.saturation),
                 vibrance: None,
+                color_mixer_saturation: None,
             },
         }
     }

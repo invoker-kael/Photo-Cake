@@ -1,4 +1,4 @@
-use crate::Recipe;
+use crate::{ColorMixerSaturation, Recipe};
 use image::{DynamicImage, ImageBuffer, Rgb};
 use std::path::Path;
 use thiserror::Error;
@@ -139,6 +139,21 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
             (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
         scale_chroma_with_headroom(&mut rgb, saturation_luminance, saturation_factor);
 
+        if let Some(mixer) = recipe.adjustments.color_mixer_saturation.as_ref() {
+            if let Some(hue) = preview_hue_degrees(rgb) {
+                let adjustment = color_mixer_saturation_for_hue(mixer, hue);
+                if adjustment.abs() >= 0.01 {
+                    let mixer_luminance =
+                        (rgb[0] * 0.2126) + (rgb[1] * 0.7152) + (rgb[2] * 0.0722);
+                    scale_chroma_with_headroom(
+                        &mut rgb,
+                        mixer_luminance,
+                        (1.0 + adjustment / 100.0).max(0.0),
+                    );
+                }
+            }
+        }
+
         output.put_pixel(
             x,
             y,
@@ -151,6 +166,56 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
     }
 
     DynamicImage::ImageRgb8(output)
+}
+
+fn preview_hue_degrees(rgb: [f32; 3]) -> Option<f32> {
+    let max = rgb[0].max(rgb[1]).max(rgb[2]);
+    let min = rgb[0].min(rgb[1]).min(rgb[2]);
+    let delta = max - min;
+    if max <= 1e-6 || delta / max < 0.05 {
+        return None;
+    }
+    let mut hue = if (max - rgb[0]).abs() < 1e-6 {
+        60.0 * (((rgb[1] - rgb[2]) / delta) % 6.0)
+    } else if (max - rgb[1]).abs() < 1e-6 {
+        60.0 * (((rgb[2] - rgb[0]) / delta) + 2.0)
+    } else {
+        60.0 * (((rgb[0] - rgb[1]) / delta) + 4.0)
+    };
+    if hue < 0.0 {
+        hue += 360.0;
+    }
+    Some(hue)
+}
+
+fn color_mixer_saturation_for_hue(mixer: &ColorMixerSaturation, hue: f32) -> f32 {
+    let centers = [0.0f32, 30.0, 60.0, 120.0, 180.0, 240.0, 270.0, 300.0];
+    let values = [
+        mixer.red.unwrap_or(0.0),
+        mixer.orange.unwrap_or(0.0),
+        mixer.yellow.unwrap_or(0.0),
+        mixer.green.unwrap_or(0.0),
+        mixer.aqua.unwrap_or(0.0),
+        mixer.blue.unwrap_or(0.0),
+        mixer.purple.unwrap_or(0.0),
+        mixer.magenta.unwrap_or(0.0),
+    ];
+    let hue = hue.rem_euclid(360.0);
+    for index in 0..centers.len() {
+        let start = centers[index];
+        let end = if index + 1 < centers.len() {
+            centers[index + 1]
+        } else {
+            360.0
+        };
+        if hue >= start && hue <= end {
+            let next_index = (index + 1) % centers.len();
+            let width = (end - start).max(1e-6);
+            let t = ((hue - start) / width).clamp(0.0, 1.0);
+            return values[index] * (1.0 - t) + values[next_index] * t;
+        }
+    }
+    values[0]
 }
 
 fn preserve_linear_highlight_ratios(rgb: &mut [f32; 3]) {
@@ -280,6 +345,7 @@ mod tests {
                 tint: None,
                 saturation: Some(saturation),
                 vibrance: None,
+                color_mixer_saturation: None,
             },
         }
     }
@@ -494,6 +560,37 @@ mod tests {
         let pixel = edited.get_pixel(0, 0).0;
         assert!(pixel.iter().all(|value| *value < 255));
         assert!(pixel[0] > pixel[1] && pixel[1] > pixel[2]);
+    }
+
+    #[test]
+    fn selective_blue_saturation_changes_blue_more_than_orange() {
+        let source = DynamicImage::ImageRgb8(ImageBuffer::from_fn(2, 1, |x, _| {
+            if x == 0 { Rgb([40, 80, 220]) } else { Rgb([220, 120, 40]) }
+        }));
+        let mut edit = recipe(0.0, 0.0, 0.0);
+        edit.adjustments.color_mixer_saturation = Some(ColorMixerSaturation {
+            blue: Some(-40.0),
+            ..ColorMixerSaturation::default()
+        });
+        let edited = apply_preview_adjustments(source, &edit).to_rgb8();
+
+        let blue = edited.get_pixel(0, 0).0;
+        let orange = edited.get_pixel(1, 0).0;
+        let blue_range = i16::from(*blue.iter().max().unwrap()) - i16::from(*blue.iter().min().unwrap());
+        let orange_range = i16::from(*orange.iter().max().unwrap()) - i16::from(*orange.iter().min().unwrap());
+        assert!(blue_range < 150);
+        assert!(orange_range > blue_range);
+    }
+
+    #[test]
+    fn color_mixer_interpolates_across_adjacent_hue_centers() {
+        let mixer = ColorMixerSaturation {
+            red: Some(0.0),
+            orange: Some(20.0),
+            ..ColorMixerSaturation::default()
+        };
+        let middle = color_mixer_saturation_for_hue(&mixer, 15.0);
+        assert!((middle - 10.0).abs() < 0.01);
     }
 
     #[test]

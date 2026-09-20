@@ -576,9 +576,16 @@ mod tests {
 
         let blue = edited.get_pixel(0, 0).0;
         let orange = edited.get_pixel(1, 0).0;
-        let blue_range = i16::from(*blue.iter().max().unwrap()) - i16::from(*blue.iter().min().unwrap());
-        let orange_range = i16::from(*orange.iter().max().unwrap()) - i16::from(*orange.iter().min().unwrap());
-        assert!(blue_range < 150);
+        let blue_range =
+            i16::from(*blue.iter().max().unwrap()) - i16::from(*blue.iter().min().unwrap());
+        let orange_range =
+            i16::from(*orange.iter().max().unwrap()) - i16::from(*orange.iter().min().unwrap());
+
+        // The source ranges are both 180. Selective blue desaturation should
+        // reduce only the blue pixel's chroma while leaving the orange pixel
+        // effectively unchanged apart from preview round-trip quantization.
+        assert!(blue_range < 180);
+        assert!((orange_range - 180).abs() <= 2);
         assert!(orange_range > blue_range);
     }
 

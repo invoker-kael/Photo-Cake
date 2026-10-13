@@ -414,3 +414,10 @@ Next: validate with diverse user RAW fixtures (same scene different exposure, po
 Add manual-only cross-Moment candidates at conservative visual similarity thresholds while continuing to auto-select only high-similarity and unprotected photos. Photographer can switch between All, Recommended, Other Moments, and Last batch changes. Immediately after applying one representative's relative corrections, automatically render up to eight edited examples and show a before/after contact sheet; offer an explicit eight-photo re-render action for selected current edits. Rendering uses the canonical Recipe and reloaded current review state, never speculative or saved to RAW. The previous approved-photo and custom-edit safeguards and transactional undo continue unchanged.
 
 Next user-fixture validation must compare final Lightroom/Camera Raw interpretation to the embedded-preview approximation; no claim of RAW fidelity has yet been made.
+
+
+### First-class Batch Edit UI (October 2026)
+
+A separate Windows Batch Edit navigation and full workflow page now exposes the existing actual batch-edit backend end-to-end: group/source RAW photo contact sheets, editable source without prior Exception, in-page eight-channel adjustments, representative before/after inspection, similar-photo filters, selection and field-level synchronization, protected overwrite toggle, automatic changed-photo previews and last-batch undo. Review provides an obvious link and per-photo entry button to the workspace. Workstation-only; Android companion retains its four views.
+
+Regression guard: the frontend CI verifies the Batch Edit route, source controls, contact sheets, apply/undo actions and Android-safe optional bridge. Real preview visual fidelity vs Lightroom/Camera Raw remains a separate fixture validation requirement; no claims about white-balance, local masks or curves.

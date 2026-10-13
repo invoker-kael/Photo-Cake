@@ -94,7 +94,7 @@ export type {
 import { recipePreviewSignature, unconfirmedDeliveryAssets } from "./review-workflow";
 import { defaultSimilarSelections, isSimilarTargetProtected, filterSimilarCandidates } from "./similar-edit";
 
-type WorkspaceView = "library" | "cull" | "groups" | "reference" | "review" | "lightroom";
+type WorkspaceView = "library" | "cull" | "groups" | "reference" | "batch-edit" | "review" | "lightroom";
 type CullViewMode = "TRIAGE" | "ALL";
 type ReviewViewMode = "TRIAGE" | "ALL";
 type LightroomViewMode = "NEEDS_ACTION" | "ALL";
@@ -434,6 +434,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [similarViewMode, setSimilarViewMode] = useState<"ALL" | "RECOMMENDED" | "CROSS_MOMENT" | "LAST_BATCH">("ALL");
   const [similarPreviewRunning, setSimilarPreviewRunning] = useState(false);
   const [similarPreviewNote, setSimilarPreviewNote] = useState<string | null>(null);
+  const [similarSourceGroupId, setSimilarSourceGroupId] = useState<string | null>(null);
+  const [similarShowAllSources, setSimilarShowAllSources] = useState(false);
 
   const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
   const [handoffPreflightErrors, setHandoffPreflightErrors] = useState<Record<string, string>>({});
@@ -523,6 +525,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setSimilarError(null);
     setSimilarViewMode("ALL");
     setSimilarPreviewNote(null);
+    setSimilarSourceGroupId(null);
+    setSimilarShowAllSources(false);
     setHandoffPreflightErrors({});
     setHandoffBatchTargets([]);
     setHandoffBatchNote(null);
@@ -1863,9 +1867,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     vibranceDelta: number,
   ) => {
     if (!bridge?.setRecipeReview || !activeBatchId) return;
-    const groupId = recipeReviewItems.find((item) => item.asset_id === assetId)?.group_id;
+    const groupId = recipeReviewItems.find((item) => item.asset_id === assetId)?.group_id ??
+      photoContext?.groups.find((group) => referencePreviews[group.id]?.recipes
+        .some((recipe) => recipe.target_asset_id === assetId))?.id;
     if (!groupId) {
-      setBackendError("Photo is not in the current editable Recipe review.");
+      setBackendError("Photo is not in a currently editable Recipe group. Choose a Reference and complete analysis first.");
       return;
     }
     setReviewUpdating(assetId);
@@ -2433,10 +2439,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             number: "5",
             order: 4,
             focus: null,
-            title: "Adaptive recipe",
+            title: "Adaptive Recipe & Batch Edit",
             detail: workflowStatus
-              ? "Canonical Recipe per deliverable photo"
-              : "Different correction per photo",
+              ? "Adjust a representative RAW and reuse relative edits"
+              : "Adjust once, reuse across similar photos",
           },
           {
             number: "6",
@@ -2477,6 +2483,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           ["cull", "Cull"],
           ["groups", "Groups"],
           ["reference", "Reference"],
+          ["batch-edit", "Batch Edit"],
           ["review", "Review"],
           ["lightroom", "Lightroom"],
         ];
@@ -3702,90 +3709,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     );
   };
 
-  const renderReview = () => (
-    <section className="queue-card">
-      <div className="queue-title">
-        <strong>Recipe review</strong>
-        <span>Edit one representative photo → apply selected adjustments to visually similar RAW photos, including across Moments</span>
-      </div>
-      <div className="review-summary">
-        <div><span>Attention</span><strong>{recipeReviewSummary.attention}</strong></div>
-        <div><span>Clear</span><strong>{recipeReviewSummary.clear}</strong></div>
-        <div><span>Confirmed</span><strong>{recipeReviewSummary.confirmed}</strong></div>
-        <div><span>Pending</span><strong>{recipeReviewSummary.pending}</strong></div>
-        <div><span>Exceptions</span><strong>{recipeReviewSummary.exceptions}</strong></div>
-        <div><span>Reference mismatch</span><strong>{recipeReviewSummary.referenceMismatch}</strong></div>
-        <div><span>HDR sources</span><strong>{recipeReviewSummary.hdrSources}</strong></div>
-        <div><span>Reject skipped</span><strong>{recipeReviewSummary.rejected}</strong></div>
-      </div>
-      {culling.some((group) => (group.exposure_brackets?.length ?? 0) > 0) && (
-        <div className="group-refine-note">
-          Exposure-bracket RAWs are excluded from ordinary Adaptive Recipe review so their intentional EV differences remain intact for HDR merge in Lightroom/Camera Raw.
-        </div>
-      )}
-      <div className="cull-toolbar">
-        <span>
-          {reviewViewMode === "TRIAGE"
-            ? "Triage follows the backend Recipe preflight: saved exceptions and Cull uncertainty first; clear, pending and already-confirmed Recipes stay out of the attention queue."
-            : "All shows every adaptive Recipe, including photos already considered straightforward."}
-        </span>
-        <div className="cull-toolbar-actions">
-          <button
-            className="cull-batch-action"
-            disabled={
-              reviewBatchUpdating ||
-              reviewSyncSource != null ||
-              reviewUpdating != null ||
-              !bridge?.confirmRecipeReviewGroups ||
-              clearRecipeReviewGroups.length === 0
-            }
-            onClick={() =>
-              void confirmClearRecipeGroups(
-                clearRecipeReviewGroups.map((group) => group.group_id),
-              )
-            }
-          >
-            {reviewBatchUpdating
-              ? "Confirming…"
-              : `Confirm clear groups (${clearRecipeReviewGroups.length} · ${clearRecipeReviewAssetCount} photos)`}
-          </button>
-          <button
-            className="cull-batch-action"
-            disabled={
-              reviewBatchUpdating ||
-              reviewSyncSource != null ||
-              reviewUpdating != null ||
-              !bridge?.confirmRecipeReviews ||
-              visibleRecipeReviewItems.length === 0
-            }
-            onClick={() => void confirmVisibleRecipeReviews()}
-          >
-            {reviewBatchUpdating
-              ? "Confirming…"
-              : `Confirm visible (${visibleRecipeReviewItems.length})`}
-          </button>
-          <div className="cull-view-switch" role="group" aria-label="Recipe review view mode">
-            {(["TRIAGE", "ALL"] as ReviewViewMode[]).map((viewMode) => (
-              <button
-                className={reviewViewMode === viewMode ? "active" : ""}
-                key={viewMode}
-                disabled={reviewBatchUpdating}
-                onClick={() => setReviewViewMode(viewMode)}
-              >
-                {viewMode === "TRIAGE" ? "Triage" : "All"}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-      {reviewBatchNote && <div className="review-batch-note">{reviewBatchNote}</div>}
-
+  const renderSimilarWorkspace = () => (
+    <>
       {bridge?.similarEditCandidates && (
         <div className="similar-edit-workspace">
           <div className="similar-edit-heading">
             <div>
               <strong>Batch edit similar photos</strong>
-              <small>Select "Batch edit similar" on an adjusted representative photo below. Existing adaptive Recipes remain individual, while selected corrections are copied as relative deltas.</small>
+              <small>03 · Select matching photos, choose which corrections to synchronize, apply once, then inspect the new previews.</small>
             </div>
             {similarLastEdit && !similarLastEdit.undone && (
               <button className="cull-batch-action" disabled={similarApplying || !bridge.undoSimilarEdits}
@@ -3802,14 +3733,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     alt="Representative RAW" loading="lazy" />
                 )}
                 <div>
-                  <strong>Representative · {assetNames.get(reviewSyncSource.assetId) ?? reviewSyncSource.assetId}</strong>
-                  <small>Finish your adjustments on this photo, then apply only the checked fields. The source photo is never changed by batch apply.</small>
+                  <strong>Current source · {assetNames.get(reviewSyncSource.assetId) ?? reviewSyncSource.assetId}</strong>
+                  <small>Only the selected relative corrections are copied. Each photo keeps its own adaptive Recipe; the original RAW is never modified.</small>
                   {!recipeReviews[reviewSyncSource.assetId] && (
                     <small className="attention-text">Adjust and save at least one slider below before applying.</small>
                   )}
                 </div>
                 <button className="cull-batch-action" disabled={similarApplying || similarPreviewRunning}
-                  onClick={() => { setReviewSyncSource(null); setSimilarCandidates(null); setSimilarTargets([]); setSimilarOverwrite(false); }}>
+                  onClick={() => { setReviewSyncSource(null); setSimilarCandidates(null); setSimilarTargets([]); setSimilarOverwrite(false); setSimilarSourceGroupId(null); }}>
                   Close
                 </button>
               </div>
@@ -3926,6 +3857,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               )}
               {similarPreviewNote && <div className="review-batch-note">{similarPreviewNote}</div>}
               <div className="similar-edit-footer">
+                {similarLastEdit && !similarLastEdit.undone && similarViewMode === "LAST_BATCH" && (
+                  <button className="cull-batch-action" onClick={() => { setReviewViewMode("ALL"); setActiveView("review"); }}>
+                    Review edited photos before Lightroom
+                  </button>
+                )}
                 <button className="cull-batch-action"
                   disabled={similarApplying || similarPreviewRunning || similarTargets.length === 0 ||
                     !bridge.renderRecipePreview || !bridge.loadReferencePreviews}
@@ -3948,6 +3884,272 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           {reviewSyncNote && <div className="review-batch-note">{reviewSyncNote}</div>}
         </div>
       )}
+    </>
+  );
+
+  const selectSimilarSource = (groupId: string, assetId: string) => {
+    if (similarApplying || similarPreviewRunning || reviewUpdating) return;
+    setReviewSyncSource({ groupId, assetId });
+    setSimilarSourceGroupId(groupId);
+    setSimilarTargets([]);
+    setSimilarOverwrite(false);
+    setSimilarViewMode("ALL");
+    setSimilarPreviewNote(null);
+    setSimilarError(null);
+    setReviewSyncNote(null);
+    setReviewSyncFields({
+      exposure: true, highlights: true, shadows: true, whites: true,
+      blacks: true, contrast: true, saturation: true, vibrance: true,
+    });
+  };
+
+  const renderBatchEdit = () => {
+    const sourceGroups = (photoContext?.groups ?? []).filter((group) =>
+      referencePreviews[group.id]?.recipes.some((recipe) => recipe.target_asset_id != null));
+    const sourceGroup = sourceGroups.find((group) => group.id === similarSourceGroupId)
+      ?? sourceGroups.find((group) => group.id === reviewSyncSource?.groupId)
+      ?? sourceGroups[0];
+    const sourceRecipes = sourceGroup
+      ? (referencePreviews[sourceGroup.id]?.recipes ?? []).filter((recipe) => recipe.target_asset_id != null)
+      : [];
+    const activeSource = reviewSyncSource;
+    const sourceRecipe = activeSource && referencePreviews[activeSource.groupId]?.recipes
+      .find((recipe) => recipe.target_asset_id === activeSource.assetId);
+    const sourceEdit = activeSource ? recipeReviews[activeSource.assetId] : undefined;
+    const sourceSignature = activeSource && sourceRecipe
+      ? recipePreviewSignature(activeBatchId,
+        referenceBindings[activeSource.groupId]?.selected_reference_asset_id,
+        referenceStyles[activeSource.groupId]?.style_profile,
+        sourceRecipe, sourceEdit)
+      : null;
+    const sourceAfter = activeSource && sourceSignature
+      && editedPreviews[activeSource.assetId]?.signature === sourceSignature
+      ? editedPreviews[activeSource.assetId] : null;
+    const sourceBusy = reviewUpdating !== null || similarApplying || similarPreviewRunning;
+
+    return (
+      <section className="queue-card batch-edit-page">
+        <div className="queue-title">
+          <strong>Similar Photo Batch Editing</strong>
+          <span>One representative RAW → adaptive edits for visually similar photos → Lightroom XMP</span>
+        </div>
+        {!bridge?.similarEditCandidates ? (
+          <div className="panel-note">Batch editing is available in the Windows workstation. Connect a photo library and complete RAW analysis to start.</div>
+        ) : (
+          <>
+            <div className="batch-editor-steps">
+              <span className="batch-editor-step"><b>01</b> Choose representative RAW</span>
+              <span className="batch-editor-step"><b>02</b> Adjust its look</span>
+              <span className="batch-editor-step"><b>03</b> Batch apply &amp; compare</span>
+            </div>
+            {sourceGroups.length === 0 ? (
+              <div className="batch-editor-empty">
+                <strong>No editable photo groups are ready yet</strong>
+                <p>Import RAW photos, finish Analyze and choose a Reference for each group. HDR bracket sources and rejected photos are excluded from ordinary edits.</p>
+                <button className="button primary" onClick={() => setActiveView("reference")}>Go to References</button>
+              </div>
+            ) : (
+              <>
+                <div className="batch-editor-section-head">
+                  <div><strong>01 · Choose a representative photo</strong>
+                    <small>Select a group and click any editable thumbnail. Previously unedited photos can be used as the source.</small>
+                  </div>
+                  <small>{sourceGroups.length} groups ready</small>
+                </div>
+                <div className="batch-editor-group-strip" role="group" aria-label="Choose photo group">
+                  {sourceGroups.map((group) => {
+                    const selected = group.id === sourceGroup?.id;
+                    const index = photoContext?.groups.findIndex((item) => item.id === group.id) ?? -1;
+                    const assetId = referenceBindings[group.id]?.selected_reference_asset_id
+                      ?? referencePreviews[group.id]?.selected_reference_asset_id;
+                    return (
+                      <button type="button" key={group.id} className={`batch-editor-group ${selected ? "selected" : ""}`}
+                        aria-pressed={selected} disabled={similarApplying || similarPreviewRunning}
+                        onClick={() => { setSimilarSourceGroupId(group.id); setSimilarShowAllSources(false); }}>
+                        {assetId && previewUrls.get(assetId) ? (
+                          <img src={previewUrls.get(assetId)} loading="lazy" alt="Group reference" />
+                        ) : <div className="recipe-review-placeholder">RAW</div>}
+                        <span>Group {index + 1}</span>
+                        <small>{referencePreviews[group.id]?.recipes.length ?? 0} editable</small>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="batch-editor-source-grid">
+                  {(similarShowAllSources ? sourceRecipes : sourceRecipes.slice(0, 30)).map((recipe) => {
+                    const assetId = recipe.target_asset_id!;
+                    const selected = activeSource?.assetId === assetId && activeSource.groupId === sourceGroup?.id;
+                    return (
+                      <button key={assetId} type="button" className={`batch-editor-source ${selected ? "selected" : ""}`}
+                        disabled={sourceBusy} aria-pressed={selected}
+                        onClick={() => selectSimilarSource(sourceGroup!.id, assetId)}>
+                        {previewUrls.get(assetId) ? (
+                          <img loading="lazy" src={previewUrls.get(assetId)} alt={assetNames.get(assetId) ?? "RAW photo"} />
+                        ) : <div className="recipe-review-placeholder">RAW</div>}
+                        <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
+                        <small>{selected ? "Representative" :
+                          recipeReviews[assetId] ? "Has adjustments" : "Choose as source"}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+                {sourceRecipes.length > 30 && (
+                  <button type="button" className="cull-batch-action"
+                    onClick={() => setSimilarShowAllSources((value) => !value)}>
+                    {similarShowAllSources ? "Show first 30 photos" : `Show all ${sourceRecipes.length} photos`}
+                  </button>
+                )}
+                {activeSource && sourceRecipe && (
+                  <div className="batch-editor-adjustment">
+                    <div className="batch-editor-section-head">
+                      <div><strong>02 · Adjust {assetNames.get(activeSource.assetId) ?? "representative RAW"}</strong>
+                        <small>Fine-tune relative deltas on this photo. Every target retains its own baseline Recipe.</small>
+                      </div>
+                      <button type="button" className="cull-batch-action" disabled={sourceBusy || !bridge.renderRecipePreview}
+                        onClick={() => void renderEditedPreview(activeSource.groupId, activeSource.assetId)}>
+                        {reviewUpdating === activeSource.assetId ? "Rendering / saving…" : "Refresh representative preview"}
+                      </button>
+                    </div>
+                    <div className="batch-editor-preview-pair">
+                      <div><small>Before · RAW embedded preview</small>
+                        {previewUrls.get(activeSource.assetId) ? (
+                          <img src={previewUrls.get(activeSource.assetId)} alt="Representative before" />
+                        ) : <div className="recipe-review-placeholder">RAW</div>}
+                      </div>
+                      <div><small>After · approximate edit preview</small>
+                        {sourceAfter?.preview_url ? (
+                          <img src={sourceAfter.preview_url} alt="Representative after" />
+                        ) : <div className="recipe-review-placeholder">Use Refresh representative preview</div>}
+                      </div>
+                    </div>
+                    <div className="batch-editor-adjust-grid">
+                      {([
+                        ["exposure", "Exposure", "exposure_delta_ev", 0.1, -3, 3, " EV"],
+                        ["highlights", "Highlights", "highlights_delta", 5, -100, 100, ""],
+                        ["shadows", "Shadows", "shadows_delta", 5, -100, 100, ""],
+                        ["whites", "Whites", "whites_delta", 5, -100, 100, ""],
+                        ["blacks", "Blacks", "blacks_delta", 5, -100, 100, ""],
+                        ["contrast", "Contrast", "contrast_delta", 5, -100, 100, ""],
+                        ["saturation", "Saturation", "saturation_delta", 5, -100, 100, ""],
+                        ["vibrance", "Vibrance", "vibrance_delta", 5, -100, 100, ""],
+                      ] as const).map(([field, label, key, step, min, max, unit]) => {
+                        const value = sourceEdit?.[key] ?? 0;
+                        return (
+                          <div className="batch-editor-adjust-row" key={field}>
+                            <span>{label}</span>
+                            <button type="button" disabled={sourceBusy || value <= min}
+                              aria-label={`Decrease ${label}`}
+                              onClick={() => adjustRecipeReview(activeSource.assetId, field, -step)}>−</button>
+                            <strong>{signed(value, field === "exposure" ? 1 : 0)}{unit}</strong>
+                            <button type="button" disabled={sourceBusy || value >= max}
+                              aria-label={`Increase ${label}`}
+                              onClick={() => adjustRecipeReview(activeSource.assetId, field, step)}>+</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="batch-editor-source-status">
+                      {sourceEdit ? "Representative adjustments saved. Select related photos below." :
+                        "Start with one adjustment. You can choose the source before any exception exists."}
+                      <small>White balance, curves and masks are not part of this eight-control batch-edit operation. Preview uses the embedded JPEG approximation.</small>
+                    </div>
+                  </div>
+                )}
+                {renderSimilarWorkspace()}
+              </>
+            )}
+          </>
+        )}
+      </section>
+    );
+  };
+
+  const renderReview = () => (
+    <section className="queue-card">
+      <div className="queue-title">
+        <strong>Recipe review</strong>
+        <span>Confirm per-photo adjustments and exceptions before safe Lightroom XMP delivery</span>
+      </div>
+      <div className="review-summary">
+        <div><span>Attention</span><strong>{recipeReviewSummary.attention}</strong></div>
+        <div><span>Clear</span><strong>{recipeReviewSummary.clear}</strong></div>
+        <div><span>Confirmed</span><strong>{recipeReviewSummary.confirmed}</strong></div>
+        <div><span>Pending</span><strong>{recipeReviewSummary.pending}</strong></div>
+        <div><span>Exceptions</span><strong>{recipeReviewSummary.exceptions}</strong></div>
+        <div><span>Reference mismatch</span><strong>{recipeReviewSummary.referenceMismatch}</strong></div>
+        <div><span>HDR sources</span><strong>{recipeReviewSummary.hdrSources}</strong></div>
+        <div><span>Reject skipped</span><strong>{recipeReviewSummary.rejected}</strong></div>
+      </div>
+      {culling.some((group) => (group.exposure_brackets?.length ?? 0) > 0) && (
+        <div className="group-refine-note">
+          Exposure-bracket RAWs are excluded from ordinary Adaptive Recipe review so their intentional EV differences remain intact for HDR merge in Lightroom/Camera Raw.
+        </div>
+      )}
+      <div className="cull-toolbar">
+        <span>
+          {reviewViewMode === "TRIAGE"
+            ? "Triage follows the backend Recipe preflight: saved exceptions and Cull uncertainty first; clear, pending and already-confirmed Recipes stay out of the attention queue."
+            : "All shows every adaptive Recipe, including photos already considered straightforward."}
+        </span>
+        <div className="cull-toolbar-actions">
+          <button
+            className="cull-batch-action"
+            disabled={
+              reviewBatchUpdating ||
+              reviewSyncSource != null ||
+              reviewUpdating != null ||
+              !bridge?.confirmRecipeReviewGroups ||
+              clearRecipeReviewGroups.length === 0
+            }
+            onClick={() =>
+              void confirmClearRecipeGroups(
+                clearRecipeReviewGroups.map((group) => group.group_id),
+              )
+            }
+          >
+            {reviewBatchUpdating
+              ? "Confirming…"
+              : `Confirm clear groups (${clearRecipeReviewGroups.length} · ${clearRecipeReviewAssetCount} photos)`}
+          </button>
+          <button
+            className="cull-batch-action"
+            disabled={
+              reviewBatchUpdating ||
+              reviewSyncSource != null ||
+              reviewUpdating != null ||
+              !bridge?.confirmRecipeReviews ||
+              visibleRecipeReviewItems.length === 0
+            }
+            onClick={() => void confirmVisibleRecipeReviews()}
+          >
+            {reviewBatchUpdating
+              ? "Confirming…"
+              : `Confirm visible (${visibleRecipeReviewItems.length})`}
+          </button>
+          <div className="cull-view-switch" role="group" aria-label="Recipe review view mode">
+            {(["TRIAGE", "ALL"] as ReviewViewMode[]).map((viewMode) => (
+              <button
+                className={reviewViewMode === viewMode ? "active" : ""}
+                key={viewMode}
+                disabled={reviewBatchUpdating}
+                onClick={() => setReviewViewMode(viewMode)}
+              >
+                {viewMode === "TRIAGE" ? "Triage" : "All"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {reviewBatchNote && <div className="review-batch-note">{reviewBatchNote}</div>}
+
+      <div className="review-batch-edit-link">
+        <div><strong>Editing a whole series?</strong>
+          <small>Choose any representative RAW, change its appearance and apply the selected adjustments to similar photos.</small>
+        </div>
+        <button className="button primary" onClick={() => setActiveView("batch-edit")}>
+          Open Batch Edit
+        </button>
+      </div>
       <div className="recipe-review-groups">
         {photoContext?.groups.map((group, groupIndex) => {
           const preview = referencePreviews[group.id];
@@ -4345,23 +4547,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         >
                           {reviewed ? "Reopen review" : "Looks good"}
                         </button>
+                        <button
+                          className={`review-choice clear ${isSyncSource ? "active-sync-source" : ""}`}
+                          disabled={updating || reviewBatchUpdating || reviewSyncUpdating}
+                          onClick={() => {
+                            selectSimilarSource(group.id, assetId);
+                            setActiveView("batch-edit");
+                          }}
+                        >
+                          {isSyncSource ? "Open Batch Edit" : "Batch Edit Similar"}
+                        </button>
                         {review && (
                           <>
-                            <button
-                              className={`review-choice clear ${isSyncSource ? "active-sync-source" : ""}`}
-                              disabled={updating || reviewBatchUpdating || reviewSyncUpdating}
-                              onClick={() => {
-                                setReviewSyncSource({ groupId: group.id, assetId });
-                                setReviewSyncTargets([]);
-                                setSimilarOverwrite(false);
-                                setSimilarViewMode("ALL");
-                                setSimilarPreviewNote(null);
-                                setReviewSyncFields({ exposure: true, highlights: true, shadows: true, whites: true, blacks: true, contrast: true, saturation: true, vibrance: true });
-                                setReviewSyncNote(null);
-                              }}
-                            >
-                              {isSyncSource ? "Representative selected" : "Batch edit similar"}
-                            </button>
                             <button
                               className="review-choice clear recipe-reset"
                               disabled={updating || reviewBatchUpdating || reviewSyncUpdating}
@@ -4943,6 +5140,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         {activeView === "cull" && renderCull()}
         {activeView === "groups" && renderGroups()}
         {activeView === "reference" && renderReference()}
+        {activeView === "batch-edit" && renderBatchEdit()}
         {activeView === "review" && renderReview()}
         {activeView === "lightroom" && renderLightroom()}
       </main>

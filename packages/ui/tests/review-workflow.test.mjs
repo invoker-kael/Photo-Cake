@@ -76,3 +76,35 @@ test("photo filters separate recommended, optional cross-Moment and last edited"
   assert.deepEqual(filterSimilarCandidates(candidates, "LAST_BATCH", ["optional", "manual"]).map((c) => c.asset_id),
     ["optional", "manual"]);
 });
+
+import { readFileSync } from "node:fs";
+
+test("Windows exposes dedicated Batch Edit navigation without adding it to companion", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(app, /"batch-edit"\s*\|\s*"review"/);
+  assert.match(app, /\["batch-edit", "Batch Edit"\]/);
+  assert.match(app, /activeView === "batch-edit" && renderBatchEdit\(\)/);
+  assert.match(app, /const renderBatchEdit = \(\) =>/);
+  assert.match(app, /const renderSimilarWorkspace = \(\) =>/);
+  assert.match(app, /className="batch-editor-source-grid"/);
+  assert.match(app, /className="batch-editor-adjust-grid"/);
+  assert.match(app, /className="batch-editor-preview-pair"/);
+  assert.match(app, /className="similar-edit-grid"/);
+  assert.match(app, /selectSimilarSource\(sourceGroup!\.id, assetId\)/);
+  assert.match(app, /onClick=\{\(\) => void applySimilarEdits\(\)\}/);
+  assert.match(app, /onClick=\{\(\) => void undoSimilarEdits\(\)\}/);
+  assert.match(styles, /\.batch-editor-source\.selected/);
+  assert.match(styles, /\.batch-editor-adjust-row/);
+});
+
+test("Source controls expose all eight real persisted Recipe correction channels", () => {
+  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  for (const key of ["exposure_delta_ev", "highlights_delta", "shadows_delta",
+    "whites_delta", "blacks_delta", "contrast_delta",
+    "saturation_delta", "vibrance_delta"]) {
+    assert.match(app, new RegExp(`\\b${key}\\b`));
+  }
+  assert.match(app, /adjustRecipeReview\(activeSource\.assetId, field, step\)/);
+  assert.match(app, /setActiveView\("batch-edit"\)/);
+});

@@ -400,3 +400,10 @@ Use the existing per-photo override store with atomic operation history, exact b
 Test both candidate tiers: same-group manual with missing embeddings; cross-Moment must have measured score above manual floor; below recommended threshold must be visible but never auto-selected. Portrait cross-Moment safety floor must exceed general scene floor. Client tests cover safe default selection and filters for recommended, cross-Moment and last-changed assets.
 
 Automatically inspect a bounded visual sample after batch Apply, while keeping source/current group and Review preflight authoritative. Limit preview concurrency; preserve successful previews if a single render fails. Clearing or changing representative source must reset intentional-overwrite opt-in. Do not claim a one-to-one Lightroom RAW preview match. Continue to require real user RAW/Lightroom fixture testing before production-ready color fidelity claims.
+
+
+### Batch Edit UI regression and maintenance
+
+Keep a first-class Windows Batch Edit page with group and RAW thumbnail selector, representative before/after controls and clear recommended/manual photo selection. A source without prior per-photo Exception must be editable without navigating through Recipe Review. Only existing typed Bridge actions are used; do not branch the underlying color-correction logic or introduce a second preset layer. Do not expose editing on Android companion when Windows-only backend commands are absent. Keep protected target selection, explicit overwrite, capped preview rendering, conflict-aware Undo and Lightroom Review gate.
+
+Front-end smoke checks must guard workstation routing, all eight persisted Recipe delta controls, actual Apply/Undo bindings and source thumbnail gallery. Compilation and actual Windows visual UI/RAW tests are separate; full Photoshop/Lightroom parity must not be inferred from screenshot previews.

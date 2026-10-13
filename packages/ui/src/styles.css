@@ -937,7 +937,7 @@ h2 { font-size: 19px; }
   .subtitle { display: none; }
   .top-actions .secondary { display: none; }
   .sidebar { position: fixed; z-index: 10; left: 0; right: 0; bottom: 0; height: 62px; padding: 5px 8px; border: 0; border-top: 1px solid #24282b; }
-  .sidebar nav { grid-template-columns: repeat(6, 1fr); }
+  .sidebar nav { grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .mode-companion .sidebar nav { grid-template-columns: repeat(4, 1fr); }
   .nav-item { min-height: 50px; }
   .workspace { padding: 18px 12px; }
@@ -1071,3 +1071,54 @@ h2 { font-size: 19px; }
 }
 .similar-edit-filter button.active { background: #2a4852; border-color: #82bbc8; color: #fff; }
 .similar-edit-filter small { margin-left: auto; }
+
+/* The photographer-facing Batch Edit workspace is a first-class Windows view. */
+.batch-edit-page { display: grid; gap: 0; }
+.batch-editor-steps { display: flex; flex-wrap: wrap; gap: 8px; padding: 16px 18px 6px; }
+.batch-editor-step { display: inline-flex; align-items: center; gap: 7px; color: #c1cbd1; padding: 8px 10px; border: 1px solid #303c40; background: #161c1e; border-radius: 7px; font-size: 12px; }
+.batch-editor-step b { color: #a8d4df; font-size: 11px; }
+.batch-editor-empty { display: grid; gap: 12px; justify-items: start; margin: 18px; padding: 22px; border: 1px solid #344045; background: #161b1e; border-radius: 10px; }
+.batch-editor-empty p { color: #a8b0b6; font-size: 13px; max-width: 620px; margin: 0; line-height: 1.5; }
+.batch-editor-section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 16px 18px 10px; }
+.batch-editor-section-head > div { display: grid; gap: 5px; }
+.batch-editor-section-head strong { color: #ecf2f4; font-size: 16px; }
+.batch-editor-section-head small { color: #a9b5bb; font-size: 12px; line-height: 1.5; }
+.batch-editor-group-strip { display: flex; gap: 9px; max-width: 100%; margin: 0 18px 14px; overflow-x: auto; padding: 3px 3px 9px; }
+.batch-editor-group { background: #14191b; border: 1px solid #3a4348; border-radius: 8px; color: #d7e3e8; padding: 8px; display: grid; gap: 4px; min-width: 120px; width: 120px; cursor: pointer; text-align: left; flex: 0 0 auto; }
+.batch-editor-group.selected { border-color: #a2d5e3; background: #26373b; box-shadow: 0 0 0 1px #5c919c; }
+.batch-editor-group img, .batch-editor-group .recipe-review-placeholder { height: 75px; width: 100%; object-fit: cover; border-radius: 5px; }
+.batch-editor-group span { font-size: 12px; font-weight: 650; }
+.batch-editor-group small { color: #a6b5bb; font-size: 11px; }
+.batch-editor-source-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 9px; margin: 0 18px 12px; }
+.batch-editor-source { text-align: left; display: grid; align-content: start; gap: 5px; min-width: 0; padding: 8px; background: #151b1e; color: #dce7ea; border-radius: 8px; border: 1px solid #364347; cursor: pointer; }
+.batch-editor-source.selected { border-color: #a9d6e1; background: #20383e; box-shadow: 0 0 0 1px #6495a0; }
+.batch-editor-source img, .batch-editor-source .recipe-review-placeholder { width: 100%; height: 110px; object-fit: cover; border-radius: 5px; }
+.batch-editor-source strong { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.batch-editor-source small { color: #aec1c9; font-size: 11px; }
+.batch-editor-source-grid + .cull-batch-action { margin: 0 18px 12px; justify-self: start; }
+.batch-editor-adjustment { margin: 8px 18px; border: 1px solid #394a50; border-radius: 10px; background: #11191c; display: grid; gap: 12px; padding-bottom: 16px; }
+.batch-editor-adjustment .batch-editor-section-head { margin-bottom: 0; }
+.batch-editor-preview-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 0 18px; }
+.batch-editor-preview-pair > div { display: grid; gap: 6px; min-width: 0; }
+.batch-editor-preview-pair small { color: #a9bcc5; font-size: 12px; }
+.batch-editor-preview-pair img, .batch-editor-preview-pair .recipe-review-placeholder { width: 100%; height: clamp(165px, 24vw, 310px); object-fit: contain; background: #0d1114; border-radius: 7px; }
+.batch-editor-adjust-grid { padding: 0 18px; display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.batch-editor-adjust-row { display: grid; align-items: center; grid-template-columns: minmax(0, 1fr) 32px 77px 32px; border: 1px solid #2e3b40; border-radius: 7px; gap: 5px; padding: 7px 9px; }
+.batch-editor-adjust-row span { color: #d5e1e4; font-size: 12px; }
+.batch-editor-adjust-row strong { text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+.batch-editor-adjust-row button { background: #243037; border: 1px solid #3a545d; color: #e9f3f5; min-height: 30px; border-radius: 5px; cursor: pointer; }
+.batch-editor-source-status { display: grid; gap: 4px; margin: 0 18px; color: #a9d0c8; font-size: 12px; }
+.batch-editor-source-status small { color: #93a6af; line-height: 1.5; }
+.batch-edit-page > .similar-edit-workspace { margin: 12px 18px 18px; }
+.review-batch-edit-link { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin: 18px; padding: 14px 16px; background: #1b282e; border: 1px solid #476670; border-radius: 8px; }
+.review-batch-edit-link > div { display: grid; gap: 5px; flex: 1; min-width: 210px; }
+.review-batch-edit-link strong { font-size: 14px; }
+.review-batch-edit-link small { font-size: 12px; color: #b5c5ca; }
+@media (max-width: 720px) {
+  .mode-workstation .nav-item { font-size: 10px; padding: 0 2px; }
+  .batch-editor-source-grid { grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); }
+  .batch-editor-adjust-grid, .batch-editor-preview-pair { grid-template-columns: 1fr; }
+  .batch-editor-step { flex: 1 0 110px; }
+  .batch-editor-section-head, .batch-editor-group-strip, .batch-editor-source-grid { margin-left: 10px; margin-right: 10px; }
+  .batch-editor-adjustment, .batch-edit-page > .similar-edit-workspace { margin-left: 10px; margin-right: 10px; }
+}

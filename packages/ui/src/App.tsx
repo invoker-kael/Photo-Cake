@@ -85,6 +85,7 @@ export type {
   PhotoCakeBridge,
   WorkflowFocus,
 } from "./batch";
+import { recipePreviewSignature, unconfirmedDeliveryAssets } from "./review-workflow";
 
 type WorkspaceView = "library" | "cull" | "groups" | "reference" | "review" | "lightroom";
 type CullViewMode = "TRIAGE" | "ALL";
@@ -390,7 +391,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [recipeReviewPreflights, setRecipeReviewPreflights] =
     useState<Record<string, BackendRecipeReviewGroupPreflight>>({});
   const [reviewRevision, setReviewRevision] = useState(0);
-  const [editedPreviews, setEditedPreviews] = useState<Record<string, BackendReviewRenderResult>>({});
+  const [editedPreviews, setEditedPreviews] = useState<Record<string, BackendReviewRenderResult & { signature: string }>>({});
+  const [expandedCompareAssetId, setExpandedCompareAssetId] = useState<string | null>(null);
   const [styleUpdating, setStyleUpdating] = useState<string | null>(null);
   const [styleBatchSource, setStyleBatchSource] = useState("");
   const [styleSyncPreflight, setStyleSyncPreflight] =
@@ -419,6 +421,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [handoffPreflightErrors, setHandoffPreflightErrors] = useState<Record<string, string>>({});
   const [handoffPreflightLoading, setHandoffPreflightLoading] = useState(false);
   const [handoffPreflightRevision, setHandoffPreflightRevision] = useState(0);
+  const [checkedDeliveryInputsKey, setCheckedDeliveryInputsKey] = useState<string | null>(null);
   const [handoffResults, setHandoffResults] = useState<Record<string, BackendLightroomHandoffResult>>({});
   const [handoffRunning, setHandoffRunning] = useState<string | null>(null);
   const [hdrMergeUpdating, setHdrMergeUpdating] = useState<string | null>(null);
@@ -801,6 +804,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     groupRevision,
   ]);
 
+  // Visible Lightroom readiness belongs only to the exact current photo inputs.
+  const deliveryInputsKey = JSON.stringify([
+    activeBatchId, analysisRevision, groupRevision, reviewRevision,
+    referenceBindings, referenceStyles, recipeReviews, cullingReviews,
+    Object.values(referencePreviews).map((preview) => [
+      preview.group_id, preview.pending_asset_id, preview.reviewed_asset_ids,
+      preview.recipes.map((recipe) => [
+        recipe.target_asset_id, recipe.source_reference_ids, recipe.adjustments,
+      ]),
+    ]),
+  ]);
+
   useEffect(() => {
     if (
       activeView !== "lightroom" ||
@@ -849,6 +864,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         }
         setHandoffPreflights(preflights);
         setHandoffPreflightErrors(errors);
+        setCheckedDeliveryInputsKey(deliveryInputsKey);
         setBackendError(null);
       })
       .catch((error) => {
@@ -859,6 +875,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         setHandoffPreflightErrors(Object.fromEntries(
           groups.map((group) => [group.id, String(error)]),
         ));
+        setCheckedDeliveryInputsKey(deliveryInputsKey);
         setBackendError(String(error));
       })
       .finally(() => {
@@ -875,6 +892,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     culling,
     cullingReviews,
     handoffPreflightRevision,
+    deliveryInputsKey,
     photoContext,
     recipeReviews,
     referenceBindings,
@@ -2072,10 +2090,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
   const renderEditedPreview = async (groupId: string, assetId: string) => {
     if (!bridge?.renderRecipePreview || !activeBatchId) return;
+    const recipe = referencePreviews[groupId]?.recipes.find((item) => item.target_asset_id === assetId);
+    if (!recipe) return;
+    const signature = recipePreviewSignature(
+      activeBatchId, referenceBindings[groupId]?.selected_reference_asset_id,
+      referenceStyles[groupId]?.style_profile, recipe, recipeReviews[assetId],
+    );
     setReviewUpdating(assetId);
     try {
       const result = await bridge.renderRecipePreview(activeBatchId, groupId, assetId);
-      setEditedPreviews((current) => ({ ...current, [assetId]: result }));
+      // Async results must retain their originating photographic inputs.
+      setEditedPreviews((current) => ({ ...current, [assetId]: { ...result, signature } }));
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
@@ -3656,6 +3681,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               <div className="recipe-review-head">
                 <strong>Group {groupIndex + 1}</strong>
                 <div className="recipe-review-head-actions">
+                  {previewUrls.get(preview.selected_reference_asset_id) && (
+                    <img className="review-reference-thumb"
+                      src={previewUrls.get(preview.selected_reference_asset_id)}
+                      alt="Selected Reference" loading="lazy" />
+                  )}
+                  <small className="review-reference-name">
+                    Look: {assetNames.get(preview.selected_reference_asset_id) ?? "Selected Reference"}
+                  </small>
                   <span>
                     {`${groupAttentionCount} attention · ${groupPendingCount} pending · ${groupConfirmedCount} confirmed · ${groupExceptionCount} exceptions · ${groupQualityRiskCount} quality guard · ${recipesWithTargets.length} editable`}
                   </span>
@@ -3778,9 +3811,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     syncingThisGroup && reviewSyncSource?.assetId === assetId;
                   const isSyncTarget =
                     syncingThisGroup && reviewSyncTargets.includes(assetId);
+                  const previewSignature = recipePreviewSignature(
+                    activeBatchId, referenceBindings[group.id]?.selected_reference_asset_id,
+                    referenceStyles[group.id]?.style_profile, recipe, review,
+                  );
+                  const currentEditedPreview =
+                    editedPreviews[assetId]?.signature === previewSignature
+                      ? editedPreviews[assetId] : null;
+                  const expanded = expandedCompareAssetId === assetId;
                   return (
                     <article
-                      className={`recipe-review-card ${isSyncSource ? "sync-source" : ""} ${isSyncTarget ? "sync-target" : ""}`}
+                      className={`recipe-review-card ${isSyncSource ? "sync-source" : ""} ${isSyncTarget ? "sync-target" : ""} ${expanded ? "compare-expanded" : ""}`}
                       key={recipe.id}
                     >
                       <div className="recipe-compare">
@@ -3799,10 +3840,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         </div>
                         <div className="recipe-compare-pane">
                           <small>After preview</small>
-                          {editedPreviews[assetId]?.preview_url ? (
+                          {currentEditedPreview?.preview_url ? (
                             <img
                               className="recipe-review-image"
-                              src={editedPreviews[assetId].preview_url}
+                              src={currentEditedPreview.preview_url}
                               alt={`${assetNames.get(assetId) ?? "RAW"} edited preview`}
                               loading="lazy"
                             />
@@ -3819,7 +3860,24 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       </div>
                       <div className="recipe-review-info">
                         <strong>{assetNames.get(assetId) ?? assetId.slice(0, 8)}</strong>
+                        <div className="recipe-compare-actions">
+                          <button className="review-choice clear" type="button"
+                            onClick={() => setExpandedCompareAssetId(expanded ? null : assetId)}>
+                            {expanded ? "Compact comparison" : "Larger before / after"}
+                          </button>
+                          {currentEditedPreview && (
+                            <button className="review-choice clear" type="button"
+                              disabled={updating} onClick={() => void renderEditedPreview(group.id, assetId)}>
+                              Refresh preview
+                            </button>
+                          )}
+                        </div>
                         <small>{recipeReviewLabel(assetId)}</small>
+                        {editedPreviews[assetId] && !currentEditedPreview && (
+                          <small className="attention-text">
+                            Adjustments changed. Render a fresh preview before judging this photo.
+                          </small>
+                        )}
                         {recipeReviewPlansByAsset.get(assetId)?.quality_risk && (
                           <small>
                             Quality guard · {recipeQualityRiskLabel(
@@ -3835,6 +3893,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         <small>
                           Final exposure {signed(recipe.adjustments.exposure ?? 0)} EV
                           {review ? ` · override ${signed(review.exposure_delta_ev)} EV` : ""}
+                        </small>
+                        <small>
+                          Contrast {signed(recipe.adjustments.contrast ?? 0, 0)}
+                          {" · "}Saturation {signed(recipe.adjustments.saturation ?? 0, 0)}
+                          {" · "}WB {recipe.adjustments.temperature != null && recipe.adjustments.tint != null
+                            ? Math.round(recipe.adjustments.temperature) + " K / tint " + signed(recipe.adjustments.tint, 0)
+                            : "untouched (unverified RAW mapping)"}
                         </small>
                         <small>
                           Tone H {signed(recipe.adjustments.highlights ?? 0, 0)}
@@ -3972,9 +4037,12 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     const allHandoffGroups = (photoContext?.groups ?? []).map((group, index) => {
       const binding = referenceBindings[group.id];
       const preview = referencePreviews[group.id];
-      const preflight = handoffPreflights[group.id];
-      const preflightError = handoffPreflightErrors[group.id];
-      const result = handoffResults[group.id];
+      const preflight = checkedDeliveryInputsKey === deliveryInputsKey
+        ? handoffPreflights[group.id] : undefined;
+      const preflightError = checkedDeliveryInputsKey === deliveryInputsKey
+        ? handoffPreflightErrors[group.id] : undefined;
+      const result = checkedDeliveryInputsKey === deliveryInputsKey
+        ? handoffResults[group.id] : undefined;
       const bracketSets = bracketSetsForGroup(group.id);
       const detectedHdrSourceAssetIds = Array.from(
         new Set(bracketSets.flatMap((set) => set.members.map((member) => member.asset_id))),
@@ -4002,9 +4070,12 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           recipe.target_asset_id != null &&
           recipeReviewPriority(recipe.target_asset_id) < 10,
       ).length;
+      const unconfirmedAssetIds = unconfirmedDeliveryAssets(
+        deliverableRecipes, recipeReviewPreflights[group.id],
+      );
       const conflictCount = preflight?.conflicting_sidecars.length ?? 0;
       const currentCount = preflight?.current_sidecars.length ?? 0;
-      const preflightReady = !bridge?.preflightGroupXmp || preflight != null;
+      const preflightReady = preflight != null && !handoffPreflightLoading;
       const missingCount = preflight?.missing_sidecars.length ?? deliverableRecipes.length;
       const standardDeliveryExpected = standardSourceCount > 0;
       const unresolved =
@@ -4019,9 +4090,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         standardDeliveryExpected &&
         !unresolved &&
         conflictCount === 0 &&
+        unconfirmedAssetIds.length === 0 &&
         missingCount > 0;
       const safeBatchReady =
-        ready && reviewAttentionCount === 0 && !hdrMergeRequired;
+        ready && !hdrMergeRequired;
       const writesWhiteBalance = deliverableRecipes.some(
         (recipe) =>
           recipe.adjustments.temperature != null || recipe.adjustments.tint != null,
@@ -4031,7 +4103,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           ? 0
           : unresolved
             ? 1
-            : reviewAttentionCount > 0
+            : unconfirmedAssetIds.length > 0
               ? 2
               : missingCount > 0
                 ? 3
@@ -4049,6 +4121,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         rejectedCount,
         exceptionCount,
         reviewAttentionCount,
+        unconfirmedAssetIds,
         conflictCount,
         currentCount,
         preflightReady,
@@ -4163,7 +4236,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             <span>Safe batch handoff</span>
             <strong>{safeBatchMissingCount} missing XMP across {safeBatchGroups.length} review-clear groups</strong>
             <small>
-              Safe batch only includes groups whose Recipe attention is clear, whose XMP preflight succeeded without conflicts, and which contain no pending HDR bracket sources.
+              Safe batch needs photographer-confirmed current Recipes, conflict-free XMP and no pending HDR stack. Confirm straightforward groups in Review first.
               HDR groups stay in Needs action so capture EV is preserved until merge.
             </small>
             <div className="handoff-batch-controls">
@@ -4237,6 +4310,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               rejectedCount,
               exceptionCount,
               reviewAttentionCount,
+              unconfirmedAssetIds,
               conflictCount,
               currentCount,
               preflightReady,
@@ -4271,7 +4345,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         ? [
                             `${deliverableRecipes.length} XMP targets`,
                             rejectedCount ? `${rejectedCount} confirmed Reject skipped` : null,
-                            reviewAttentionCount ? `${reviewAttentionCount} review attention` : "review clear",
+                            unconfirmedAssetIds.length ? `${unconfirmedAssetIds.length} need Recipe approval` : "Recipes confirmed",
                             currentCount ? `${currentCount} XMP already current` : null,
                             exceptionCount ? `${exceptionCount} photo exceptions` : null,
                             `WB ${writesWhiteBalance ? "measured" : "untouched"}`,
@@ -4331,6 +4405,21 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       />
                       <span>Include in safe batch</span>
                     </label>
+                  )}
+                  {unconfirmedAssetIds.length > 0 && (
+                    <div className="delivery-blocker">
+                      <small className="attention-text">
+                        {unconfirmedAssetIds.length} photos need current Recipe approval:
+                        {" "}{unconfirmedAssetIds.slice(0, 5)
+                          .map((id) => assetNames.get(id) ?? id.slice(0, 8)).join(", ")}
+                        {unconfirmedAssetIds.length > 5 ? ` +${unconfirmedAssetIds.length - 5} more` : ""}.
+                        Changing Reference, Look or exception reopens approval.
+                      </small>
+                      <button className="review-choice clear" onClick={() => {
+                        setReviewViewMode("ALL");
+                        setActiveView("review");
+                      }}>Open Recipe Review</button>
+                    </div>
                   )}
                   {preflightError && (
                     <small className="error-text">XMP preflight failed: {preflightError}</small>

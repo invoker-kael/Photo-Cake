@@ -31,7 +31,7 @@ use photo_core::{
     ReferenceStyleResult as CommandStyleResult, ReferenceStyleBatchResult as CommandStyleBatchResult,
     GroupAssetSelection, CullDecideResult, CullConfirmVisibleResult,
     CullQuickApplyResult, ReferenceClearResult,
-    CURRENT_RECIPE_PROCESS_VERSION,
+    CURRENT_RECIPE_PROCESS_VERSION, review_handoff_unconfirmed,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::{Deserialize, Serialize};
@@ -548,6 +548,18 @@ fn recipe_review_preflight_for_group(
             .unwrap_or(usize::MAX)
     });
     Ok((plan, recipes))
+}
+
+/// Single and multi-group writes have identical authoritative Review gates.
+fn ensure_review_confirmed_for_handoff(group_id: Uuid, state: &AppState) -> Result<(), String> {
+    let (plan, _) = recipe_review_preflight_for_group(group_id, state)?;
+    let missing = review_handoff_unconfirmed(&plan);
+    if missing.is_empty() { return Ok(()); }
+    let examples = missing.iter().take(4).map(Uuid::to_string).collect::<Vec<_>>().join(", ");
+    Err(format!(
+        "group {group_id}: {} photos need current Recipe approval before XMP ({examples}). Review exceptions and confirm clear photos in bulk.",
+        missing.len(),
+    ))
 }
 
 fn lock_runner<T>(
@@ -2602,10 +2614,13 @@ fn render_group_recipe_preview(
         .get(asset_id)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "RAW preview is not ready yet".to_string())?;
+    // A late render of an older Recipe cannot overwrite the current photo preview.
+    let fingerprint = photo_core::recipe_review_store::recipe_review_fingerprint(&recipe)
+        .map_err(|error| error.to_string())?;
     let destination = state
         .cache_root
         .join("review-previews")
-        .join(format!("{asset_id}.jpg"));
+        .join(format!("{asset_id}-{fingerprint}.jpg"));
 
     render_recipe_preview(
         &PathBuf::from(source.cache_path),
@@ -2790,6 +2805,7 @@ fn write_group_reference_xmp(
 ) -> Result<LightroomHandoffResult, String> {
     let group_id = Uuid::parse_str(&group_id)
         .map_err(|error| format!("invalid group id: {error}"))?;
+    ensure_review_confirmed_for_handoff(group_id, &state)?;
     let resolved = resolve_lightroom_handoff(group_id, &state)?;
     if resolved.recipes.is_empty() && !resolved.hdr_source_asset_ids.is_empty() {
         return Err(
@@ -2841,16 +2857,8 @@ fn write_reference_xmp_batch(
             return Err(format!("duplicate Lightroom group in batch handoff: {group_id}"));
         }
 
-        // Recheck live Review gates on the backend, not only in Windows UI.
-        // Future CLI/Agent callers must not bypass attention or pending evidence.
-        let (review_plan, _) = recipe_review_preflight_for_group(group_id, &state)?;
-        if !review_plan.attention_asset_ids.is_empty()
-            || !review_plan.pending_asset_ids.is_empty()
-        {
-            return Err(format!(
-                "group {group_id} has unresolved Recipe attention or pending evidence"
-            ));
-        }
+        // Batch delivery cannot bypass individual photographer approval.
+        ensure_review_confirmed_for_handoff(group_id, &state)?;
         let resolved = resolve_lightroom_handoff(group_id, &state)?;
         if !resolved.hdr_source_asset_ids.is_empty() && !resolved.hdr_merge_completed {
             return Err(format!(

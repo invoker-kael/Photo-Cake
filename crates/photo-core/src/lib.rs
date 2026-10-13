@@ -155,6 +155,7 @@ pub use xmp::{
 pub use workflow::{
     assess_recipe_quality_risk, build_recipe_review_group_preflight, derive_workflow_status,
     recipe_review_attention_reason, recipe_review_group_can_confirm,
+    review_handoff_unconfirmed,
     recipe_review_requires_attention, RecipeQualityRisk, RecipeReviewAssetPreflight,
     RecipeReviewAttentionReason, RecipeReviewDisposition, RecipeReviewGroupPreflight,
     RecipeReviewSignal, WorkflowFacts, WorkflowFocus, WorkflowStatus,

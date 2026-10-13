@@ -389,3 +389,12 @@ CLI/MCP server or Android RAW backend is introduced.
 Next focus should be quality and integration passes on the complete
 27-command photography chain, especially recovery and human-facing
 handoff failure explanations, before adding unrelated command IDs.
+
+
+### October 2026 photographer inspection and delivery safety
+
+Completed implementation batch: the Windows workstation exposes the actual selected Reference beside its group, enlarges real before/after previews on demand, and explains the final tone/contrast/color/white-balance controls without inventing RAW-renderer parity. Asynchronous review previews are tied to the exact current photo inputs, with fingerprint-addressed cache artifacts so older rendering cannot overwrite a new result.
+
+Single-group and multi-group Lightroom delivery both use the same current photographer-approval preflight. Unconfirmed clear photos and changed Recipes are blocked until explicitly approved, without forcing manual review of all normal frames: use existing Confirm clear groups. The Lightroom view names affected photos and opens Review directly, and previously verified preflight cannot authorize handoff after a photographic input change.
+
+Remaining real-shoot validation: visually test mixed landscape, city, family/bursts, low-light, backlit portraits and HDR brackets with user-owned CR3/ARW/NEF/DNG RAWs and compare final XMP in Lightroom/Camera Raw. Validated RAW-to-Lightroom white-balance synthesis is still intentionally gated.

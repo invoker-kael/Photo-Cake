@@ -789,3 +789,12 @@ and cache invalidation for Review/XMP preflight; it is an adapter, not
 a second database of grouping state. The optional shared UI Bridge
 continues to support Android's native companion action until a
 separate Android Command adapter exists.
+
+
+## Current photographer approval across handoff surfaces
+
+The existing `recipe_review_fingerprint` remains the sole confirmation authority. `review_handoff_unconfirmed` projects the canonical `RecipeReviewGroupPreflight` into unconfirmed editable assets. Single- and multi-group Windows XMP writers both re-run that same preflight and require current `CONFIRMED` state before the existing XMP preflight/write/verify/rollback pipeline. Clear AI Recipes are bulk-confirmable but are not auto-approved. HDR sources remain separate.
+
+Review-preview rendering uses an asset-plus-final-Recipe-fingerprint cache filename instead of rewriting the same JPEG path. The UI tags asynchronous responses with a signature of batch, selected Reference, StyleProfile, materialized per-photo adjustments and review override; temporary materialization Recipe UUID is not treated as visual identity. Only matching results are visible.
+
+The Lightroom read-only view associates its preflight result with the current photographic-input key; changes to Cull, Reference, style, exception, groups, analysis or Recipe approvals immediately prevent displaying old readiness as current. Write-time canonical validation remains mandatory. No parallel photo edit resolver, new persistent store, or additional Photography Command is introduced.

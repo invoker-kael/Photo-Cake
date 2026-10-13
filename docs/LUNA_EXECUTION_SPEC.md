@@ -375,3 +375,12 @@ Lightroom preflight. Preserve review overrides and existing sidecars,
 and never pretend that clearing a Reference automatically rolls back
 a Lightroom delivery. CLI/MCP and autonomous regrouping are not
 part of this batch.
+
+
+## Photographer-first Windows review and Lightroom approval gate
+
+Keep all 27 existing Photography Commands and the current Canonical Reference -> adaptive Recipe -> preview -> exception review -> Lightroom pipeline. Do not introduce a parallel renderer, state manager, preset-copy system or Lightroom plugin.
+
+Both individual and batch XMP writes must re-run canonical Recipe Review preflight and require photographer `CONFIRMED` for all current editable targets. AI-clear and missing/pending evidence are not confirmation; fingerprints re-open approval when Reference, Look or single-photo edits change. Continue using existing bulk confirm for clear groups, with targeted per-photo Review for exceptions. Preserve HDR bracket routing, existing XMP conflict detection, idempotence, parse-back verification and rollback.
+
+Show actual Reference in Windows Review, permit larger before/after inspection and display exposure/contrast/tone/color/WB details from the current Recipe. Never call the embedded-JPEG approximation a complete RAW renderer. Bind asynchronous preview results to the exact current photographic inputs, with content-specific file paths. Lightroom should show affected filenames and explicit Review action when blocked. Require Rust gate tests, UI regression tests, Windows/Android typechecks and real Lightroom fixture testing before claiming final color parity.

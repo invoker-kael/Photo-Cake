@@ -735,3 +735,16 @@ or Lightroom XMP. Windows UI requires explicit two-step confirmation,
 explains downstream re-review and updates dependent Recipe and Lightroom
 preflight views after success. Current reference selection, culling
 decisions, Recipe review and XMP handoff semantics are unchanged.
+
+
+### Current Recipe approval and safe XMP delivery
+
+Lightroom delivery, both single-group and batch, requires explicit photographer confirmation of every **currently materialized deliverable Recipe**. AI-clear is a recommendation, not approval. Current fingerprint checks invalidate approval after Reference, StyleProfile or per-photo Exception changes. Clear groups can still be confirmed in one action; the photographer sees filenames of unconfirmed assets and a direct route back to Review. HDR bracket RAWs are not turned into ordinary exposure-adjusted XMP sources.
+
+Windows must not show an earlier read-only XMP preflight as current after relevant photographic inputs change. Real write-time preflight, idempotence, no-overwrite, full-set verification and rollback remain authoritative. A single-group handoff is not a bypass around the batch Review gate.
+
+### Real before / after inspection
+
+The selected Reference appears next to Review group context. Photographer-triggered expanded before/after inspection uses the existing embedded-RAW-preview evaluator only and surfaces final exposure, contrast, saturation, tone and measured/omitted white-balance controls. A JPEG approximation must never claim Lightroom RAW rendering parity.
+
+Preview cache filenames are scoped to the current canonical Recipe fingerprint, and Windows displays the result only if its originating Reference/Look/adjustments/exception signature is current. A late async response cannot be mistaken for a newer adjustment.

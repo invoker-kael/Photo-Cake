@@ -15,6 +15,7 @@
     "check": "pnpm check:windows && pnpm check:android",
     "check:windows": "pnpm --filter @photo-cake/windows check",
     "check:android": "pnpm --filter @photo-cake/android check",
-    "test:core": "cargo test --workspace"
+    "test:core": "cargo test --workspace",
+    "test:review-ui": "node --experimental-strip-types --test packages/ui/tests/review-workflow.test.mjs"
   }
 }

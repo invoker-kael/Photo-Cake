@@ -43,6 +43,9 @@ jobs:
       - name: Check Windows and Android UI
         run: pnpm check
 
+      - name: Test review and Lightroom UI approval
+        run: pnpm test:review-ui
+
   windows-rust:
     runs-on: windows-latest
     steps:

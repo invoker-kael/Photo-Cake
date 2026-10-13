@@ -261,6 +261,15 @@ pub struct RecipeReviewGroupPreflight {
     pub hdr_source_asset_ids: Vec<Uuid>,
 }
 
+/// Lightroom delivery requires explicit photographer confirmation of every
+/// currently materialized Recipe. AI clear is not equivalent to approval.
+pub fn review_handoff_unconfirmed(plan: &RecipeReviewGroupPreflight) -> Vec<Uuid> {
+    plan.assets.iter()
+        .filter(|asset| asset.disposition != RecipeReviewDisposition::Confirmed)
+        .map(|asset| asset.asset_id)
+        .collect()
+}
+
 pub fn recipe_review_attention_reason(
     signal: &RecipeReviewSignal,
 ) -> Option<RecipeReviewAttentionReason> {
@@ -385,6 +394,40 @@ mod tests {
             lightroom_current_groups: 4,
             ..WorkflowFacts::default()
         }
+    }
+
+    #[test]
+    fn lightroom_blocks_clear_and_exception_until_confirmed() {
+        let clear = Uuid::new_v4();
+        let exception = Uuid::new_v4();
+        let approved = Uuid::new_v4();
+        let plan = build_recipe_review_group_preflight(
+            Uuid::new_v4(),
+            &[
+                (clear, RecipeReviewSignal::default()),
+                (exception, RecipeReviewSignal { has_exception: true, ..Default::default() }),
+                (approved, RecipeReviewSignal { confirmed: true, ..Default::default() }),
+            ], false, vec![], vec![],
+        );
+        assert_eq!(review_handoff_unconfirmed(&plan), vec![clear, exception]);
+    }
+
+    #[test]
+    fn changed_recipe_reopens_delivery_confirmation() {
+        let photo = Uuid::new_v4();
+        let group = Uuid::new_v4();
+        let yes = build_recipe_review_group_preflight(
+            group, &[(photo, RecipeReviewSignal { confirmed: true, ..Default::default() })],
+            false, vec![], vec![],
+        );
+        assert!(review_handoff_unconfirmed(&yes).is_empty());
+        // A changed Reference/style/exception invalidates the persisted
+        // Recipe fingerprint; the canonical preflight then reports unconfirmed.
+        let stale = build_recipe_review_group_preflight(
+            group, &[(photo, RecipeReviewSignal { has_exception: true, ..Default::default() })],
+            false, vec![], vec![],
+        );
+        assert_eq!(review_handoff_unconfirmed(&stale), vec![photo]);
     }
 
     #[test]

@@ -33,7 +33,7 @@ const bridge: PhotoCakeBridge = {
     invoke<void>("set_culling_reviews", { reviews }),
   loadReferenceBindings: (batchId) =>
     invoke<BackendReferenceBinding[]>("batch_reference_bindings", { batchId }),
-  setGroupReference: (groupId, assetId) =>
+  setGroupReference: (_batchId, groupId, assetId) =>
     invoke<BackendReferenceBinding>("set_group_reference", { groupId, assetId }),
   clearGroupReference: (groupId) =>
     invoke<void>("clear_group_reference", { groupId }),

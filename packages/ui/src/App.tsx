@@ -793,6 +793,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   useEffect(() => {
     if (
       activeView !== "lightroom" ||
+      !activeBatchId ||
       !bridge?.preflightGroupXmp ||
       !photoContext?.groups.length
     ) {
@@ -828,7 +829,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setHandoffPreflightLoading(true);
     Promise.allSettled(
       groups.map(async (group) => {
-        const preflight = await bridge.preflightGroupXmp!(group.id);
+        const preflight = await bridge.preflightGroupXmp!(activeBatchId, group.id);
         return [group.id, preflight] as const;
       }),
     )
@@ -858,6 +859,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     };
   }, [
     activeView,
+    activeBatchId,
     bridge,
     culling,
     cullingReviews,
@@ -1607,9 +1609,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const setReferencePhoto = async (groupId: string, assetId: string) => {
-    if (!bridge?.setGroupReference) return;
+    if (!bridge?.setGroupReference || !activeBatchId) return;
     try {
-      const binding = await bridge.setGroupReference(groupId, assetId);
+      const binding = await bridge.setGroupReference(activeBatchId, groupId, assetId);
       setReferenceBindings((current) => ({ ...current, [groupId]: binding }));
       setReferenceBatchTargets((current) =>
         current.filter((value) => value !== groupId),
@@ -1906,11 +1908,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     assetId: string,
     reviewed: boolean,
   ) => {
-    if (reviewed ? !bridge?.setRecipeReviewed : !bridge?.clearRecipeReviewed) return;
+    if (!activeBatchId || (reviewed ? !bridge?.setRecipeReviewed : !bridge?.clearRecipeReviewed)) return;
     setReviewUpdating(assetId);
     try {
-      if (reviewed) await bridge!.setRecipeReviewed!(groupId, assetId);
-      else await bridge!.clearRecipeReviewed!(assetId);
+      if (reviewed) await bridge!.setRecipeReviewed!(activeBatchId, groupId, assetId);
+      else await bridge!.clearRecipeReviewed!(activeBatchId, groupId, assetId);
       setReferencePreviews((current) => {
         const preview = current[groupId];
         if (!preview) return current;
@@ -1995,10 +1997,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const renderEditedPreview = async (groupId: string, assetId: string) => {
-    if (!bridge?.renderRecipePreview) return;
+    if (!bridge?.renderRecipePreview || !activeBatchId) return;
     setReviewUpdating(assetId);
     try {
-      const result = await bridge.renderRecipePreview(groupId, assetId);
+      const result = await bridge.renderRecipePreview(activeBatchId, groupId, assetId);
       setEditedPreviews((current) => ({ ...current, [assetId]: result }));
       setBackendError(null);
     } catch (error) {
@@ -2036,10 +2038,10 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const writeGroupXmp = async (groupId: string) => {
-    if (!bridge?.writeGroupXmp) return;
+    if (!bridge?.writeGroupXmp || !activeBatchId) return;
     setHandoffRunning(groupId);
     try {
-      const result = await bridge.writeGroupXmp(groupId);
+      const result = await bridge.writeGroupXmp(activeBatchId, groupId);
       setHandoffResults((current) => ({ ...current, [groupId]: result }));
       setHandoffPreflights((current) => {
         const previous = current[groupId];

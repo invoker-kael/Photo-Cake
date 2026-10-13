@@ -495,6 +495,7 @@ export interface BackendReviewRenderResult {
   recipe_id: string;
   cache_path: string;
   preview_url?: string;
+  process_version?: number;
 }
 
 export interface BatchWorkerEvent {
@@ -538,7 +539,7 @@ export interface PhotoCakeBridge {
   ): Promise<BackendMomentQuickCullOperation>;
   loadReferenceBindings?(batchId: string): Promise<BackendReferenceBinding[]>;
   loadReferenceReadiness?(batchId: string): Promise<BackendReferenceReadinessPlan[]>;
-  setGroupReference?(groupId: string, assetId: string): Promise<BackendReferenceBinding>;
+  setGroupReference?(batchId: string, groupId: string, assetId: string): Promise<BackendReferenceBinding>;
   setGroupReferences?(
     batchId: string,
     items: BackendReferenceBatchItem[],
@@ -564,11 +565,11 @@ export interface PhotoCakeBridge {
     fields: BackendRecipeReviewSyncFields,
   ): Promise<BackendRecipeReviewSyncResult>;
   clearRecipeReview?(assetId: string): Promise<void>;
-  setRecipeReviewed?(groupId: string, assetId: string): Promise<void>;
+  setRecipeReviewed?(batchId: string, groupId: string, assetId: string): Promise<void>;
   confirmRecipeReviews?(items: BackendRecipeReviewBatchItem[]): Promise<BackendRecipeReviewBatchResult>;
   confirmRecipeReviewGroups?(groupIds: string[]): Promise<BackendRecipeReviewGroupBatchResult>;
-  clearRecipeReviewed?(assetId: string): Promise<void>;
-  renderRecipePreview?(groupId: string, assetId: string): Promise<BackendReviewRenderResult>;
+  clearRecipeReviewed?(batchId: string, groupId: string, assetId: string): Promise<void>;
+  renderRecipePreview?(batchId: string, groupId: string, assetId: string): Promise<BackendReviewRenderResult>;
   loadReferenceStyles?(batchId: string): Promise<BackendGroupReferenceStyle[]>;
   preflightReferenceStyleSync?(
     batchId: string,
@@ -590,8 +591,8 @@ export interface PhotoCakeBridge {
   ): Promise<BackendGroupReferenceStyleBatchResult>;
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
   setHdrMerged?(groupId: string, merged: boolean): Promise<boolean>;
-  preflightGroupXmp?(groupId: string): Promise<BackendLightroomHandoffPreflight>;
-  writeGroupXmp?(groupId: string): Promise<BackendLightroomHandoffResult>;
+  preflightGroupXmp?(batchId: string, groupId: string): Promise<BackendLightroomHandoffPreflight>;
+  writeGroupXmp?(batchId: string, groupId: string): Promise<BackendLightroomHandoffResult>;
   writeBatchXmp?(groupIds: string[]): Promise<BackendLightroomBatchHandoffResult>;
   subscribeBatchUpdates?(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }

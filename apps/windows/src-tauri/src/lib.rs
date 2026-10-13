@@ -20,6 +20,9 @@ use photo_core::{
     ReferenceStore,
     ReferenceWorkflowError, RunStep, SemanticGroupingConfig, SemanticRefinementReport,
     StyleProfile, StyleSyncGroupContext, StyleSyncPreflight, WorkflowFacts, WorkflowStatus,
+    PhotographyCommandRequest, PhotographyCommandResult, RecipePreviewResult,
+    RecipeConfirmationResult, LightroomPreflightResult, LightroomHandoffResult as CommandHandoffResult,
+    CURRENT_RECIPE_PROCESS_VERSION,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::{Deserialize, Serialize};
@@ -707,6 +710,81 @@ fn set_worker_intent(
         active
     };
     Ok(active)
+}
+
+#[tauri::command]
+fn photography_command(
+    command_id: String,
+    request: serde_json::Value,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let command = PhotographyCommandRequest::parse(&command_id, request)?;
+    let groups = state.catalog
+        .list_effective_groups_for_collection(command.batch_id())
+        .map_err(|error| error.to_string())?;
+    command.validate_target(&groups)?;
+
+    // One validated request -> existing photo-core backed workflow -> typed result.
+    let result = match command {
+        PhotographyCommandRequest::ReferenceSelect(request) => {
+            let binding = set_group_reference(
+                request.group_id.to_string(), request.asset_id.to_string(), state,
+            )?;
+            PhotographyCommandResult::ReferenceSelected(binding)
+        }
+        PhotographyCommandRequest::RecipePreview(request) => {
+            let preview = render_group_recipe_preview(
+                request.group_id.to_string(), request.asset_id.to_string(), state,
+            )?;
+            PhotographyCommandResult::RecipePreview(RecipePreviewResult {
+                asset_id: preview.asset_id, recipe_id: preview.recipe_id,
+                cache_path: preview.cache_path,
+                process_version: CURRENT_RECIPE_PROCESS_VERSION,
+            })
+        }
+        PhotographyCommandRequest::RecipeConfirm(request) => {
+            set_recipe_reviewed(request.group_id.to_string(), request.asset_id.to_string(), state)?;
+            PhotographyCommandResult::RecipeConfirmation(RecipeConfirmationResult {
+                asset_id: request.asset_id, confirmed: true,
+            })
+        }
+        PhotographyCommandRequest::RecipeReopen(request) => {
+            clear_recipe_reviewed(request.asset_id.to_string(), state)?;
+            PhotographyCommandResult::RecipeConfirmation(RecipeConfirmationResult {
+                asset_id: request.asset_id, confirmed: false,
+            })
+        }
+        PhotographyCommandRequest::LightroomPreflight(request) => {
+            let preflight = preflight_group_reference_xmp(request.group_id.to_string(), state)?;
+            PhotographyCommandResult::LightroomPreflight(LightroomPreflightResult {
+                group_id: preflight.group_id,
+                target_count: preflight.target_sidecars.len(),
+                current_count: preflight.current_sidecars.len(),
+                missing_count: preflight.missing_sidecars.len(),
+                conflict_count: preflight.conflicting_sidecars.len(),
+                target_sidecars: preflight.target_sidecars,
+                current_sidecars: preflight.current_sidecars,
+                missing_sidecars: preflight.missing_sidecars,
+                conflicting_sidecars: preflight.conflicting_sidecars,
+                hdr_source_asset_ids: preflight.hdr_source_asset_ids,
+                hdr_merge_required: preflight.hdr_merge_required,
+                hdr_merge_completed: preflight.hdr_merge_completed,
+            })
+        }
+        PhotographyCommandRequest::LightroomHandoff(request) => {
+            let result = write_group_reference_xmp(request.group_id.to_string(), state)?;
+            let written_count = result.written_sidecars.len();
+            let target_count = result.verified_sidecar_count;
+            PhotographyCommandResult::LightroomHandoff(CommandHandoffResult {
+                group_id: result.group_id,
+                written_sidecars: result.written_sidecars,
+                verified_sidecar_count: result.verified_sidecar_count,
+                target_count, written_count,
+                already_current_count: target_count.saturating_sub(written_count),
+            })
+        }
+    };
+    serde_json::to_value(result).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1539,7 +1617,6 @@ fn batch_reference_bindings(
     Ok(bindings)
 }
 
-#[tauri::command]
 fn set_group_reference(
     group_id: String,
     asset_id: String,
@@ -2060,7 +2137,6 @@ fn batch_reference_previews(
     Ok(previews)
 }
 
-#[tauri::command]
 fn set_recipe_reviewed(
     group_id: String,
     asset_id: String,
@@ -2201,7 +2277,6 @@ fn confirm_recipe_review_groups(
     })
 }
 
-#[tauri::command]
 fn clear_recipe_reviewed(
     asset_id: String,
     state: State<'_, AppState>,
@@ -2214,7 +2289,6 @@ fn clear_recipe_reviewed(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
 fn render_group_recipe_preview(
     group_id: String,
     asset_id: String,
@@ -2369,7 +2443,6 @@ fn set_group_hdr_merged(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
 fn preflight_group_reference_xmp(
     group_id: String,
     state: State<'_, AppState>,
@@ -2421,7 +2494,6 @@ fn preflight_group_reference_xmp(
     })
 }
 
-#[tauri::command]
 fn write_group_reference_xmp(
     group_id: String,
     state: State<'_, AppState>,
@@ -2704,6 +2776,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            photography_command,
             list_batches,
             build_companion_snapshot,
             apply_companion_decision_patch,
@@ -2724,7 +2797,6 @@ pub fn run() {
             batch_reference_bindings,
             batch_reference_readiness,
             set_group_references,
-            set_group_reference,
             clear_group_reference,
             batch_recipe_reviews,
             set_recipe_review,
@@ -2737,14 +2809,9 @@ pub fn run() {
             copy_reference_style_to_groups,
             batch_recipe_review_preflight,
             batch_reference_previews,
-            set_recipe_reviewed,
             confirm_recipe_reviews,
             confirm_recipe_review_groups,
-            clear_recipe_reviewed,
-            render_group_recipe_preview,
             set_group_hdr_merged,
-            preflight_group_reference_xmp,
-            write_group_reference_xmp,
             write_reference_xmp_batch,
             create_batch,
             import_raw_paths,

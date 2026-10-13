@@ -635,3 +635,32 @@ ExposureAnalysis v8 replaces hard hue-bin assignment with feathered weighting be
 Selective Reference matching now treats hue coverage as scene-composition evidence as well as confidence. Very small zones are attenuated, and zones whose Reference/target coverage overlap is below 25% are skipped because they are more likely to represent a different object than a style mismatch. Positive Red/Orange saturation lift is capped more tightly than desaturation to reduce unintended pressure on skin and other warm subjects.
 
 The existing COLOR_DISTRIBUTION_CONFLICT Review gate remains authoritative. These changes improve the automatic starting point and its stability; they do not silently auto-approve mixed-color scenes.
+
+## Photography Command boundary — first slice
+
+```text
+Windows UI / future CLI / future Agent / future MCP
+                       |
+        Photography Command ID + typed request
+                       |
+          validated batch/group/asset scope
+                       |
+                 photo-core workflows
+      ReferenceStore -> color_sync -> RecipeReviewStore
+                    -> XMP preflight/writer/verification
+```
+
+`photo-core::photography_commands` defines the six stable command IDs and typed
+request/result contracts, separate from UI labels. The current Windows Tauri
+`photography_command` adapter dispatches single-group operations exclusively
+to the existing core-backed Reference, canonical Recipe preview, Recipe review
+confirmation, and Lightroom XMP paths. It is deliberately not a second workflow
+engine. Execution remains in the existing workflows; the initial dispatcher is
+a Windows adapter, not a cross-platform execution server.
+
+Batch Reference/confirmation/XMP and other operations are not Command-migrated.
+Future adapters must preserve the same validated contract; they may not directly
+write SQLite tables, submit arbitrary Recipe JSON, edit XMP XML or bypass
+photographer authority. No MCP server is provided. Existing XMP case-insensitive
+collision checks, whole-group preflight, write-missing only, parse-back,
+numeric/identity verification and rollback remain in photo-core.

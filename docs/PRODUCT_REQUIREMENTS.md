@@ -601,3 +601,19 @@ The selected Quick Cull batch must expose its projected Keep/Review/Reject count
 - Positive Red/Orange automatic Saturation lift MUST use stricter bounds than negative correction to reduce unintended changes to skin and warm subjects.
 - Preview Color Mixer interpolation MUST remain continuous through the Magenta-to-Red wrap.
 - These safeguards MUST NOT remove the COLOR_DISTRIBUTION_CONFLICT photographer Review requirement.
+
+## Photography Command contract (first batch)
+
+Windows single-group Reference selection, canonical Recipe preview, confirmation/reopen
+and Lightroom preflight/handoff expose stable intent IDs: `reference.select`,
+`recipe.preview`, `recipe.confirm`, `recipe.reopen`,
+`lightroom.preflight`, `lightroom.handoff`. Requests carry batch/group/asset UUID
+identity as applicable, never database rows, arbitrary Recipe JSON or XMP XML.
+The validated request must belong to the current effective photo group in its batch.
+Batch mutations, import, Cull, group refinement, CLI, MCP and Android editing
+are not in this first slice.
+
+Photographer-confirmed Reject alone excludes a deliverable; AI RejectSuggestion
+never does. Reference preservation, persisted exceptions, current Recipe
+fingerprint and ProcessVersion review invalidation, immutable RAW, and case-safe
+existing XMP preflight/rollback remain authoritative in the existing core.

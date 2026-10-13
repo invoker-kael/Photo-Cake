@@ -29,6 +29,7 @@ pub mod pipeline;
 pub mod preview;
 pub mod raw;
 pub mod recipe;
+pub mod photography_commands;
 pub mod recipe_review_store;
 pub mod reference;
 pub mod reference_store;
@@ -157,4 +158,11 @@ pub use workflow::{
     recipe_review_requires_attention, RecipeQualityRisk, RecipeReviewAssetPreflight,
     RecipeReviewAttentionReason, RecipeReviewDisposition, RecipeReviewGroupPreflight,
     RecipeReviewSignal, WorkflowFacts, WorkflowFocus, WorkflowStatus,
+};
+
+pub use photography_commands::{
+    PhotographyCommandId, PhotographyCommandRequest, PhotographyCommandResult,
+    GroupAssetCommandRequest, GroupCommandRequest, RecipePreviewResult,
+    RecipeConfirmationResult, LightroomPreflightResult, LightroomHandoffResult,
+    PHOTOGRAPHY_COMMAND_IDS,
 };

@@ -253,3 +253,21 @@ Generate the return patch by diffing current mobile CullingReviewStore / Referen
 Keep triage as a UI projection over existing CullingRecommendation and CullingReviewStore state. In Triage mode surface unresolved Review / RejectSuggestion candidates and analysis-pending assets, hide already-confirmed items and obvious AI Keep items, and preserve original group identity/numbering. Do not manufacture a confidence score just to sort the page; use existing recommendation class, measured quality and group rank only. All mode must remain available as the complete evidence view.
 
 Batch confirmation must be explicit and use one CullingReviewStore transaction. Confirm only currently visible scored suggestions that do not already have a photographer decision; never convert pending state into a decision. Protect the asset currently selected as a group Reference from automatic batch Reject conversion. Batch confirmation remains decision persistence only and must never delete, move or exclude RAW files by itself.
+
+## Photography Command execution rule (first slice)
+
+First batch of stable command IDs: `reference.select`, `recipe.preview`,
+`recipe.confirm`, `recipe.reopen`, `lightroom.preflight`,
+`lightroom.handoff`. Typed requests validate batch/group/asset membership
+before delegating to existing core-backed workflows. Windows single-group buttons
+use the shared `photography_command` adapter. Batch actions and other
+photography operations are not yet Command-migrated.
+
+The registry is an interface boundary, **not** a workflow engine.
+Never duplicate `ReferenceStore`, `color_sync`, Recipe regeneration, per-photo
+exceptions, review fingerprints/ProcessVersion or XMP sidecar writing. Future
+CLI/Agent/MCP adapters may express stable command IDs only, not raw SQLite,
+ReferenceStore internals, arbitrary Recipe JSON, XMP XML or unsanctioned editing.
+Retain human Reject/Reference gates, exception precedence, existing whole-group
+XMP preflight/verification/rollback and RAW byte immutability. Do not implement
+a standalone MCP service until the Command API is proven through Windows UI.

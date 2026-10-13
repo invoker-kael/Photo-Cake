@@ -298,3 +298,16 @@ Completed after selective Reference Color Mixer saturation: hue evidence now fea
 Selective corrections are also coverage-aware. A hue that occupies materially different portions of Reference and target is treated as a likely composition difference and skipped, while small regions receive reduced authority. Red/Orange positive lift is intentionally tighter than desaturation so family, portrait and warm indoor photographs are less likely to receive excessive warm-color saturation from an automatic Reference match.
 
 ExposureAnalysis moves to v8 so existing libraries recompute this evidence instead of silently reusing the older hard-bin cache.
+
+## Photography Commands — first vertical slice
+
+The first six stable high-level IDs are `reference.select`, `recipe.preview`,
+`recipe.confirm`, `recipe.reopen`, `lightroom.preflight`,
+`lightroom.handoff`. Primary Windows single-group actions route through one
+validated command dispatcher and reuse existing core-backed workflows. Batch
+Reference setup, batch confirmations/handoff, Style sync, Cull, Group and import
+continue on existing adapters and are not yet Command-based.
+
+Next slice: move batch Reference/Recipe/XMP actions onto the same contract while
+preserving their transactional all-groups gates; only then consider CLI/MCP adapters.
+Do not create a new Recipe, color engine, RAW engine or XMP writer.

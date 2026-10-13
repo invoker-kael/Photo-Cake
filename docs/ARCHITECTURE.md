@@ -725,3 +725,35 @@ optional methods without introducing Android RAW processing.
 Unmigrated Cull, grouping, reference clearing, HDR merge and other
 operational endpoints remain outside the registry. CLI and MCP are future
 adapters, not implemented servers.
+
+## Photography Commands — fourth slice: Cull + real Windows controls
+
+```text
+Windows Cull page (Triage / All, decision buttons, bulk panel, Quick Cull)
+                             |
+                  Photography Commands
+        scope validation + current evidence recomputation
+                             |
+                 existing photo-core
+ CullingReviewStore (atomic insert-only bulk, Quick Cull op/undo)
+                             |
+           Reference and HDR safety gates
+```
+
+Fourth slice extends the same typed registry/Windows Tauri dispatcher
+to 21 stable IDs. `cull.decide` validates group/asset scope and protects
+the selected Reference. `cull.confirmVisible` takes only selected
+group/asset pairs, reads current AI recommendations and downstream
+Reference/HDR state, forbids existing decisions and pending evidence,
+and persists all choices via one `set_many_if_unreviewed` SQLite
+transaction. The UI never authorizes a Reject merely because the
+old cached snapshot says RejectSuggestion. `cull.quickApply` and
+`cull.quickUndo` delegate to the existing group-validated conservative
+Quick Cull and operation log; undo verifies the latest operation,
+photographer changes and downstream Reference state. No new planner,
+SQLite schema engine or editing workflow.
+
+Shared UI Bridge methods remain optional for Android. Windows
+exposes the unified Command route for these actions; Android has
+an independent companion backend and retains its legacy Cull adapter.
+No general CLI/MCP server is implemented.

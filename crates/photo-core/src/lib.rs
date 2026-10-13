@@ -172,5 +172,8 @@ pub use photography_commands::{
     RecipeExceptionDeltas, RecipeExceptionSetRequest, RecipeExceptionSyncFields,
     RecipeExceptionSyncRequest, RecipeExceptionClearResult, RecipeExceptionSyncResult,
     ReferenceStyleUpdateRequest, ReferenceStyleCopyBatchRequest,
-    ReferenceStyleResult, ReferenceStyleBatchResult, PHOTOGRAPHY_COMMAND_IDS,
+    ReferenceStyleResult, ReferenceStyleBatchResult,
+    CullDecideRequest, CullConfirmVisibleRequest, CullQuickApplyRequest,
+    CullQuickUndoRequest, CullDecideResult, CullConfirmVisibleResult,
+    CullQuickApplyResult, PHOTOGRAPHY_COMMAND_IDS,
 };

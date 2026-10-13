@@ -56,6 +56,10 @@ pub enum CullingReviewStoreError {
     Json(#[from] serde_json::Error),
     #[error("invalid culling decision in store: {0}")]
     InvalidDecision(String),
+    #[error("duplicate photographer Cull review in batch: {0}")]
+    DuplicateReviewAsset(Uuid),
+    #[error("photo already has a photographer Cull decision: {0}")]
+    ExistingReviewAsset(Uuid),
     #[error("moment quick-cull operation not found: {0}")]
     OperationNotFound(Uuid),
     #[error("moment quick-cull operation is stale because photographer decisions changed: {0}")]
@@ -128,6 +132,44 @@ impl CullingReviewStore {
                     decision_to_db(review.decision),
                     updated_at
                 ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Confirm visible AI suggestions without overwriting a photographer's
+    /// decision saved after the frontend read its cull snapshot.
+    /// All requested assets commit together or none are changed.
+    pub fn set_many_if_unreviewed(
+        &self,
+        reviews: &[CullingReview],
+    ) -> Result<(), CullingReviewStoreError> {
+        if reviews.is_empty() {
+            return Ok(());
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        for review in reviews {
+            if !seen.insert(review.asset_id) {
+                return Err(CullingReviewStoreError::DuplicateReviewAsset(review.asset_id));
+            }
+            let existing = tx.query_row(
+                "SELECT 1 FROM culling_reviews WHERE asset_id = ?1",
+                [review.asset_id.to_string()],
+                |_| Ok(()),
+            ).optional()?;
+            if existing.is_some() {
+                return Err(CullingReviewStoreError::ExistingReviewAsset(review.asset_id));
+            }
+        }
+        let updated_at = unix_time_ms();
+        for review in reviews {
+            tx.execute(
+                "INSERT INTO culling_reviews (asset_id, decision, updated_at_unix_ms)
+                 VALUES (?1, ?2, ?3)",
+                params![review.asset_id.to_string(), decision_to_db(review.decision), updated_at],
             )?;
         }
         tx.commit()?;
@@ -411,6 +453,32 @@ mod tests {
             store.get(reject).unwrap().unwrap().decision,
             CullingUserDecision::Reject
         );
+    }
+
+    #[test]
+    fn confirm_visible_is_atomic_and_preserves_existing_photographer_decisions() {
+        let dir = tempdir().unwrap();
+        let store = CullingReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let already = Uuid::new_v4();
+        let fresh = Uuid::new_v4();
+        store.set(already, CullingUserDecision::Review).unwrap();
+        let invalid = store.set_many_if_unreviewed(&[
+            CullingReview { asset_id: fresh, decision: CullingUserDecision::Reject },
+            CullingReview { asset_id: already, decision: CullingUserDecision::Reject },
+        ]);
+        assert!(matches!(invalid, Err(CullingReviewStoreError::ExistingReviewAsset(_))));
+        assert!(store.get(fresh).unwrap().is_none());
+        assert_eq!(store.get(already).unwrap().unwrap().decision, CullingUserDecision::Review);
+        let duplicate = store.set_many_if_unreviewed(&[
+            CullingReview { asset_id: fresh, decision: CullingUserDecision::Keep },
+            CullingReview { asset_id: fresh, decision: CullingUserDecision::Review },
+        ]);
+        assert!(matches!(duplicate, Err(CullingReviewStoreError::DuplicateReviewAsset(_))));
+        assert!(store.get(fresh).unwrap().is_none());
+        store.set_many_if_unreviewed(&[
+            CullingReview { asset_id: fresh, decision: CullingUserDecision::Keep }
+        ]).unwrap();
+        assert_eq!(store.get(fresh).unwrap().unwrap().decision, CullingUserDecision::Keep);
     }
 
     #[test]

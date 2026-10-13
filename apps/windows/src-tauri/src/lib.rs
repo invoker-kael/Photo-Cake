@@ -29,6 +29,8 @@ use photo_core::{
     LightroomHandoffBatchResult as CommandBatchHandoffResult,
     RecipeExceptionClearResult, RecipeExceptionSyncResult as CommandExceptionSyncResult,
     ReferenceStyleResult as CommandStyleResult, ReferenceStyleBatchResult as CommandStyleBatchResult,
+    GroupAssetSelection, CullDecideResult, CullConfirmVisibleResult,
+    CullQuickApplyResult,
     CURRENT_RECIPE_PROCESS_VERSION,
 };
 use photo_inference::LocalAnalyzeExecutor;
@@ -943,6 +945,48 @@ fn photography_command(
                 }).collect(),
             })
         }
+        PhotographyCommandRequest::CullDecide(request) => {
+            // An explicit photographer Reject must not invalidate a selected
+            // Reference behind the photographer's back.
+            if request.decision == Some(CullingUserDecision::Reject) {
+                let binding = state.reference_store.group_binding(request.group_id)
+                    .map_err(|error| error.to_string())?;
+                if binding.is_some_and(|b| b.selected_reference_asset_id == request.asset_id) {
+                    return Err(
+                        "this photo is the selected Reference; change or clear the Reference before rejecting it".to_string()
+                    );
+                }
+            }
+            set_culling_review(
+                request.asset_id.to_string(), request.decision, state,
+            )?;
+            PhotographyCommandResult::CullDecide(CullDecideResult {
+                asset_id: request.asset_id, decision: request.decision,
+            })
+        }
+        PhotographyCommandRequest::CullConfirmVisible(request) => {
+            let reviews = confirm_visible_culling_suggestions(
+                request.batch_id, &request.selections, &state,
+            )?;
+            PhotographyCommandResult::CullConfirmVisible(CullConfirmVisibleResult { reviews })
+        }
+        PhotographyCommandRequest::CullQuickApply(request) => {
+            let result = confirm_moment_quick_cull(
+                request.batch_id.to_string(),
+                request.group_ids.into_iter().map(|id| id.to_string()).collect(),
+                state,
+            )?;
+            PhotographyCommandResult::CullQuickApply(CullQuickApplyResult {
+                group_ids: result.group_ids, reviews: result.reviews,
+                operation: result.operation,
+            })
+        }
+        PhotographyCommandRequest::CullQuickUndo(request) => {
+            let result = undo_moment_quick_cull(
+                request.batch_id.to_string(), request.operation_id.to_string(), state,
+            )?;
+            PhotographyCommandResult::CullQuickUndo(result)
+        }
     };
     serde_json::to_value(result).map_err(|error| error.to_string())
 }
@@ -1352,6 +1396,70 @@ fn batch_workflow_status(
     Ok(derive_workflow_status(facts))
 }
 
+/// Rebuild current culling evidence in the backend. The UI only chooses
+/// visible photo identities; it cannot inject decisions or confirm pending
+/// evidence, nor override an existing photographer selection.
+fn confirm_visible_culling_suggestions(
+    batch_id: Uuid,
+    selections: &[GroupAssetSelection],
+    state: &AppState,
+) -> Result<Vec<CullingReview>, String> {
+    let groups = state.catalog
+        .list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let groups_by_id = groups.iter().map(|group| (group.id, group)).collect::<HashMap<_, _>>();
+    let mut evidence = HashMap::new();
+    for item in selections {
+        if !evidence.contains_key(&item.group_id) {
+            let group = groups_by_id.get(&item.group_id)
+                .ok_or_else(|| format!("group {} is not in batch {batch_id}", item.group_id))?;
+            evidence.insert(item.group_id, build_group_culling_result(
+                &state.analysis_cache, group, 0.98,
+            ).map_err(|error| error.to_string())?);
+        }
+    }
+    let mut reviews = Vec::with_capacity(selections.len());
+    for item in selections {
+        let result = &evidence[&item.group_id];
+        if result.pending_asset_ids.contains(&item.asset_id) {
+            return Err(format!("photo {} still has pending Cull evidence", item.asset_id));
+        }
+        let recommendation = result.recommendations.iter()
+            .find(|r| r.asset_id == item.asset_id)
+            .ok_or_else(|| format!("current Cull suggestion not found for photo {}", item.asset_id))?;
+        if state.culling_reviews.get(item.asset_id)
+            .map_err(|error| error.to_string())?.is_some()
+        {
+            return Err(format!("photo {} already has a photographer Cull decision", item.asset_id));
+        }
+        let decision = match recommendation.decision {
+            CullingDecision::Keep => CullingUserDecision::Keep,
+            CullingDecision::Review => CullingUserDecision::Review,
+            CullingDecision::RejectSuggestion => CullingUserDecision::Reject,
+        };
+        if decision == CullingUserDecision::Reject {
+            if result.exposure_brackets.iter().any(|set|
+                set.members.iter().any(|member| member.asset_id == item.asset_id)
+            ) {
+                return Err(format!("photo {} is an HDR bracket source; batch Reject is blocked", item.asset_id));
+            }
+            if state.reference_store.group_binding(item.group_id)
+                .map_err(|error| error.to_string())?
+                .is_some_and(|binding| binding.selected_reference_asset_id == item.asset_id)
+            {
+                return Err(format!(
+                    "photo {} is a selected Reference; batch Reject is blocked", item.asset_id
+                ));
+            }
+        }
+        reviews.push(CullingReview { asset_id: item.asset_id, decision });
+    }
+    state.culling_reviews
+        .set_many_if_unreviewed(&reviews)
+        .map_err(|error| error.to_string())?;
+    Ok(reviews)
+}
+
 #[tauri::command]
 fn batch_culling(
     batch_id: String,
@@ -1404,7 +1512,6 @@ fn batch_latest_moment_quick_cull(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
 fn set_culling_review(
     asset_id: String,
     decision: Option<CullingUserDecision>,
@@ -1425,18 +1532,6 @@ fn set_culling_review(
     }
 }
 
-#[tauri::command]
-fn set_culling_reviews(
-    reviews: Vec<CullingReview>,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    state
-        .culling_reviews
-        .set_many(&reviews)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 fn confirm_moment_quick_cull(
     batch_id: String,
     group_ids: Vec<String>,
@@ -1544,7 +1639,6 @@ fn confirm_moment_quick_cull(
     })
 }
 
-#[tauri::command]
 fn undo_moment_quick_cull(
     batch_id: String,
     operation_id: String,
@@ -2974,10 +3068,6 @@ pub fn run() {
             batch_culling,
             batch_culling_reviews,
             batch_latest_moment_quick_cull,
-            set_culling_review,
-            set_culling_reviews,
-            confirm_moment_quick_cull,
-            undo_moment_quick_cull,
             batch_reference_bindings,
             batch_reference_readiness,
             clear_group_reference,

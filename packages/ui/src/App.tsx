@@ -49,6 +49,8 @@ import {
 export type {
   BackendBatch,
   BackendCullingReview,
+  BackendCullSelection,
+  BackendCullConfirmVisibleResult,
   BackendGroupCullingResult,
   BackendGroupReferencePreview,
   BackendGroupReferenceStyle,
@@ -361,6 +363,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [reviewViewMode, setReviewViewMode] = useState<ReviewViewMode>("TRIAGE");
   const [lightroomViewMode, setLightroomViewMode] = useState<LightroomViewMode>("NEEDS_ACTION");
   const [cullBatchUpdating, setCullBatchUpdating] = useState(false);
+  const [cullDecisionUpdating, setCullDecisionUpdating] = useState<string | null>(null);
+  const [cullBatchNote, setCullBatchNote] = useState<string | null>(null);
   const [momentQuickCullTargets, setMomentQuickCullTargets] = useState<string[]>([]);
   const [momentQuickCullUpdating, setMomentQuickCullUpdating] = useState(false);
   const [momentQuickCullUndoing, setMomentQuickCullUndoing] = useState(false);
@@ -480,6 +484,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setGroupRefinementNote(null);
     setReferenceBatchTargets([]);
     setReferenceBatchNote(null);
+    setCullBatchNote(null);
+    setCullDecisionUpdating(null);
     setReviewBatchNote(null);
     setReviewSyncSource(null);
     setReviewSyncTargets([]);
@@ -1221,23 +1227,38 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     [referenceBindings],
   );
 
-  const visibleSuggestionCount = useMemo(
-    () =>
-      visibleCulling.reduce(
-        (total, group) =>
-          total +
-          group.recommendations.filter(
-            (item) =>
-              !cullingReviews[item.asset_id] &&
-              !(
-                item.decision === "REJECT_SUGGESTION" &&
-                selectedReferenceAssetIds.has(item.asset_id)
-              ),
-          ).length,
-        0,
+  const protectedHdrSources = useMemo(
+    () => new Set(culling.flatMap((group) =>
+      (group.exposure_brackets ?? []).flatMap((set) =>
+        set.members.map((member) => member.asset_id),
       ),
-    [cullingReviews, selectedReferenceAssetIds, visibleCulling],
+    )),
+    [culling],
   );
+  // A preview of the exact eligible photos; Windows sends identities only.
+  const visibleCullSelections = useMemo(
+    () => visibleCulling.flatMap((group) =>
+      group.recommendations
+        .filter((item) =>
+          !cullingReviews[item.asset_id] &&
+          !(item.decision === "REJECT_SUGGESTION" &&
+            (selectedReferenceAssetIds.has(item.asset_id) ||
+             protectedHdrSources.has(item.asset_id))),
+        )
+        .map((item) => ({
+          group_id: group.group_id,
+          asset_id: item.asset_id,
+          decision: item.decision,
+        })),
+    ),
+    [cullingReviews, protectedHdrSources, selectedReferenceAssetIds, visibleCulling],
+  );
+  const visibleSuggestionCount = visibleCullSelections.length;
+  const cullConfirmCounts = {
+    keep: visibleCullSelections.filter((item) => item.decision === "KEEP").length,
+    review: visibleCullSelections.filter((item) => item.decision === "REVIEW").length,
+    reject: visibleCullSelections.filter((item) => item.decision === "REJECT_SUGGESTION").length,
+  };
 
   const referenceCandidatesForGroup = (groupId: string, assetIds: string[]) => {
     const bracketCenters = new Set(
@@ -1440,12 +1461,15 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const setPhotoDecision = async (
+    groupId: string,
     assetId: string,
     decision: CullingUserDecision | null,
   ) => {
-    if (!bridge?.setCullingReview) return;
+    if (!bridge?.setCullingReview || !activeBatchId || cullDecisionUpdating) return;
+    setCullDecisionUpdating(assetId);
+    setCullBatchNote(null);
     try {
-      await bridge.setCullingReview(assetId, decision);
+      await bridge.setCullingReview(activeBatchId, groupId, assetId, decision);
       setCullingReviews((current) => {
         const next = { ...current };
         if (decision) next[assetId] = decision;
@@ -1456,41 +1480,40 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
+    } finally {
+      setCullDecisionUpdating(null);
     }
   };
 
   const confirmVisibleSuggestions = async () => {
-    if (!bridge?.setCullingReviews) return;
-
-    const reviews: BackendCullingReview[] = visibleCulling.flatMap((group) =>
-      group.recommendations
-        .filter(
-          (item) =>
-            !cullingReviews[item.asset_id] &&
-            !(
-              item.decision === "REJECT_SUGGESTION" &&
-              selectedReferenceAssetIds.has(item.asset_id)
-            ),
-        )
-        .map((item) => ({
-          asset_id: item.asset_id,
-          decision:
-            item.decision === "KEEP"
-              ? "KEEP"
-              : item.decision === "REVIEW"
-                ? "REVIEW"
-                : "REJECT",
-        })),
-    );
-    if (reviews.length === 0) return;
-
+    if (!activeBatchId ||
+      (!bridge?.confirmVisibleCulling && !bridge?.setCullingReviews) ||
+      visibleCullSelections.length === 0) return;
     setCullBatchUpdating(true);
+    setCullBatchNote(null);
     try {
-      await bridge.setCullingReviews(reviews);
+      let reviews: BackendCullingReview[];
+      if (bridge.confirmVisibleCulling) {
+        const result = await bridge.confirmVisibleCulling(
+          activeBatchId,
+          visibleCullSelections.map(({ group_id, asset_id }) => ({ group_id, asset_id })),
+        );
+        reviews = result.reviews;
+      } else {
+        // Android companion retains its existing per-device culling bridge.
+        reviews = visibleCullSelections.map(({ asset_id, decision }) => ({
+          asset_id,
+          decision: decision === "REJECT_SUGGESTION" ? "REJECT" : decision,
+        }));
+        await bridge.setCullingReviews!(reviews);
+      }
       setCullingReviews((current) => ({
         ...current,
         ...Object.fromEntries(reviews.map((review) => [review.asset_id, review.decision])),
       }));
+      setCullBatchNote(
+        `Confirmed ${reviews.length} photographer decisions: ${reviews.filter((r) => r.decision === "KEEP").length} Keep · ${reviews.filter((r) => r.decision === "REVIEW").length} Review · ${reviews.filter((r) => r.decision === "REJECT").length} Reject.`,
+      );
       setEditedPreviews({});
       setBackendError(null);
     } catch (error) {
@@ -2334,12 +2357,12 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               : "All shows the complete culling set, including AI Keep and already confirmed photos."}
           </span>
           <div className="cull-toolbar-actions">
-            {bridge?.setCullingReviews && (
+            {(bridge?.confirmVisibleCulling || bridge?.setCullingReviews) && (
               <button
                 className="cull-batch-action"
-                disabled={cullBatchUpdating || visibleSuggestionCount === 0}
+                disabled={cullBatchUpdating || cullDecisionUpdating != null || momentQuickCullUpdating || visibleSuggestionCount === 0}
                 onClick={() => void confirmVisibleSuggestions()}
-                title="Persist only currently visible unconfirmed AI suggestions; pending photos, existing photographer decisions and selected references are unchanged."
+                title="Backend validates every selected photo again. Pending evidence, existing decisions, selected References and HDR bracket sources are protected."
               >
                 {cullBatchUpdating
                   ? "Confirming…"
@@ -2358,6 +2381,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               ))}
             </div>
           </div>
+        </div>
+        <div className="cull-command-summary" aria-live="polite">
+          <strong>Photographer confirmation</strong>
+          <span>
+            Ready: {visibleSuggestionCount} photos · {cullConfirmCounts.keep} Keep · {cullConfirmCounts.review} Review · {cullConfirmCounts.reject} Reject
+          </span>
+          <small>
+            {cullViewMode === "TRIAGE" ? "Triage limits bulk confirmation to attention suggestions." : "All includes every visible unconfirmed suggestion."}
+            {" "}Pending photos, current References, and HDR bracket sources are protected from bulk Reject.
+            Source RAW files remain unchanged.
+          </small>
+          {cullBatchNote && <small className="success-text">{cullBatchNote}</small>}
         </div>
         {mode === "workstation" &&
           bridge?.confirmMomentQuickCull &&
@@ -2392,7 +2427,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               <div className="batch-look-actions reference-batch-actions">
                 <button
                   className="review-choice clear"
-                  disabled={momentQuickCullUpdating || momentQuickCullEligibleGroups.length === 0}
+                  disabled={momentQuickCullUpdating || cullDecisionUpdating != null || cullBatchUpdating || momentQuickCullEligibleGroups.length === 0}
                   onClick={() =>
                     setMomentQuickCullTargets(
                       momentQuickCullEligibleGroups.map((group) => group.group_id),
@@ -2403,7 +2438,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 </button>
                 <button
                   className="review-choice clear"
-                  disabled={momentQuickCullUpdating || momentQuickCullTargets.length === 0}
+                  disabled={momentQuickCullUpdating || cullDecisionUpdating != null || cullBatchUpdating || momentQuickCullTargets.length === 0}
                   onClick={() => setMomentQuickCullTargets([])}
                 >
                   Clear
@@ -2413,18 +2448,20 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   disabled={
                     momentQuickCullUpdating ||
                     momentQuickCullUndoing ||
+                    cullDecisionUpdating != null ||
+                    cullBatchUpdating ||
                     selectedMomentQuickCullGroups.length === 0
                   }
                   onClick={() => void confirmSelectedMomentQuickCull()}
                 >
                   {momentQuickCullUpdating
                     ? "Quick-culling selected moments…"
-                    : `Apply to ${selectedMomentQuickCullGroups.length} moments`}
+                    : `Apply reviewed plan to ${selectedMomentQuickCullGroups.length} moments`}
                 </button>
                 {latestMomentQuickCull && bridge?.undoMomentQuickCull && (
                   <button
                     className="review-choice clear"
-                    disabled={momentQuickCullUpdating || momentQuickCullUndoing}
+                    disabled={momentQuickCullUpdating || momentQuickCullUndoing || cullDecisionUpdating != null || cullBatchUpdating}
                     onClick={() => void undoLatestMomentQuickCull()}
                     title="Undo is transactional and is blocked if any Quick Cull decision, group membership, or downstream Reference changed."
                   >
@@ -2540,7 +2577,13 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           <button
                             className={`review-choice ${userDecision === decision ? "active" : ""}`}
                             key={decision}
-                            onClick={() => void setPhotoDecision(item.asset_id, decision)}
+                            disabled={cullDecisionUpdating != null || cullBatchUpdating || momentQuickCullUpdating ||
+                              (decision === "REJECT" &&
+                                referenceBindings[group.group_id]?.selected_reference_asset_id === item.asset_id)}
+                            title={decision === "REJECT" &&
+                              referenceBindings[group.group_id]?.selected_reference_asset_id === item.asset_id
+                              ? "Change the Reference before rejecting this photo." : undefined}
+                            onClick={() => void setPhotoDecision(group.group_id, item.asset_id, decision)}
                           >
                             {decision === "REJECT" ? "Reject" : decision === "KEEP" ? "Keep" : "Review"}
                           </button>
@@ -2548,7 +2591,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         {userDecision && (
                           <button
                             className="review-choice clear"
-                            onClick={() => void setPhotoDecision(item.asset_id, null)}
+                            disabled={cullDecisionUpdating != null || cullBatchUpdating}
+                            onClick={() => void setPhotoDecision(group.group_id, item.asset_id, null)}
                           >
                             Use suggestion
                           </button>
@@ -2585,13 +2629,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                           <button
                             className={`review-choice ${userDecision === decision ? "active" : ""}`}
                             key={decision}
-                            onClick={() => void setPhotoDecision(assetId, decision)}
+                            disabled={cullDecisionUpdating != null || cullBatchUpdating || momentQuickCullUpdating ||
+                              (decision === "REJECT" &&
+                                referenceBindings[group.group_id]?.selected_reference_asset_id === assetId)}
+                            onClick={() => void setPhotoDecision(group.group_id, assetId, decision)}
                           >
                             {decision === "REJECT" ? "Reject" : decision === "KEEP" ? "Keep" : "Review"}
                           </button>
                         ))}
                         {userDecision && (
-                          <button className="review-choice clear" onClick={() => void setPhotoDecision(assetId, null)}>
+                          <button className="review-choice clear"
+                              disabled={cullDecisionUpdating != null || cullBatchUpdating}
+                              onClick={() => void setPhotoDecision(group.group_id, assetId, null)}>
                             Clear
                           </button>
                         )}

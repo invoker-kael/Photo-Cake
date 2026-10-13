@@ -27,7 +27,7 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendGroupCullingResult[]>("batch_culling", { batchId }),
   loadCullingReviews: (batchId) =>
     invoke<BackendCullingReview[]>("batch_culling_reviews", { batchId }),
-  setCullingReview: (assetId, decision) =>
+  setCullingReview: (_batchId, _groupId, assetId, decision) =>
     invoke<void>("set_culling_review", { assetId, decision }),
   setCullingReviews: (reviews) =>
     invoke<void>("set_culling_reviews", { reviews }),

@@ -6,6 +6,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import App, {
   type BackendBatch,
   type BackendCullingReview,
+  type BackendCullSelection,
+  type BackendCullConfirmVisibleResult,
   type BackendGroupCullingResult,
   type BackendGroupReferencePreview,
   type BackendGroupReferenceStyle,
@@ -92,19 +94,25 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendMomentQuickCullOperation | null>("batch_latest_moment_quick_cull", {
       batchId,
     }),
-  setCullingReview: (assetId, decision) =>
-    invoke<void>("set_culling_review", { assetId, decision }),
-  setCullingReviews: (reviews) =>
-    invoke<void>("set_culling_reviews", { reviews }),
+  setCullingReview: (batchId, groupId, assetId, decision) =>
+    invoke("photography_command", {
+      commandId: "cull.decide",
+      request: { batch_id: batchId, group_id: groupId, asset_id: assetId, decision },
+    }).then(() => undefined),
+  confirmVisibleCulling: (batchId, selections: BackendCullSelection[]) =>
+    invoke<BackendCullConfirmVisibleResult>("photography_command", {
+      commandId: "cull.confirmVisible",
+      request: { batch_id: batchId, selections },
+    }),
   confirmMomentQuickCull: (batchId, groupIds) =>
-    invoke<BackendMomentQuickCullBatchResult>("confirm_moment_quick_cull", {
-      batchId,
-      groupIds,
+    invoke<BackendMomentQuickCullBatchResult>("photography_command", {
+      commandId: "cull.quickApply",
+      request: { batch_id: batchId, group_ids: groupIds },
     }),
   undoMomentQuickCull: (batchId, operationId) =>
-    invoke<BackendMomentQuickCullOperation>("undo_moment_quick_cull", {
-      batchId,
-      operationId,
+    invoke<BackendMomentQuickCullOperation>("photography_command", {
+      commandId: "cull.quickUndo",
+      request: { batch_id: batchId, operation_id: operationId },
     }),
   loadReferenceBindings: (batchId) =>
     invoke<BackendReferenceBinding[]>("batch_reference_bindings", { batchId }),

@@ -323,3 +323,29 @@ the single transactional ReferenceStore implementation. Never write XMP
 from these Commands, bypass canonical Recipe/fingerprint/ProcessVersion
 validation, or implement full CLI/MCP, autonomous Recipe changes or a
 new Style engine in this slice.
+
+## Photography Command execution rule (fourth slice: Cull)
+
+Keep the prior 17 IDs. Register `cull.decide`,
+`cull.confirmVisible`, `cull.quickApply`, and `cull.quickUndo`
+in the same Registry/dispatcher and wire the actual Windows Cull
+page to them. No second decision store, planner, workflow engine
+or duplicate Tauri write endpoint.
+
+A manual `cull.decide` must verify batch/group/asset and never
+silently reject a selected Reference. The visible bulk Command
+accepts identities only: recompute live culling recommendations on
+the backend, reject pending evidence, duplicate assets, existing
+photographer decisions, HDR bracket Reject and selected-Reference
+Reject before the first write. Use the existing CullingReviewStore
+with an atomic insert-only batch guard to prevent races or silent
+overwrites. All-or-none persistence is mandatory.
+
+For Quick Cull, reuse the conservative moment planner, people
+protection, exact scene/HDR gates, one transaction with operation
+record and latest-only stale-safe undo. UI must show actual eligible
+Keep/Review/Reject totals, preserve Triage/All and existing Quick Cull
+review/undo controls, mark saving operations busy, and show errors
+without claiming a write succeeded. Android companion keeps its
+platform-specific bridge until consciously migrated; do not
+introduce Android RAW processing, CLI or MCP in this batch.

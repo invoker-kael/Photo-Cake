@@ -214,6 +214,20 @@ h2 { font-size: 19px; }
   font-size: 9px;
   cursor: pointer;
 }
+/* Cull Command preview: shares workstation/companion styling without a new page. */
+.cull-command-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 7px 16px;
+  padding: 10px 14px;
+  background: #14191b;
+  border-bottom: 1px solid #30383b;
+}
+.cull-command-summary strong { color: #e4e9eb; font-size: 12px; }
+.cull-command-summary span { color: #b5c6cb; font-size: 11px; }
+.cull-command-summary small { flex-basis: 100%; color: #879398; font-size: 10px; line-height: 1.55; }
+.cull-command-summary .success-text { color: #86c9a8; }
 .cull-batch-action:hover:not(:disabled) { background: #292f33; }
 .cull-batch-action:disabled { opacity: .45; cursor: not-allowed; }
 .cull-view-switch { display: flex; gap: 5px; flex: 0 0 auto; }

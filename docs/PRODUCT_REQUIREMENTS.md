@@ -675,3 +675,35 @@ selected Reference and independent adaptive baseline.
 This is an additional high-level business entrypoint, not a Recipe generator,
 Style engine, writer, or workflow scheduler. CLI/MCP and unrelated photography
 operations are not included.
+
+## Photography Commands — fourth slice: Cull and Quick Cull
+
+The same registry adds `cull.decide`, `cull.confirmVisible`,
+`cull.quickApply`, and `cull.quickUndo`. Windows Cull
+single-photo actions, visible-suggestion bulk confirmation and Moment
+Quick Cull apply/undo now route through the shared `photography_command`
+adapter; there is no second Cull engine.
+
+Every Command validates batch/group/asset identity before mutation.
+`cull.decide` writes only an explicit photographer Keep/Review/Reject
+(or clears the decision); it blocks Reject of the group's selected
+Reference until that Reference is changed or cleared.
+`cull.confirmVisible` accepts identities, not injected decisions; backend
+regenerates current evidence, rejects pending photos or existing
+photographer decisions, and blocks automatic Reject of HDR bracket
+members and selected References. It uses one transactional
+`CullingReviewStore::set_many_if_unreviewed`: an invalid or stale target
+rejects the entire requested confirmation without overwriting decisions.
+AI RejectSuggestion remains distinct from photographer Reject until
+the photographer expressly confirms that candidate.
+
+Moment Quick Cull still derives conservative plan from current culling
+evidence, protects people/family alternates and HDR and does not run
+without completed evidence. The existing operation recording and
+latest-operation stale-safe transactional undo remain authoritative.
+No files are moved or deleted, and no RAW pixels or XMP edits are made.
+
+Windows UI displays eligible Keep/Review/Reject counts before confirm,
+preserves Triage/All, preview/evidence context, Quick Cull selection,
+loading states, full error text and undo. Android companion retains its
+platform bridge and is not a RAW processing client.

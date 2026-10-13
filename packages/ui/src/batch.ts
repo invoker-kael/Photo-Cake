@@ -231,6 +231,14 @@ export interface BackendCullingReview {
   decision: CullingUserDecision;
 }
 
+export interface BackendCullSelection {
+  group_id: string;
+  asset_id: string;
+}
+export interface BackendCullConfirmVisibleResult {
+  reviews: BackendCullingReview[];
+}
+
 export interface BackendMomentQuickCullOperation {
   operation_id: string;
   batch_id: string;
@@ -549,8 +557,16 @@ export interface PhotoCakeBridge {
   loadLatestMomentQuickCull?(
     batchId: string,
   ): Promise<BackendMomentQuickCullOperation | null>;
-  setCullingReview?(assetId: string, decision: CullingUserDecision | null): Promise<void>;
+  setCullingReview?(
+    batchId: string, groupId: string, assetId: string,
+    decision: CullingUserDecision | null,
+  ): Promise<void>;
+  // Android companion retains its existing review path; Windows uses the
+  // validated batch Command below, never bulk-writes submitted decisions.
   setCullingReviews?(reviews: BackendCullingReview[]): Promise<void>;
+  confirmVisibleCulling?(
+    batchId: string, selections: BackendCullSelection[],
+  ): Promise<BackendCullConfirmVisibleResult>;
   confirmMomentQuickCull?(
     batchId: string,
     groupIds: string[],

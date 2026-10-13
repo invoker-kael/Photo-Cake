@@ -346,3 +346,25 @@ RAW engine, second dispatcher or Android RAW development. Remaining
 candidate stages: Cull/Quick Cull human confirmation, reference clearing,
 group refinement and HDR merge intent; prioritize real user controls and
 existing transaction boundaries, not abstract registry coverage.
+
+## Photography Commands — fourth vertical slice: Cull decisions and workstation UI
+
+Four new stable IDs: `cull.decide`, `cull.confirmVisible`,
+`cull.quickApply`, and `cull.quickUndo`. The existing Windows Cull
+page is now wired to them: per-photo Keep/Review/Reject and Use
+suggestion, Confirm visible, Quick Cull Apply and Undo. A compact
+photographer confirmation summary previews eligible Keep/Review/Reject
+counts and makes pending/Reference/HDR safeguards explicit.
+
+The Command adapter does not accept arbitrary AI decision payloads
+for visible batch confirmation; photo-core derives each candidate
+again and persists only after validating the complete selection.
+A fresh atomic insert-only review store method prevents stale bulk
+confirmation from replacing another photographer decision. Moment
+Quick Cull continues through the existing store's atomic operation
+and stale-safe undo rather than a new planner. Android companion
+retains its existing native culling path.
+
+Potential next high-value stage: group refinement and Reference
+clearing/handoff recovery, subject to existing locking and downstream
+safety. CLI/Agent/MCP remain prospective adapters only.

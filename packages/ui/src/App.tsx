@@ -54,6 +54,7 @@ export type {
   BackendGroupReferenceStyle,
   BackendGroupReferenceStyleBatchResult,
   BackendLightroomBatchHandoffResult,
+  BackendLightroomBatchPreflightResult,
   BackendLightroomHandoffPreflight,
   BackendLightroomHandoffResult,
   BackendMomentQuickCullBatchResult,
@@ -794,7 +795,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     if (
       activeView !== "lightroom" ||
       !activeBatchId ||
-      !bridge?.preflightGroupXmp ||
+      !bridge?.preflightBatchXmp ||
       !photoContext?.groups.length
     ) {
       if (activeView !== "lightroom") {
@@ -827,28 +828,28 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
 
     let disposed = false;
     setHandoffPreflightLoading(true);
-    Promise.allSettled(
-      groups.map(async (group) => {
-        const preflight = await bridge.preflightGroupXmp!(activeBatchId, group.id);
-        return [group.id, preflight] as const;
-      }),
-    )
-      .then((results) => {
+    bridge.preflightBatchXmp(activeBatchId, groups.map((group) => group.id))
+      .then((result) => {
         if (disposed) return;
         const preflights: Record<string, BackendLightroomHandoffPreflight> = {};
         const errors: Record<string, string> = {};
-        results.forEach((result, index) => {
-          const groupId = groups[index].id;
-          if (result.status === "fulfilled") {
-            const [resolvedGroupId, preflight] = result.value;
-            preflights[resolvedGroupId] = preflight;
-          } else {
-            errors[groupId] = String(result.reason);
-          }
-        });
+        for (const group of result.group_results) {
+          if (group.preflight) preflights[group.group_id] = group.preflight;
+          if (group.error) errors[group.group_id] = group.error;
+        }
         setHandoffPreflights(preflights);
         setHandoffPreflightErrors(errors);
         setBackendError(null);
+      })
+      .catch((error) => {
+        if (disposed) return;
+        setHandoffPreflights({});
+        // A failed whole-request identity check must not leave stale green
+        // preflight data or enable a batch handoff from an earlier revision.
+        setHandoffPreflightErrors(Object.fromEntries(
+          groups.map((group) => [group.id, String(error)]),
+        ));
+        setBackendError(String(error));
       })
       .finally(() => {
         if (!disposed) setHandoffPreflightLoading(false);
@@ -1959,12 +1960,12 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const confirmVisibleRecipeReviews = async () => {
-    if (!bridge?.confirmRecipeReviews || visibleRecipeReviewItems.length === 0) return;
+    if (!bridge?.confirmRecipeReviews || !activeBatchId || visibleRecipeReviewItems.length === 0) return;
     setReviewBatchUpdating(true);
     setReviewBatchNote(null);
     try {
       const result: BackendRecipeReviewBatchResult =
-        await bridge.confirmRecipeReviews(visibleRecipeReviewItems);
+        await bridge.confirmRecipeReviews(activeBatchId, visibleRecipeReviewItems);
       applyConfirmedRecipeAssets(result.asset_ids);
       setReviewRevision((value) => value + 1);
       setReviewBatchNote(`Confirmed ${result.asset_ids.length} visible Recipes.`);
@@ -1977,12 +1978,12 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const confirmClearRecipeGroups = async (groupIds: string[]) => {
-    if (!bridge?.confirmRecipeReviewGroups || groupIds.length === 0) return;
+    if (!bridge?.confirmRecipeReviewGroups || !activeBatchId || groupIds.length === 0) return;
     setReviewBatchUpdating(true);
     setReviewBatchNote(null);
     try {
       const result: BackendRecipeReviewGroupBatchResult =
-        await bridge.confirmRecipeReviewGroups(groupIds);
+        await bridge.confirmRecipeReviewGroups(activeBatchId, groupIds);
       applyConfirmedRecipeAssets(result.asset_ids);
       setReviewRevision((value) => value + 1);
       setReviewBatchNote(
@@ -2065,11 +2066,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const writeBatchXmp = async (groupIds: string[]) => {
-    if (!bridge?.writeBatchXmp || groupIds.length === 0) return;
+    if (!bridge?.writeBatchXmp || !activeBatchId || groupIds.length === 0) return;
     setHandoffBatchRunning(true);
     setHandoffBatchNote(null);
     try {
-      const result: BackendLightroomBatchHandoffResult = await bridge.writeBatchXmp(groupIds);
+      const result: BackendLightroomBatchHandoffResult = await bridge.writeBatchXmp(activeBatchId, groupIds);
       setHandoffResults((current) => ({
         ...current,
         ...Object.fromEntries(result.groups.map((group) => [group.group_id, group])),

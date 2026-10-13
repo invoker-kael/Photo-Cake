@@ -164,5 +164,9 @@ pub use photography_commands::{
     PhotographyCommandId, PhotographyCommandRequest, PhotographyCommandResult,
     GroupAssetCommandRequest, GroupCommandRequest, RecipePreviewResult,
     RecipeConfirmationResult, LightroomPreflightResult, LightroomHandoffResult,
-    PHOTOGRAPHY_COMMAND_IDS,
+    GroupAssetSelection, ReferenceSelectBatchRequest, RecipeConfirmBatchRequest,
+    RecipeConfirmClearGroupsRequest, LightroomPreflightBatchRequest,
+    LightroomHandoffBatchRequest, ReferenceSelectBatchResult, RecipeConfirmBatchResult,
+    RecipeConfirmClearGroupsResult, LightroomPreflightBatchGroupResult,
+    LightroomPreflightBatchResult, LightroomHandoffBatchResult, PHOTOGRAPHY_COMMAND_IDS,
 };

@@ -4,7 +4,7 @@ use photo_core::{
     assess_recipe_quality_risk, build_recipe_review_group_preflight, build_reference_readiness_plan,
     build_style_sync_group_context, build_style_sync_preflight, derive_workflow_status,
     reference_relative_color_distribution_conflict, reference_relative_match_strength,
-    preflight_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
+    preflight_group_sidecars, verify_group_sidecars, refine_collection_semantic_groups, render_recipe_preview,
     route_exposure_bracket_sources, write_group_sidecars, write_sidecar_batch, AnalysisCache,
     AssetMetadataEvidence, AutomationRunner, Batch, BatchStore, ClassificationRoutingExecutor,
     ClassificationStore, CompanionDecisionPatch, CompanionPatchApplyReport, CompanionSnapshot,
@@ -22,6 +22,11 @@ use photo_core::{
     StyleProfile, StyleSyncGroupContext, StyleSyncPreflight, WorkflowFacts, WorkflowStatus,
     PhotographyCommandRequest, PhotographyCommandResult, RecipePreviewResult,
     RecipeConfirmationResult, LightroomPreflightResult, LightroomHandoffResult as CommandHandoffResult,
+    ReferenceSelectBatchResult as CommandReferenceBatchResult,
+    RecipeConfirmBatchResult as CommandRecipeBatchResult,
+    RecipeConfirmClearGroupsResult as CommandClearGroupsResult,
+    LightroomPreflightBatchGroupResult, LightroomPreflightBatchResult,
+    LightroomHandoffBatchResult as CommandBatchHandoffResult,
     CURRENT_RECIPE_PROCESS_VERSION,
 };
 use photo_inference::LocalAnalyzeExecutor;
@@ -712,6 +717,23 @@ fn set_worker_intent(
     Ok(active)
 }
 
+fn command_lightroom_preflight(preflight: LightroomHandoffPreflight) -> LightroomPreflightResult {
+    LightroomPreflightResult {
+        group_id: preflight.group_id,
+        target_count: preflight.target_sidecars.len(),
+        current_count: preflight.current_sidecars.len(),
+        missing_count: preflight.missing_sidecars.len(),
+        conflict_count: preflight.conflicting_sidecars.len(),
+        target_sidecars: preflight.target_sidecars,
+        current_sidecars: preflight.current_sidecars,
+        missing_sidecars: preflight.missing_sidecars,
+        conflicting_sidecars: preflight.conflicting_sidecars,
+        hdr_source_asset_ids: preflight.hdr_source_asset_ids,
+        hdr_merge_required: preflight.hdr_merge_required,
+        hdr_merge_completed: preflight.hdr_merge_completed,
+    }
+}
+
 #[tauri::command]
 fn photography_command(
     command_id: String,
@@ -755,21 +777,8 @@ fn photography_command(
             })
         }
         PhotographyCommandRequest::LightroomPreflight(request) => {
-            let preflight = preflight_group_reference_xmp(request.group_id.to_string(), state)?;
-            PhotographyCommandResult::LightroomPreflight(LightroomPreflightResult {
-                group_id: preflight.group_id,
-                target_count: preflight.target_sidecars.len(),
-                current_count: preflight.current_sidecars.len(),
-                missing_count: preflight.missing_sidecars.len(),
-                conflict_count: preflight.conflicting_sidecars.len(),
-                target_sidecars: preflight.target_sidecars,
-                current_sidecars: preflight.current_sidecars,
-                missing_sidecars: preflight.missing_sidecars,
-                conflicting_sidecars: preflight.conflicting_sidecars,
-                hdr_source_asset_ids: preflight.hdr_source_asset_ids,
-                hdr_merge_required: preflight.hdr_merge_required,
-                hdr_merge_completed: preflight.hdr_merge_completed,
-            })
+            let preflight = preflight_group_reference_xmp(request.group_id.to_string(), &state)?;
+            PhotographyCommandResult::LightroomPreflight(command_lightroom_preflight(preflight))
         }
         PhotographyCommandRequest::LightroomHandoff(request) => {
             let result = write_group_reference_xmp(request.group_id.to_string(), state)?;
@@ -781,6 +790,84 @@ fn photography_command(
                 verified_sidecar_count: result.verified_sidecar_count,
                 target_count, written_count,
                 already_current_count: target_count.saturating_sub(written_count),
+            })
+        }
+        PhotographyCommandRequest::ReferenceSelectBatch(request) => {
+            let items = request.selections.into_iter().map(|item| ReferenceBatchItem {
+                group_id: item.group_id.to_string(), asset_id: item.asset_id.to_string(),
+            }).collect();
+            let result = set_group_references(request.batch_id.to_string(), items, state)?;
+            PhotographyCommandResult::ReferenceSelectBatch(CommandReferenceBatchResult {
+                bindings: result.bindings,
+            })
+        }
+        PhotographyCommandRequest::RecipeConfirmBatch(request) => {
+            let items = request.selections.into_iter().map(|item| RecipeReviewBatchItem {
+                group_id: item.group_id.to_string(), asset_id: item.asset_id.to_string(),
+            }).collect();
+            let result = confirm_recipe_reviews(items, state)?;
+            PhotographyCommandResult::RecipeConfirmBatch(CommandRecipeBatchResult {
+                asset_ids: result.asset_ids,
+            })
+        }
+        PhotographyCommandRequest::RecipeConfirmClearGroups(request) => {
+            let group_ids = request.group_ids.into_iter().map(|id| id.to_string()).collect();
+            let result = confirm_recipe_review_groups(group_ids, state)?;
+            PhotographyCommandResult::RecipeConfirmClearGroups(CommandClearGroupsResult {
+                group_ids: result.group_ids, asset_ids: result.asset_ids,
+            })
+        }
+        PhotographyCommandRequest::LightroomPreflightBatch(request) => {
+            let mut summary = LightroomPreflightBatchResult {
+                group_count: request.group_ids.len(), target_count: 0,
+                current_count: 0, missing_count: 0, conflict_count: 0,
+                hdr_blocked_group_count: 0, failed_group_count: 0,
+                group_results: Vec::with_capacity(request.group_ids.len()),
+            };
+            // Per-group preflight failures are surfaced to the UI; the complete
+            // request's group identity and scope were already validated above.
+            for group_id in request.group_ids {
+                match preflight_group_reference_xmp(group_id.to_string(), &state) {
+                    Ok(raw) => {
+                        let preflight = command_lightroom_preflight(raw);
+                        summary.target_count += preflight.target_count;
+                        summary.current_count += preflight.current_count;
+                        summary.missing_count += preflight.missing_count;
+                        summary.conflict_count += preflight.conflict_count;
+                        if preflight.hdr_merge_required {
+                            summary.hdr_blocked_group_count += 1;
+                        }
+                        summary.group_results.push(LightroomPreflightBatchGroupResult {
+                            group_id, preflight: Some(preflight), error: None,
+                        });
+                    }
+                    Err(error) => {
+                        summary.failed_group_count += 1;
+                        summary.group_results.push(LightroomPreflightBatchGroupResult {
+                            group_id, preflight: None, error: Some(error),
+                        });
+                    }
+                }
+            }
+            PhotographyCommandResult::LightroomPreflightBatch(summary)
+        }
+        PhotographyCommandRequest::LightroomHandoffBatch(request) => {
+            // Preserve the existing all-groups preflight, atomic write and
+            // rollback path. Never loop through the single-group Command.
+            let ids = request.group_ids.into_iter().map(|id| id.to_string()).collect();
+            let result = write_reference_xmp_batch(ids, state)?;
+            PhotographyCommandResult::LightroomHandoffBatch(CommandBatchHandoffResult {
+                groups: result.groups.into_iter().map(|group| {
+                    let written_count = group.written_sidecars.len();
+                    let target_count = group.verified_sidecar_count;
+                    CommandHandoffResult {
+                        group_id: group.group_id,
+                        written_sidecars: group.written_sidecars,
+                        verified_sidecar_count: group.verified_sidecar_count,
+                        target_count, written_count,
+                        already_current_count: target_count.saturating_sub(written_count),
+                    }
+                }).collect(),
             })
         }
     };
@@ -1493,7 +1580,6 @@ fn batch_reference_readiness(
     Ok(plans)
 }
 
-#[tauri::command]
 fn set_group_references(
     batch_id: String,
     items: Vec<ReferenceBatchItem>,
@@ -2161,7 +2247,6 @@ fn set_recipe_reviewed(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
 fn confirm_recipe_reviews(
     items: Vec<RecipeReviewBatchItem>,
     state: State<'_, AppState>,
@@ -2185,8 +2270,16 @@ fn confirm_recipe_reviews(
 
     let mut recipes_to_confirm = Vec::with_capacity(seen_assets.len());
     for (group_id, asset_ids) in requested {
-        let (editable, recipes) = resolve_reviewed_group_recipes(group_id, &state)?;
+        let (plan, recipes) = recipe_review_preflight_for_group(group_id, &state)?;
+        let pending = plan.pending_asset_ids.into_iter().collect::<HashSet<_>>();
+        let editable = state.catalog.find_group(group_id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("photo group not found: {group_id}"))?;
+        let (editable, _, _) = delivery_group(&editable, &state)?;
         for asset_id in asset_ids {
+            if pending.contains(&asset_id) {
+                return Err(format!("photo {asset_id} has pending evidence; cannot confirm"));
+            }
             if !editable.asset_ids.contains(&asset_id) {
                 return Err(format!(
                     "photo {asset_id} is not an editable member of group {group_id}"
@@ -2212,7 +2305,6 @@ fn confirm_recipe_reviews(
     })
 }
 
-#[tauri::command]
 fn confirm_recipe_review_groups(
     group_ids: Vec<String>,
     state: State<'_, AppState>,
@@ -2445,7 +2537,7 @@ fn set_group_hdr_merged(
 
 fn preflight_group_reference_xmp(
     group_id: String,
-    state: State<'_, AppState>,
+    state: &AppState,
 ) -> Result<LightroomHandoffPreflight, String> {
     let group_id = Uuid::parse_str(&group_id)
         .map_err(|error| format!("invalid group id: {error}"))?;
@@ -2512,9 +2604,15 @@ fn write_group_reference_xmp(
             },
         );
     }
-    let verified_sidecar_count = resolved.recipes.len();
     let written = write_group_sidecars(&resolved.assets, &resolved.recipes)
         .map_err(|error| error.to_string())?;
+    let verified_sidecar_count = match verify_group_sidecars(&resolved.assets, &resolved.recipes) {
+        Ok(result) => result.verified_sidecars.len(),
+        Err(error) => {
+            for path in &written { let _ = std::fs::remove_file(path); }
+            return Err(error.to_string());
+        }
+    };
 
     Ok(LightroomHandoffResult {
         group_id,
@@ -2526,7 +2624,6 @@ fn write_group_reference_xmp(
     })
 }
 
-#[tauri::command]
 fn write_reference_xmp_batch(
     group_ids: Vec<String>,
     state: State<'_, AppState>,
@@ -2546,6 +2643,16 @@ fn write_reference_xmp_batch(
             return Err(format!("duplicate Lightroom group in batch handoff: {group_id}"));
         }
 
+        // Recheck live Review gates on the backend, not only in Windows UI.
+        // Future CLI/Agent callers must not bypass attention or pending evidence.
+        let (review_plan, _) = recipe_review_preflight_for_group(group_id, &state)?;
+        if !review_plan.attention_asset_ids.is_empty()
+            || !review_plan.pending_asset_ids.is_empty()
+        {
+            return Err(format!(
+                "group {group_id} has unresolved Recipe attention or pending evidence"
+            ));
+        }
         let resolved = resolve_lightroom_handoff(group_id, &state)?;
         if !resolved.hdr_source_asset_ids.is_empty() && !resolved.hdr_merge_completed {
             return Err(format!(
@@ -2561,12 +2668,22 @@ fn write_reference_xmp_batch(
         resolved_groups.push((resolved.assets, resolved.recipes));
     }
 
-    let verified_counts = resolved_groups
-        .iter()
-        .map(|(_, recipes)| recipes.len())
-        .collect::<Vec<_>>();
     let written = write_sidecar_batch(&resolved_groups)
         .map_err(|error| error.to_string())?;
+    // The count is determined by actual parse-back/full-group verification,
+    // never inferred from planned Recipe counts or new file writes.
+    let verified_counts = match resolved_groups.iter().map(|(assets, recipes)| {
+        verify_group_sidecars(assets, recipes)
+            .map(|result| result.verified_sidecars.len())
+    }).collect::<Result<Vec<_>, _>>() {
+        Ok(counts) => counts,
+        Err(error) => {
+            // Only paths created by this batch are removed; existing photographer
+            // and already-current XMP sidecars remain untouched.
+            for path in written.iter().flatten() { let _ = std::fs::remove_file(path); }
+            return Err(error.to_string());
+        }
+    };
 
     Ok(LightroomBatchHandoffResult {
         groups: resolved_ids
@@ -2796,7 +2913,6 @@ pub fn run() {
             undo_moment_quick_cull,
             batch_reference_bindings,
             batch_reference_readiness,
-            set_group_references,
             clear_group_reference,
             batch_recipe_reviews,
             set_recipe_review,
@@ -2809,10 +2925,7 @@ pub fn run() {
             copy_reference_style_to_groups,
             batch_recipe_review_preflight,
             batch_reference_previews,
-            confirm_recipe_reviews,
-            confirm_recipe_review_groups,
             set_group_hdr_merged,
-            write_reference_xmp_batch,
             create_batch,
             import_raw_paths,
             import_raw_directory,

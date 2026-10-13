@@ -11,6 +11,7 @@ import App, {
   type BackendGroupReferenceStyle,
   type BackendGroupReferenceStyleBatchResult,
   type BackendLightroomBatchHandoffResult,
+  type BackendLightroomBatchPreflightResult,
   type BackendLightroomHandoffPreflight,
   type BackendLightroomHandoffResult,
   type BackendMomentQuickCullBatchResult,
@@ -114,9 +115,9 @@ const bridge: PhotoCakeBridge = {
       commandId: "reference.select", request: { batch_id: batchId, group_id: groupId, asset_id: assetId },
     }),
   setGroupReferences: (batchId, items: BackendReferenceBatchItem[]) =>
-    invoke<BackendReferenceBatchResult>("set_group_references", {
-      batchId,
-      items,
+    invoke<BackendReferenceBatchResult>("photography_command", {
+      commandId: "reference.selectBatch",
+      request: { batch_id: batchId, selections: items },
     }),
   clearGroupReference: (groupId) =>
     invoke<void>("clear_group_reference", { groupId }),
@@ -164,10 +165,16 @@ const bridge: PhotoCakeBridge = {
     invoke("photography_command", {
       commandId: "recipe.confirm", request: { batch_id: batchId, group_id: groupId, asset_id: assetId },
     }).then(() => undefined),
-  confirmRecipeReviews: (items: BackendRecipeReviewBatchItem[]) =>
-    invoke<BackendRecipeReviewBatchResult>("confirm_recipe_reviews", { items }),
-  confirmRecipeReviewGroups: (groupIds) =>
-    invoke<BackendRecipeReviewGroupBatchResult>("confirm_recipe_review_groups", { groupIds }),
+  confirmRecipeReviews: (batchId, items: BackendRecipeReviewBatchItem[]) =>
+    invoke<BackendRecipeReviewBatchResult>("photography_command", {
+      commandId: "recipe.confirmBatch",
+      request: { batch_id: batchId, selections: items },
+    }),
+  confirmRecipeReviewGroups: (batchId, groupIds) =>
+    invoke<BackendRecipeReviewGroupBatchResult>("photography_command", {
+      commandId: "recipe.confirmClearGroups",
+      request: { batch_id: batchId, group_ids: groupIds },
+    }),
   clearRecipeReviewed: (batchId, groupId, assetId) =>
     invoke("photography_command", {
       commandId: "recipe.reopen", request: { batch_id: batchId, group_id: groupId, asset_id: assetId },
@@ -218,12 +225,20 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendLightroomHandoffPreflight>("photography_command", {
       commandId: "lightroom.preflight", request: { batch_id: batchId, group_id: groupId },
     }),
+  preflightBatchXmp: (batchId, groupIds) =>
+    invoke<BackendLightroomBatchPreflightResult>("photography_command", {
+      commandId: "lightroom.preflightBatch",
+      request: { batch_id: batchId, group_ids: groupIds },
+    }),
   writeGroupXmp: (batchId, groupId) =>
     invoke<BackendLightroomHandoffResult>("photography_command", {
       commandId: "lightroom.handoff", request: { batch_id: batchId, group_id: groupId },
     }),
-  writeBatchXmp: (groupIds) =>
-    invoke<BackendLightroomBatchHandoffResult>("write_reference_xmp_batch", { groupIds }),
+  writeBatchXmp: (batchId, groupIds) =>
+    invoke<BackendLightroomBatchHandoffResult>("photography_command", {
+      commandId: "lightroom.handoffBatch",
+      request: { batch_id: batchId, group_ids: groupIds },
+    }),
   importRawDirectory: async () => {
     const selected = await open({
       directory: true,

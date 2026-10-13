@@ -311,3 +311,20 @@ continue on existing adapters and are not yet Command-based.
 Next slice: move batch Reference/Recipe/XMP actions onto the same contract while
 preserving their transactional all-groups gates; only then consider CLI/MCP adapters.
 Do not create a new Recipe, color engine, RAW engine or XMP writer.
+
+## Photography Commands — second vertical slice: batch
+
+Implemented on the same registry/dispatcher: `reference.selectBatch`,
+`recipe.confirmBatch`, `recipe.confirmClearGroups`,
+`lightroom.preflightBatch`, and `lightroom.handoffBatch`. Windows batch
+Reference, explicit Recipe confirmation, clear-group Recipe confirmation,
+Lightroom multi-group preflight, and Lightroom multi-group XMP handoff now
+route through high-level typed Commands. The existing photo-core transaction
+and whole-batch sidecar writer remain responsible for the actual operations.
+
+The first six single-group Commands remain supported. No CLI/MCP runtime or
+second photography workflow is introduced. Next candidates for selective
+Command migration: exception-aware Recipe override/sync, Reference Style
+propagation, and review/culling gates, only with explicit photographer intent
+and reuse of existing persistence/transactions. Other current UI routes are
+not yet Command-based.

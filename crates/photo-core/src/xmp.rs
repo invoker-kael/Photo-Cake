@@ -445,27 +445,23 @@ pub fn sidecar_path_for_raw(raw_path: &Path) -> PathBuf {
     raw_path.with_extension("xmp")
 }
 
-fn existing_sidecar_path(raw_path: &Path) -> Option<PathBuf> {
+fn existing_sidecar_paths(raw_path: &Path) -> Vec<PathBuf> {
     let parent = raw_path.parent().unwrap_or_else(|| Path::new("."));
-    let raw_stem = raw_path.file_stem()?;
-
+    let Some(raw_stem) = raw_path.file_stem() else { return Vec::new(); };
+    let mut paths = Vec::new();
     if let Ok(entries) = std::fs::read_dir(parent) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_file() || path.file_stem() != Some(raw_stem) {
-                continue;
-            }
-            let is_xmp = path
-                .extension()
-                .and_then(|value| value.to_str())
-                .is_some_and(|value| value.eq_ignore_ascii_case("xmp"));
-            if is_xmp {
-                return Some(path);
+            if path.is_file() && path.file_stem() == Some(raw_stem)
+                && path.extension().and_then(|value| value.to_str())
+                    .is_some_and(|value| value.eq_ignore_ascii_case("xmp"))
+            {
+                paths.push(path);
             }
         }
     }
-
-    None
+    paths.sort();
+    paths
 }
 
 pub fn write_recipe_sidecar(
@@ -475,11 +471,21 @@ pub fn write_recipe_sidecar(
     let path = sidecar_path_for_raw(raw_path);
     let document = XmpEditState::from_recipe(recipe).to_xmp_document();
     let mut file = OpenOptions::new().write(true).create_new(true).open(&path)?;
-    file.write_all(document.as_bytes())?;
-    file.sync_all()?;
+    // A failed disk write/sync or read-back must not leave a partial new XMP.
+    let write_result = file.write_all(document.as_bytes())
+        .and_then(|_| file.sync_all());
     drop(file);
-
-    let written = std::fs::read_to_string(&path)?;
+    if let Err(error) = write_result {
+        let _ = std::fs::remove_file(&path);
+        return Err(error.into());
+    }
+    let written = match std::fs::read_to_string(&path) {
+        Ok(document) => document,
+        Err(error) => {
+            let _ = std::fs::remove_file(&path);
+            return Err(error.into());
+        }
+    };
     if let Err(error) = validate_recipe_xmp(recipe, &written) {
         let _ = std::fs::remove_file(&path);
         return Err(XmpWriteError::RoundTrip(error.to_string()));
@@ -505,11 +511,14 @@ pub fn preflight_group_sidecars(
             .find(|asset| asset.id == target_id)
             .ok_or(XmpWriteError::MissingRawAsset(target_id))?;
         let raw_path = PathBuf::from(&asset.source_path);
-        let existing_sidecar = existing_sidecar_path(&raw_path);
-        let existing_matches_recipe = existing_sidecar
-            .as_ref()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .is_some_and(|document| xmp_document_matches_recipe_state(recipe, &document));
+        let existing_sidecars = existing_sidecar_paths(&raw_path);
+        // Two case-variant sidecars for the same RAW are ambiguous even if
+        // one is current: never choose a random file and hide the other.
+        let existing_matches_recipe = existing_sidecars.len() == 1
+            && existing_sidecars.first()
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .is_some_and(|document| xmp_document_matches_recipe_state(recipe, &document));
+        let existing_sidecar = existing_sidecars.into_iter().next();
         targets.push(XmpSidecarPreflight {
             asset_id: target_id,
             sidecar_path: sidecar_path_for_raw(&raw_path),
@@ -637,6 +646,16 @@ pub fn write_sidecar_batch(
         }
     }
 
+    // Re-verify ALL groups after the final write. If an XMP changed between
+    // group writes, roll back only the files created by this batch.
+    for (assets, recipes) in groups {
+        if let Err(error) = verify_group_sidecars(assets, recipes) {
+            for path in &batch_written {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(error);
+        }
+    }
     Ok(results)
 }
 
@@ -1384,6 +1403,37 @@ mod tests {
         assert!(matches!(error, XmpWriteError::Io(_)));
         assert!(!dir.path().join("IMG_0220.xmp").exists());
         assert!(!missing_parent_path.with_extension("xmp").exists());
+    }
+
+    // Case-distinct sibling filenames cannot coexist on standard Windows volumes.
+    #[cfg(not(windows))]
+    #[test]
+    fn multiple_case_variant_sidecars_are_always_a_conflict() {
+        let dir = tempdir().unwrap();
+        let raw = dir.path().join("IMG_0900.CR3");
+        std::fs::write(&raw, b"raw-bytes").unwrap();
+        let id = Uuid::new_v4();
+        let asset = RawAsset {
+            id, source_path: raw.to_string_lossy().into_owned(),
+            filename: "IMG_0900.CR3".into(), extension: "cr3".into(),
+            camera_id: None, capture_time_ms: None, file_time_ms: None,
+            sequence_number: None,
+        };
+        let canonical = recipe(Some(id));
+        let first = write_recipe_sidecar(&raw, &canonical).unwrap();
+        let original = std::fs::read(&first).unwrap();
+        let second = dir.path().join("IMG_0900.XMP");
+        std::fs::write(&second, b"photographer-state").unwrap();
+        let preflight = preflight_group_sidecars(&[asset.clone()], &[canonical.clone()]).unwrap();
+        assert_eq!(preflight.len(), 1);
+        assert!(preflight[0].is_conflict());
+        assert!(matches!(
+            write_group_sidecars(&[asset], &[canonical]),
+            Err(XmpWriteError::ExistingSidecar(_))
+        ));
+        assert_eq!(std::fs::read(&first).unwrap(), original);
+        assert_eq!(std::fs::read(&second).unwrap(), b"photographer-state");
+        assert_eq!(std::fs::read(&raw).unwrap(), b"raw-bytes");
     }
 
 }

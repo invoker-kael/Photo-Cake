@@ -617,3 +617,33 @@ Photographer-confirmed Reject alone excludes a deliverable; AI RejectSuggestion
 never does. Reference preservation, persisted exceptions, current Recipe
 fingerprint and ProcessVersion review invalidation, immutable RAW, and case-safe
 existing XMP preflight/rollback remain authoritative in the existing core.
+
+## Photography Command contract (second slice: batch)
+
+The six first-slice single-group Commands remain unchanged. Five batch Commands
+share the same `photo-core::photography_commands` registry and Windows
+`photography_command` dispatcher:
+
+- `reference.selectBatch` — batch UUID and photographer-selected group/asset pairs;
+  prevalidate every group, asset, duplicate and Reference readiness gate; the
+  existing `ReferenceStore::set_single_photo_references_many` commits atomically.
+  Existing group References and StyleProfiles must not be overwritten.
+- `recipe.confirmBatch` — explicit photo selections; regenerate canonical Recipes,
+  apply persisted exceptions, reject pending evidence, and persist confirmations
+  atomically using `RecipeReviewStore::confirm_recipes`.
+- `recipe.confirmClearGroups` — requested groups only; reuse the authoritative
+  clear-group preflight and reject Attention/Pending before the transactional commit.
+- `lightroom.preflightBatch` — validated group scope; return per-group results
+  or concrete errors plus counts derived from actual preflight targets. Incomplete
+  review, pending HDR merges and case-variant XMP conflicts stay visible.
+- `lightroom.handoffBatch` — validate the full batch before mutation; recheck
+  Review/HDR gates; reuse the existing `write_sidecar_batch` for whole-batch
+  conflict checks, write-missing-only behavior, parse-back and rollback. Verified
+  counts must come from successful full-group verification.
+
+Windows batch UI actions use these Commands rather than direct legacy Tauri
+batch mutations. CLI, MCP, autonomous recipe editing, Android RAW processing,
+and unrelated Cull/Style/group workflows remain outside this slice. Command IDs
+are independent of UI labels; request contracts reject arbitrary Recipe JSON,
+fingerprints and XMP XML. A Command is a validated business entrypoint, not a
+second persistence layer or workflow engine.

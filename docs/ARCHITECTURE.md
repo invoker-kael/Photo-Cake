@@ -664,3 +664,32 @@ write SQLite tables, submit arbitrary Recipe JSON, edit XMP XML or bypass
 photographer authority. No MCP server is provided. Existing XMP case-insensitive
 collision checks, whole-group preflight, write-missing only, parse-back,
 numeric/identity verification and rollback remain in photo-core.
+
+## Photography Command boundary — second slice: batch
+
+```text
+Windows UI / future CLI / future Agent / future MCP
+                         |
+               Photography Commands
+              typed requests + scope gates
+                         |
+                    photo-core
+    ReferenceStore / canonical RecipeReviewStore / XMP writer
+```
+
+The initial six IDs are the first-slice single-group commands. The second
+slice extends the **same registry** with `reference.selectBatch`,
+`recipe.confirmBatch`, `recipe.confirmClearGroups`,
+`lightroom.preflightBatch`, and `lightroom.handoffBatch`.
+Windows Tauri remains a thin dispatcher, not a workflow engine.
+
+Reference batch validation runs before the existing single transaction, and
+Recipe confirmation regenerates canonical Recipes with persisted per-photo
+exceptions before the existing transaction. Clear-group and explicit-selected
+Recipe operations stay distinct; Attention/Pending evidence is never implicitly
+approved. Lightroom batch preflight summarizes actual per-group XMP states and
+errors. Lightroom batch handoff reuses `write_sidecar_batch` (not repeated
+single-group writes), preserves existing photographer XMP and RAW bytes, and
+reports counts from verified sidecar state. Case-variant duplicate sidecars are
+conflicts; errors roll back only newly created sidecars. Other workflows,
+Android RAW processing, and CLI/MCP remain unconverted.

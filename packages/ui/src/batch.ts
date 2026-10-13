@@ -395,6 +395,28 @@ export interface BackendLightroomBatchHandoffResult {
   groups: BackendLightroomHandoffResult[];
 }
 
+export interface BackendLightroomBatchPreflightGroupResult {
+  group_id: string;
+  preflight: (BackendLightroomHandoffPreflight & {
+    target_count: number;
+    current_count: number;
+    missing_count: number;
+    conflict_count: number;
+  }) | null;
+  error: string | null;
+}
+
+export interface BackendLightroomBatchPreflightResult {
+  group_count: number;
+  target_count: number;
+  current_count: number;
+  missing_count: number;
+  conflict_count: number;
+  hdr_blocked_group_count: number;
+  failed_group_count: number;
+  group_results: BackendLightroomBatchPreflightGroupResult[];
+}
+
 export interface BackendRecipeReviewOverride {
   asset_id: string;
   exposure_delta_ev: number;
@@ -566,8 +588,8 @@ export interface PhotoCakeBridge {
   ): Promise<BackendRecipeReviewSyncResult>;
   clearRecipeReview?(assetId: string): Promise<void>;
   setRecipeReviewed?(batchId: string, groupId: string, assetId: string): Promise<void>;
-  confirmRecipeReviews?(items: BackendRecipeReviewBatchItem[]): Promise<BackendRecipeReviewBatchResult>;
-  confirmRecipeReviewGroups?(groupIds: string[]): Promise<BackendRecipeReviewGroupBatchResult>;
+  confirmRecipeReviews?(batchId: string, items: BackendRecipeReviewBatchItem[]): Promise<BackendRecipeReviewBatchResult>;
+  confirmRecipeReviewGroups?(batchId: string, groupIds: string[]): Promise<BackendRecipeReviewGroupBatchResult>;
   clearRecipeReviewed?(batchId: string, groupId: string, assetId: string): Promise<void>;
   renderRecipePreview?(batchId: string, groupId: string, assetId: string): Promise<BackendReviewRenderResult>;
   loadReferenceStyles?(batchId: string): Promise<BackendGroupReferenceStyle[]>;
@@ -592,8 +614,9 @@ export interface PhotoCakeBridge {
   loadReferencePreviews?(batchId: string): Promise<BackendGroupReferencePreview[]>;
   setHdrMerged?(groupId: string, merged: boolean): Promise<boolean>;
   preflightGroupXmp?(batchId: string, groupId: string): Promise<BackendLightroomHandoffPreflight>;
+  preflightBatchXmp?(batchId: string, groupIds: string[]): Promise<BackendLightroomBatchPreflightResult>;
   writeGroupXmp?(batchId: string, groupId: string): Promise<BackendLightroomHandoffResult>;
-  writeBatchXmp?(groupIds: string[]): Promise<BackendLightroomBatchHandoffResult>;
+  writeBatchXmp?(batchId: string, groupIds: string[]): Promise<BackendLightroomBatchHandoffResult>;
   subscribeBatchUpdates?(handler: (batch: BackendBatch) => void): Promise<() => void>;
 }
 

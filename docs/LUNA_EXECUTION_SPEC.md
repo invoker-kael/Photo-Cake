@@ -271,3 +271,28 @@ ReferenceStore internals, arbitrary Recipe JSON, XMP XML or unsanctioned editing
 Retain human Reject/Reference gates, exception precedence, existing whole-group
 XMP preflight/verification/rollback and RAW byte immutability. Do not implement
 a standalone MCP service until the Command API is proven through Windows UI.
+
+## Photography Command execution rule (second slice: batch)
+
+Keep the six first-slice single-group IDs. Use the same typed Registry and Tauri
+dispatcher for `reference.selectBatch`, `recipe.confirmBatch`,
+`recipe.confirmClearGroups`, `lightroom.preflightBatch`, and
+`lightroom.handoffBatch`; migrate Windows batch buttons to these paths.
+
+For every batch request, validate all group/asset identity, same-batch
+membership, duplicates and disallowed payloads **before** writes. Reference
+batch changes require the existing atomic ReferenceStore method; don't overwrite
+StyleProfiles or confirmed photographer Rejects. Explicit Recipe selections
+and clear groups are different operations. Both regenerate canonical Recipes,
+apply stored exceptions and preserve fingerprint/ProcessVersion invalidation;
+pending evidence blocks confirmation, while clear-group approval also rejects
+Attention. Confirmation is one RecipeReviewStore transaction, never N
+single-photo calls.
+
+For Lightroom, use real multi-group preflight data and report group-specific
+conflicts/errors. Batch handoff MUST call `write_sidecar_batch`, never loop over
+`lightroom.handoff`. Check Review/HDR safety on the backend. Verify existing and
+new sidecars by identity, values and ProcessVersion; do not modify RAWs, overwrite
+a photographer XMP, claim an unverified target, or leave partial created
+sidecars after failure. Future Agent/CLI/MCP adapters are not built in this
+slice; other photographic operations stay on their established paths.

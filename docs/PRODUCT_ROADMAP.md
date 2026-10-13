@@ -398,3 +398,12 @@ Completed implementation batch: the Windows workstation exposes the actual selec
 Single-group and multi-group Lightroom delivery both use the same current photographer-approval preflight. Unconfirmed clear photos and changed Recipes are blocked until explicitly approved, without forcing manual review of all normal frames: use existing Confirm clear groups. The Lightroom view names affected photos and opens Review directly, and previously verified preflight cannot authorize handoff after a photographic input change.
 
 Remaining real-shoot validation: visually test mixed landscape, city, family/bursts, low-light, backlit portraits and HDR brackets with user-owned CR3/ARW/NEF/DNG RAWs and compare final XMP in Lightroom/Camera Raw. Validated RAW-to-Lightroom white-balance synthesis is still intentionally gated.
+
+
+### Photographer workflow priority: Similar Photo Batch Editing
+
+Implemented first workstation batch-edit workflow: choose a representative adjusted photo from Recipe Review; view actual similar RAW thumbnails within the group and, when cached embeddings support it, across Moments; select suggested or manual compatible targets; choose exposure/highlight/shadow/white/black/contrast/saturation/vibrance corrections; apply them in one atomic operation while retaining each target's adaptive baseline. Respect protected individual edits and already-confirmed photos unless the photographer opts into overwrite. Inspect previews/exception risk, reconfirm changed Recipes, then use safe Lightroom XMP handoff.
+
+A stored undo record survives app restarts and refuses to erase edits made afterward. Missing inference evidence causes conservative candidate omission rather than invented confidence. HDR brackets and rejects are never batch-edit targets. This adds focused Tauri adapters but leaves the 27 high-level Photography Commands and Android shared UI contract intact.
+
+Next: validate with diverse user RAW fixtures (same scene different exposure, portraits/bursts, mixed moments, HDR and Lightroom sidecars), improve similarity recommendation at large-library scale and expand direct-control preview where measured image-output parity permits. Do not claim complete Lightroom/Camera Raw visual parity before real validation.

@@ -39,3 +39,22 @@ test("delivery blocks clear, pending, stale and unreviewed photos", () => {
     assets: [{ asset_id: "raw-a", disposition: "CONFIRMED" }],
   }), []);
 });
+
+import { defaultSimilarSelections, isSimilarTargetProtected } from "../src/similar-edit.ts";
+
+test("batch similar defaults never overwrite individual or approved photos", () => {
+  const candidate = (asset_id, recommended, individual = false, approved = false) => ({
+    asset_id, group_id: "group", similarity: 0.96, recommended, in_source_group: true,
+    has_individual_edit: individual, already_confirmed: approved,
+  });
+  const values = [
+    candidate("near", true), candidate("manual", false),
+    candidate("custom", true, true), candidate("approved", true, false, true),
+    candidate("other", true),
+  ];
+  assert.deepEqual(defaultSimilarSelections(values), ["near", "other"]);
+  assert.deepEqual(defaultSimilarSelections(values, 1), ["near"]);
+  assert.equal(isSimilarTargetProtected(values[2], false), true);
+  assert.equal(isSimilarTargetProtected(values[3], false), true);
+  assert.equal(isSimilarTargetProtected(values[2], true), false);
+});

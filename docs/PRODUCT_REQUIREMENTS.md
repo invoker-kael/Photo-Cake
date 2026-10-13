@@ -748,3 +748,12 @@ Windows must not show an earlier read-only XMP preflight as current after releva
 The selected Reference appears next to Review group context. Photographer-triggered expanded before/after inspection uses the existing embedded-RAW-preview evaluator only and surfaces final exposure, contrast, saturation, tone and measured/omitted white-balance controls. A JPEG approximation must never claim Lightroom RAW rendering parity.
 
 Preview cache filenames are scoped to the current canonical Recipe fingerprint, and Windows displays the result only if its originating Reference/Look/adjustments/exception signature is current. A late async response cannot be mistaken for a newer adjustment.
+
+
+### Similar-photo batch editing is the primary photographer operation
+
+A photographer adjusts one representative photo using the existing eight Recipe exception deltas, then chooses related RAW photos in the current batch. Windows presents thumbnails, in-group and cross-Moment similarity evidence, optional manual in-group targets, which fields will propagate, and a single Apply button. Similarity is based on existing image-embedding evidence; cross-Moment candidates require strong measured similarity and compatible people/scene grouping. No gallery-time association alone can authorize cross-Moment editing.
+
+The edit copies **selected relative exception deltas**, never the source photo's absolute exposure or color result. Every destination retains its independent Reference-derived adaptive Recipe. A previously individually edited or approved destination is excluded by default; intentional overwrite requires an explicit toggle. Rejected photos, HDR exposure-bracket source frames, photos missing usable Recipes and other batches are not writable. A final backend validation is required even if the UI has shown a candidate.
+
+Batch edits are atomic and logged to SQLite with exact before/after overrides. Undo restores originals only while the resulting edits remain unchanged; later individual adjustments veto destructive undo. The original RAW is never modified; Lightroom XMP still passes canonical Review approval, freshness, conflicts and safe handoff gates. Before/after remains an approximate embedded-preview render, never a claim of RAW parity.

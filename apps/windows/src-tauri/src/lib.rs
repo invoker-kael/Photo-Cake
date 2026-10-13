@@ -32,6 +32,7 @@ use photo_core::{
     GroupAssetSelection, CullDecideResult, CullConfirmVisibleResult,
     CullQuickApplyResult, ReferenceClearResult,
     CURRENT_RECIPE_PROCESS_VERSION, review_handoff_unconfirmed,
+    embedding_similarity, SimilarEditOperation,
 };
 use photo_inference::LocalAnalyzeExecutor;
 use serde::{Deserialize, Serialize};
@@ -160,6 +161,22 @@ struct RecipeReviewGroupBatchResult {
     asset_ids: Vec<Uuid>,
 }
 
+#[derive(Clone, Serialize)]
+struct SimilarEditCandidate {
+    group_id: Uuid,
+    asset_id: Uuid,
+    similarity: Option<f32>,
+    recommended: bool,
+    in_source_group: bool,
+    has_individual_edit: bool,
+    already_confirmed: bool,
+}
+#[derive(Clone, Serialize)]
+struct SimilarEditCandidateResult {
+    source_group_id: Uuid,
+    source_asset_id: Uuid,
+    candidates: Vec<SimilarEditCandidate>,
+}
 #[derive(Clone, Serialize)]
 struct RecipeReviewSyncResult {
     group_id: Uuid,
@@ -2091,6 +2108,140 @@ fn sync_recipe_review_exception(
     })
 }
 
+
+fn cached_edit_embedding(id: Uuid, state: &AppState) -> Result<Option<Vec<f32>>, String> {
+    let entry = state.analysis_cache
+        .latest_for_asset_task(id, InferenceTask::ImageEmbedding)
+        .map_err(|error| error.to_string())?;
+    entry.and_then(|entry| entry.payload_json.get("embedding").cloned())
+        .map(|value| serde_json::from_value::<Vec<f32>>(value).map_err(|error| error.to_string()))
+        .transpose()
+        .map(|value| value.filter(|embedding| !embedding.is_empty()))
+}
+
+fn validated_similar_edit_candidates(
+    batch_id: Uuid, source_group_id: Uuid, source_asset_id: Uuid, state: &AppState,
+) -> Result<SimilarEditCandidateResult, String> {
+    state.store.load_batch(batch_id).map_err(|error| error.to_string())?;
+    let groups = state.catalog.list_effective_groups_for_collection(batch_id)
+        .map_err(|error| error.to_string())?;
+    let source_group = groups.iter().find(|group| group.id == source_group_id)
+        .ok_or_else(|| "source group is not part of this active batch".to_string())?;
+    let (source_plan, source_recipes) = recipe_review_preflight_for_group(source_group.id, state)?;
+    if !source_recipes.iter().any(|recipe| recipe.target_asset_id == Some(source_asset_id)) {
+        return Err("select a non-rejected, non-HDR representative photo with an editable Recipe".into());
+    }
+    let source_embedding = cached_edit_embedding(source_asset_id, state)?;
+    let mut candidates = Vec::new();
+    for group in &groups {
+        // A group without an adaptive Recipe or reference is not a safe batch-edit target.
+        let Ok((plan, recipes)) = recipe_review_preflight_for_group(group.id, state) else { continue };
+        if group.id != source_group_id && plan.contains_people != source_plan.contains_people {
+            continue;
+        }
+        for recipe in &recipes {
+            let Some(asset_id) = recipe.target_asset_id else { continue };
+            if asset_id == source_asset_id { continue; }
+            let same_group = group.id == source_group_id;
+            let candidate_embedding = cached_edit_embedding(asset_id, state)?;
+            let similarity = match (source_embedding.as_ref(), candidate_embedding.as_ref()) {
+                (Some(left), Some(right)) if left.len() == right.len() =>
+                    Some(embedding_similarity(left, right)),
+                _ => None,
+            };
+            let threshold = if source_plan.contains_people { 0.92 } else { 0.88 };
+            // Cross-Moment application requires actual visual evidence, not only timestamp grouping.
+            if !same_group && !similarity.is_some_and(|score| score >= threshold) {
+                continue;
+            }
+            let recommended = similarity.is_some_and(|score| score >= threshold)
+                || (same_group
+                    && matches!(group.basis, photo_core::GroupingBasis::SemanticSimilarity)
+                    && similarity.is_none());
+            candidates.push(SimilarEditCandidate {
+                group_id: group.id, asset_id, similarity,
+                recommended: recommended
+                    && !plan.confirmed_asset_ids.contains(&asset_id)
+                    && state.recipe_reviews.get(asset_id).map_err(|error| error.to_string())?.is_none(),
+                in_source_group: same_group,
+                has_individual_edit: state.recipe_reviews.get(asset_id)
+                    .map_err(|error| error.to_string())?.is_some(),
+                already_confirmed: plan.confirmed_asset_ids.contains(&asset_id),
+            });
+        }
+    }
+    candidates.sort_by(|left, right| right.recommended.cmp(&left.recommended)
+        .then_with(|| right.similarity.unwrap_or(-1.0).total_cmp(&left.similarity.unwrap_or(-1.0)))
+        .then_with(|| left.asset_id.cmp(&right.asset_id)));
+    Ok(SimilarEditCandidateResult { source_group_id, source_asset_id, candidates })
+}
+
+#[tauri::command]
+fn batch_similar_edit_candidates(
+    batch_id: String, source_group_id: String, source_asset_id: String,
+    state: State<'_, AppState>,
+) -> Result<SimilarEditCandidateResult, String> {
+    validated_similar_edit_candidates(
+        parse_batch_id(&batch_id)?,
+        Uuid::parse_str(&source_group_id).map_err(|error| error.to_string())?,
+        Uuid::parse_str(&source_asset_id).map_err(|error| error.to_string())?,
+        &state,
+    )
+}
+
+#[tauri::command]
+fn batch_apply_similar_edits(
+    batch_id: String, source_group_id: String, source_asset_id: String,
+    target_asset_ids: Vec<String>, fields: RecipeReviewSyncFields,
+    overwrite_existing: bool, state: State<'_, AppState>,
+) -> Result<SimilarEditOperation, String> {
+    let batch = parse_batch_id(&batch_id)?;
+    let source_group = Uuid::parse_str(&source_group_id).map_err(|error| error.to_string())?;
+    let source = Uuid::parse_str(&source_asset_id).map_err(|error| error.to_string())?;
+    if target_asset_ids.len() > 1000 {
+        return Err("maximum 1000 target photos per batch edit".into());
+    }
+    // Re-evaluate on the server at execution time: selections may be stale.
+    let candidates = validated_similar_edit_candidates(batch, source_group, source, &state)?;
+    let valid = candidates.candidates.iter().map(|c| (c.asset_id, c))
+        .collect::<HashMap<_, _>>();
+    let mut targets = Vec::with_capacity(target_asset_ids.len());
+    for raw in target_asset_ids {
+        let id = Uuid::parse_str(&raw).map_err(|error| error.to_string())?;
+        let candidate = valid.get(&id)
+            .ok_or_else(|| format!("photo {id} no longer has a safe editable Recipe or sufficient similarity"))?;
+        if candidate.has_individual_edit && !overwrite_existing {
+            return Err(format!("photo {id} has existing individual adjustments"));
+        }
+        if candidate.already_confirmed && !overwrite_existing {
+            return Err(format!("photo {id} was previously approved; enable explicit overwrite to edit it"));
+        }
+        targets.push(id);
+    }
+    state.recipe_reviews.apply_similar_edits(batch, source, &targets, fields, overwrite_existing)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn batch_undo_similar_edits(
+    batch_id: String, operation_id: String, state: State<'_, AppState>,
+) -> Result<SimilarEditOperation, String> {
+    let batch = parse_batch_id(&batch_id)?;
+    state.store.load_batch(batch).map_err(|error| error.to_string())?;
+    let operation = Uuid::parse_str(&operation_id).map_err(|error| error.to_string())?;
+    state.recipe_reviews.undo_similar_edits(batch, operation)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn batch_latest_similar_edit(
+    batch_id: String, state: State<'_, AppState>,
+) -> Result<Option<SimilarEditOperation>, String> {
+    let batch = parse_batch_id(&batch_id)?;
+    state.store.load_batch(batch).map_err(|error| error.to_string())?;
+    state.recipe_reviews.latest_similar_edit(batch).map_err(|error| error.to_string())
+}
+
 fn clear_recipe_review(
     asset_id: String,
     state: State<'_, AppState>,
@@ -3111,6 +3262,10 @@ pub fn run() {
             batch_reference_bindings,
             batch_reference_readiness,
             batch_recipe_reviews,
+            batch_similar_edit_candidates,
+            batch_apply_similar_edits,
+            batch_undo_similar_edits,
+            batch_latest_similar_edit,
             batch_reference_styles,
             copy_group_reference_style,
             batch_recipe_review_preflight,

@@ -31,6 +31,8 @@ import App, {
   type BackendRecipeReviewOverride,
   type BackendRecipeReviewSyncFields,
   type BackendRecipeReviewSyncResult,
+  type BackendSimilarEditCandidates,
+  type BackendSimilarEditOperation,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
   type BackendStyleSyncPreflight,
@@ -154,6 +156,18 @@ const bridge: PhotoCakeBridge = {
         },
       },
     }),
+  similarEditCandidates: (batchId, groupId, sourceAssetId) =>
+    invoke<BackendSimilarEditCandidates>("batch_similar_edit_candidates", {
+      batchId, sourceGroupId: groupId, sourceAssetId,
+    }),
+  applySimilarEdits: (batchId, groupId, sourceAssetId, targetAssetIds, fields, overwriteExisting) =>
+    invoke<BackendSimilarEditOperation>("batch_apply_similar_edits", {
+      batchId, sourceGroupId: groupId, sourceAssetId, targetAssetIds, fields, overwriteExisting,
+    }),
+  undoSimilarEdits: (batchId, operationId) =>
+    invoke<BackendSimilarEditOperation>("batch_undo_similar_edits", { batchId, operationId }),
+  latestSimilarEdit: (batchId) =>
+    invoke<BackendSimilarEditOperation | null>("batch_latest_similar_edit", { batchId }),
   syncRecipeReviewException: (
     batchId, groupId, sourceAssetId, targetAssetIds,
     fields: BackendRecipeReviewSyncFields,

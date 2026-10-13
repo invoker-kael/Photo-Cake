@@ -130,6 +130,7 @@ pub use recipe::{EditAdjustments, Recipe, CURRENT_RECIPE_PROCESS_VERSION};
 pub use recipe_review_store::{
     recipe_review_fingerprint, RecipeReviewConfirmation, RecipeReviewOverride,
     RecipeReviewStore, RecipeReviewStoreError, RecipeReviewSyncFields,
+    SimilarEditChange, SimilarEditOperation,
 };
 pub use reference::{
     build_reference_readiness_plan, build_style_sync_group_context, build_style_sync_preflight,

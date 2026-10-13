@@ -509,6 +509,32 @@ export interface BackendRecipeReviewSyncFields {
   vibrance: boolean;
 }
 
+export interface BackendSimilarEditCandidate {
+  group_id: string;
+  asset_id: string;
+  similarity: number | null;
+  recommended: boolean;
+  in_source_group: boolean;
+  has_individual_edit: boolean;
+  already_confirmed: boolean;
+}
+export interface BackendSimilarEditCandidates {
+  source_group_id: string;
+  source_asset_id: string;
+  candidates: BackendSimilarEditCandidate[];
+}
+export interface BackendSimilarEditChange {
+  asset_id: string;
+  before: BackendRecipeReviewOverride | null;
+  after: BackendRecipeReviewOverride | null;
+}
+export interface BackendSimilarEditOperation {
+  operation_id: string;
+  batch_id: string;
+  source_asset_id: string;
+  changes: BackendSimilarEditChange[];
+  undone: boolean;
+}
 export interface BackendRecipeReviewSyncResult {
   group_id: string;
   source_asset_id: string;
@@ -598,6 +624,15 @@ export interface PhotoCakeBridge {
     saturationDelta: number,
     vibranceDelta: number,
   ): Promise<BackendRecipeReviewOverride>;
+  similarEditCandidates?(
+    batchId: string, groupId: string, sourceAssetId: string,
+  ): Promise<BackendSimilarEditCandidates>;
+  applySimilarEdits?(
+    batchId: string, groupId: string, sourceAssetId: string, targetAssetIds: string[],
+    fields: BackendRecipeReviewSyncFields, overwriteExisting: boolean,
+  ): Promise<BackendSimilarEditOperation>;
+  undoSimilarEdits?(batchId: string, operationId: string): Promise<BackendSimilarEditOperation>;
+  latestSimilarEdit?(batchId: string): Promise<BackendSimilarEditOperation | null>;
   syncRecipeReviewException?(
     batchId: string,
     groupId: string,

@@ -14,6 +14,10 @@ CREATE TABLE IF NOT EXISTS recipe_review_overrides (
     override_json TEXT NOT NULL,
     updated_at_unix_ms INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS recipe_similar_edit_operations (
+ operation_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, operation_json TEXT NOT NULL,
+ created_at_unix_ms INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS recipe_review_confirmations (
     asset_id TEXT PRIMARY KEY NOT NULL,
     recipe_fingerprint TEXT NOT NULL,
@@ -259,6 +263,8 @@ pub enum RecipeReviewStoreError {
     RecipeMissingTarget(Uuid),
     #[error("duplicate recipe review override for asset {0}")]
     DuplicateOverride(Uuid),
+    #[error("similar photo edit conflict: {0}")]
+    SimilarEditConflict(String),
     #[error("duplicate recipe review confirmation for asset {0}")]
     DuplicateConfirmation(Uuid),
     #[error(
@@ -271,6 +277,20 @@ pub enum RecipeReviewStoreError {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimilarEditChange {
+    pub asset_id: Uuid,
+    pub before: Option<RecipeReviewOverride>,
+    pub after: Option<RecipeReviewOverride>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimilarEditOperation {
+    pub operation_id: Uuid,
+    pub batch_id: Uuid,
+    pub source_asset_id: Uuid,
+    pub changes: Vec<SimilarEditChange>,
+    pub undone: bool,
+}
 #[derive(Debug, Clone)]
 pub struct RecipeReviewStore {
     path: PathBuf,
@@ -388,6 +408,107 @@ impl RecipeReviewStore {
         Ok(values)
     }
 
+
+    pub fn apply_similar_edits(
+        &self, batch_id: Uuid, source_asset_id: Uuid, target_ids: &[Uuid],
+        fields: RecipeReviewSyncFields, overwrite_existing: bool,
+    ) -> Result<SimilarEditOperation, RecipeReviewStoreError> {
+        if !fields.any() || target_ids.is_empty() {
+            return Err(RecipeReviewStoreError::SimilarEditConflict("select targets and adjustment fields".into()));
+        }
+        let mut seen = HashSet::new();
+        if target_ids.iter().any(|id| *id == source_asset_id || !seen.insert(*id)) {
+            return Err(RecipeReviewStoreError::SimilarEditConflict("invalid or duplicate target".into()));
+        }
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        let read = |id: Uuid| -> Result<Option<RecipeReviewOverride>, RecipeReviewStoreError> {
+            let value: Option<String> = tx.query_row(
+                "SELECT override_json FROM recipe_review_overrides WHERE asset_id = ?1",
+                [id.to_string()], |row| row.get(0),
+            ).optional()?;
+            value.map(|v| serde_json::from_str(&v).map_err(Into::into)).transpose()
+        };
+        let source = read(source_asset_id)?.ok_or_else(|| RecipeReviewStoreError::SimilarEditConflict(
+            "save the adjustments on the representative photo first".into()
+        ))?;
+        let mut changes = Vec::new();
+        for id in target_ids {
+            let before = read(*id)?;
+            if before.is_some() && !overwrite_existing {
+                return Err(RecipeReviewStoreError::SimilarEditConflict(format!(
+                    "photo {id} has individual adjustments; choose overwrite explicitly"
+                )));
+            }
+            let prior = before.clone().unwrap_or_else(|| RecipeReviewOverride::neutral(*id));
+            let after_value = source.copy_selected_to(&prior, fields);
+            let after = if after_value.is_neutral() { None } else { Some(after_value) };
+            if before != after {
+                changes.push(SimilarEditChange { asset_id: *id, before, after });
+            }
+        }
+        for change in &changes { write_similar_override(&tx, change.asset_id, change.after.as_ref())?; }
+        let operation = SimilarEditOperation {
+            operation_id: Uuid::new_v4(), batch_id, source_asset_id, changes, undone: false,
+        };
+        tx.execute(
+            "INSERT INTO recipe_similar_edit_operations (operation_id, batch_id, operation_json, created_at_unix_ms)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![operation.operation_id.to_string(), batch_id.to_string(),
+                serde_json::to_string(&operation)?, unix_time_ms()],
+        )?;
+        tx.commit()?;
+        Ok(operation)
+    }
+
+    pub fn undo_similar_edits(
+        &self, batch_id: Uuid, operation_id: Uuid,
+    ) -> Result<SimilarEditOperation, RecipeReviewStoreError> {
+        let mut conn = self.connect()?;
+        let tx = conn.transaction()?;
+        let json: String = tx.query_row(
+            "SELECT operation_json FROM recipe_similar_edit_operations WHERE operation_id = ?1 AND batch_id = ?2",
+            params![operation_id.to_string(), batch_id.to_string()], |row| row.get(0),
+        ).optional()?.ok_or_else(|| RecipeReviewStoreError::SimilarEditConflict("operation not found".into()))?;
+        let mut operation: SimilarEditOperation = serde_json::from_str(&json)?;
+        if operation.undone {
+            return Err(RecipeReviewStoreError::SimilarEditConflict("already undone".into()));
+        }
+        for change in &operation.changes {
+            let json: Option<String> = tx.query_row(
+                "SELECT override_json FROM recipe_review_overrides WHERE asset_id = ?1",
+                [change.asset_id.to_string()], |row| row.get(0),
+            ).optional()?;
+            let current: Option<RecipeReviewOverride> = json
+                .map(|v| serde_json::from_str(&v)).transpose()?;
+            if current != change.after {
+                return Err(RecipeReviewStoreError::SimilarEditConflict(format!(
+                    "photo {} changed after batch edit; refusing to overwrite newer work", change.asset_id
+                )));
+            }
+        }
+        for change in &operation.changes { write_similar_override(&tx, change.asset_id, change.before.as_ref())?; }
+        operation.undone = true;
+        tx.execute(
+            "UPDATE recipe_similar_edit_operations SET operation_json = ?1 WHERE operation_id = ?2",
+            params![serde_json::to_string(&operation)?, operation_id.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(operation)
+    }
+
+    pub fn latest_similar_edit(
+        &self, batch_id: Uuid,
+    ) -> Result<Option<SimilarEditOperation>, RecipeReviewStoreError> {
+        let conn = self.connect()?;
+        let json: Option<String> = conn.query_row(
+            "SELECT operation_json FROM recipe_similar_edit_operations WHERE batch_id = ?1
+             ORDER BY created_at_unix_ms DESC, rowid DESC LIMIT 1",
+            [batch_id.to_string()], |row| row.get(0),
+        ).optional()?;
+        json.map(|v| serde_json::from_str(&v).map_err(Into::into)).transpose()
+    }
+
     pub fn clear(&self, asset_id: Uuid) -> Result<(), RecipeReviewStoreError> {
         let conn = self.connect()?;
         conn.execute(
@@ -485,6 +606,25 @@ impl RecipeReviewStore {
     }
 }
 
+fn write_similar_override(
+    tx: &rusqlite::Transaction<'_>, asset_id: Uuid, value: Option<&RecipeReviewOverride>,
+) -> Result<(), RecipeReviewStoreError> {
+    match value {
+        Some(review) => {
+            tx.execute(
+                "INSERT INTO recipe_review_overrides (asset_id, override_json, updated_at_unix_ms)
+                 VALUES (?1, ?2, ?3) ON CONFLICT(asset_id) DO UPDATE SET
+                    override_json = excluded.override_json, updated_at_unix_ms = excluded.updated_at_unix_ms",
+                params![asset_id.to_string(), serde_json::to_string(review)?, unix_time_ms()],
+            )?;
+        }
+        None => {
+            tx.execute("DELETE FROM recipe_review_overrides WHERE asset_id = ?1", [asset_id.to_string()])?;
+        }
+    }
+    Ok(())
+}
+
 fn stable_fingerprint(bytes: &[u8]) -> String {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in bytes {
@@ -536,6 +676,44 @@ mod tests {
                 color_mixer_saturation: None,
             },
         }
+    }
+
+    #[test]
+    fn similar_edit_protects_individual_adjustments_and_undo_restores_them() {
+        let dir = tempdir().unwrap();
+        let store = RecipeReviewStore::open(dir.path().join("project.sqlite3")).unwrap();
+        let batch = Uuid::new_v4();
+        let source = Uuid::new_v4();
+        let target = Uuid::new_v4();
+        let custom = Uuid::new_v4();
+        let mut edit = RecipeReviewOverride::neutral(source);
+        edit.exposure_delta_ev = 0.4;
+        edit.highlights_delta = -25.0;
+        store.set(edit).unwrap();
+        let mut existing = RecipeReviewOverride::neutral(custom);
+        existing.saturation_delta = 6.0;
+        store.set(existing.clone()).unwrap();
+        let fields = RecipeReviewSyncFields {
+            exposure: true, highlights: true, shadows: false, whites: false,
+            blacks: false, contrast: false, saturation: false, vibrance: false,
+        };
+        assert!(store.apply_similar_edits(batch, source, &[target, custom], fields, false).is_err());
+        assert!(store.get(target).unwrap().is_none());
+        let op = store.apply_similar_edits(batch, source, &[target, custom], fields, true).unwrap();
+        assert_eq!(op.changes.len(), 2);
+        assert_eq!(store.get(target).unwrap().unwrap().exposure_delta_ev, 0.4);
+        assert_eq!(store.get(custom).unwrap().unwrap().saturation_delta, 6.0);
+        assert_eq!(store.latest_similar_edit(batch).unwrap(), Some(op.clone()));
+        let mut newer = store.get(target).unwrap().unwrap();
+        newer.exposure_delta_ev = 0.8;
+        store.set(newer.clone()).unwrap();
+        assert!(store.undo_similar_edits(batch, op.operation_id).is_err());
+        assert_eq!(store.get(custom).unwrap().unwrap().exposure_delta_ev, 0.4);
+        store.set(op.changes[0].after.clone().unwrap()).unwrap();
+        store.undo_similar_edits(batch, op.operation_id).unwrap();
+        assert!(store.get(target).unwrap().is_none());
+        assert_eq!(store.get(custom).unwrap(), Some(existing));
+        assert!(store.undo_similar_edits(batch, op.operation_id).is_err());
     }
 
     #[test]

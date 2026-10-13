@@ -28,6 +28,9 @@ import {
   type BackendRecipeReviewOverride,
   type BackendRecipeReviewSyncFields,
   type BackendRecipeReviewSyncResult,
+  type BackendSimilarEditCandidates,
+  type BackendSimilarEditCandidate,
+  type BackendSimilarEditOperation,
   type BackendReviewRenderResult,
   type BackendSemanticRefinementReport,
   type BackendWorkflowStatus,
@@ -77,6 +80,9 @@ export type {
   BackendRecipeReviewSyncFields,
   RecipeQualityRisk,
   BackendRecipeReviewSyncResult,
+  BackendSimilarEditCandidates,
+  BackendSimilarEditCandidate,
+  BackendSimilarEditOperation,
   BackendReviewRenderResult,
   BackendSemanticRefinementReport,
   BackendStyleSyncPreflight,
@@ -417,6 +423,14 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   });
   const [reviewSyncUpdating, setReviewSyncUpdating] = useState(false);
   const [reviewSyncNote, setReviewSyncNote] = useState<string | null>(null);
+  const [similarCandidates, setSimilarCandidates] = useState<BackendSimilarEditCandidates | null>(null);
+  const [similarTargets, setSimilarTargets] = useState<string[]>([]);
+  const [similarOverwrite, setSimilarOverwrite] = useState(false);
+  const [similarLoading, setSimilarLoading] = useState(false);
+  const [similarError, setSimilarError] = useState<string | null>(null);
+  const [similarApplying, setSimilarApplying] = useState(false);
+  const [similarLastEdit, setSimilarLastEdit] = useState<BackendSimilarEditOperation | null>(null);
+
   const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
   const [handoffPreflightErrors, setHandoffPreflightErrors] = useState<Record<string, string>>({});
   const [handoffPreflightLoading, setHandoffPreflightLoading] = useState(false);
@@ -498,10 +512,47 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setReviewSyncTargets([]);
     setReviewSyncFields({ exposure: true, highlights: true, shadows: true, whites: true, blacks: true, contrast: true, saturation: true, vibrance: true });
     setReviewSyncNote(null);
+    setSimilarCandidates(null);
+    setSimilarTargets([]);
+    setSimilarOverwrite(false);
+    setSimilarLastEdit(null);
+    setSimilarError(null);
     setHandoffPreflightErrors({});
     setHandoffBatchTargets([]);
     setHandoffBatchNote(null);
   }, [activeBatchId]);
+
+  useEffect(() => {
+    if (!bridge?.latestSimilarEdit || !activeBatchId) return;
+    let disposed = false;
+    bridge.latestSimilarEdit(activeBatchId)
+      .then((operation) => { if (!disposed) setSimilarLastEdit(operation); })
+      .catch((error: unknown) => { if (!disposed) setSimilarError(String(error)); });
+    return () => { disposed = true; };
+  }, [bridge, activeBatchId]);
+
+  useEffect(() => {
+    if (!bridge?.similarEditCandidates || !activeBatchId || !reviewSyncSource) {
+      setSimilarCandidates(null);
+      setSimilarTargets([]);
+      return;
+    }
+    let disposed = false;
+    setSimilarCandidates(null);
+    setSimilarTargets([]);
+    setSimilarLoading(true);
+    setSimilarError(null);
+    bridge.similarEditCandidates(activeBatchId, reviewSyncSource.groupId, reviewSyncSource.assetId)
+      .then((result) => {
+        if (disposed) return;
+        setSimilarCandidates(result);
+        setSimilarTargets(result.candidates.filter((candidate) => candidate.recommended)
+          .slice(0, 1000).map((candidate) => candidate.asset_id));
+      })
+      .catch((error: unknown) => { if (!disposed) setSimilarError(String(error)); })
+      .finally(() => { if (!disposed) setSimilarLoading(false); });
+    return () => { disposed = true; };
+  }, [bridge, activeBatchId, reviewSyncSource, analysisRevision, groupRevision, reviewRevision]);
 
   useEffect(() => {
     if (!bridge?.loadPhotoContext || !activeBatchId) {
@@ -1956,6 +2007,65 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       setBackendError(String(error));
     } finally {
       setReviewSyncUpdating(false);
+    }
+  };
+
+
+  const applySimilarEdits = async () => {
+    if (!bridge?.applySimilarEdits || !bridge?.loadRecipeReviews || !activeBatchId ||
+        !reviewSyncSource || similarTargets.length === 0 || similarApplying ||
+        !Object.values(reviewSyncFields).some(Boolean)) return;
+    setSimilarApplying(true);
+    setSimilarError(null);
+    try {
+      const result = await bridge.applySimilarEdits(
+        activeBatchId, reviewSyncSource.groupId, reviewSyncSource.assetId,
+        similarTargets, reviewSyncFields, similarOverwrite,
+      );
+      const updated = await bridge.loadRecipeReviews(activeBatchId);
+      setRecipeReviews(Object.fromEntries(updated.map((review) => [review.asset_id, review])));
+      setEditedPreviews((current) => {
+        const next = { ...current };
+        for (const change of result.changes) delete next[change.asset_id];
+        return next;
+      });
+      setSimilarLastEdit(result);
+      setReviewRevision((value) => value + 1);
+      setReviewSyncNote(
+        result.changes.length
+          ? `Applied representative adjustments to ${result.changes.length} similar photos. Review the changed results before Lightroom delivery.`
+          : "All selected photos already have those adjustments.",
+      );
+      setBackendError(null);
+    } catch (error) {
+      setSimilarError(String(error));
+    } finally {
+      setSimilarApplying(false);
+    }
+  };
+
+  const undoSimilarEdits = async () => {
+    if (!bridge?.undoSimilarEdits || !bridge?.loadRecipeReviews || !activeBatchId ||
+        !similarLastEdit || similarLastEdit.undone || similarApplying) return;
+    setSimilarApplying(true);
+    setSimilarError(null);
+    try {
+      const undone = await bridge.undoSimilarEdits(activeBatchId, similarLastEdit.operation_id);
+      const updated = await bridge.loadRecipeReviews(activeBatchId);
+      setRecipeReviews(Object.fromEntries(updated.map((review) => [review.asset_id, review])));
+      setEditedPreviews((current) => {
+        const next = { ...current };
+        for (const change of undone.changes) delete next[change.asset_id];
+        return next;
+      });
+      setSimilarLastEdit(undone);
+      setReviewRevision((value) => value + 1);
+      setReviewSyncNote(`Undid batch edits on ${undone.changes.length} photos; subsequent individual edits were protected.`);
+      setBackendError(null);
+    } catch (error) {
+      setSimilarError(String(error));
+    } finally {
+      setSimilarApplying(false);
     }
   };
 
@@ -3525,7 +3635,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     <section className="queue-card">
       <div className="queue-title">
         <strong>Recipe review</strong>
-        <span>Group style stays shared · only photo-specific exceptions are stored here</span>
+        <span>Edit one representative photo → apply selected adjustments to visually similar RAW photos, including across Moments</span>
       </div>
       <div className="review-summary">
         <div><span>Attention</span><strong>{recipeReviewSummary.attention}</strong></div>
@@ -3598,6 +3708,147 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         </div>
       </div>
       {reviewBatchNote && <div className="review-batch-note">{reviewBatchNote}</div>}
+
+      {bridge?.similarEditCandidates && (
+        <div className="similar-edit-workspace">
+          <div className="similar-edit-heading">
+            <div>
+              <strong>Batch edit similar photos</strong>
+              <small>Select "Batch edit similar" on an adjusted representative photo below. Existing adaptive Recipes remain individual, while selected corrections are copied as relative deltas.</small>
+            </div>
+            {similarLastEdit && !similarLastEdit.undone && (
+              <button className="cull-batch-action" disabled={similarApplying || !bridge.undoSimilarEdits}
+                onClick={() => void undoSimilarEdits()}>
+                Undo last batch ({similarLastEdit.changes.length})
+              </button>
+            )}
+          </div>
+          {reviewSyncSource && (
+            <>
+              <div className="similar-edit-source">
+                {previewUrls.get(reviewSyncSource.assetId) && (
+                  <img src={previewUrls.get(reviewSyncSource.assetId)}
+                    alt="Representative RAW" loading="lazy" />
+                )}
+                <div>
+                  <strong>Representative · {assetNames.get(reviewSyncSource.assetId) ?? reviewSyncSource.assetId}</strong>
+                  <small>Finish your adjustments on this photo, then apply only the checked fields. The source photo is never changed by batch apply.</small>
+                  {!recipeReviews[reviewSyncSource.assetId] && (
+                    <small className="attention-text">Adjust and save at least one slider below before applying.</small>
+                  )}
+                </div>
+                <button className="cull-batch-action" disabled={similarApplying}
+                  onClick={() => { setReviewSyncSource(null); setSimilarCandidates(null); setSimilarTargets([]); }}>
+                  Close
+                </button>
+              </div>
+              <div className="recipe-sync-fields" role="group" aria-label="Corrections to apply to similar photos">
+                {([
+                  ["exposure", "Exposure"], ["highlights", "Highlights"],
+                  ["shadows", "Shadows"], ["whites", "Whites"],
+                  ["blacks", "Blacks"], ["contrast", "Contrast"],
+                  ["saturation", "Saturation"], ["vibrance", "Vibrance"],
+                ] as const).map(([field, label]) => (
+                  <label key={field}>
+                    <input type="checkbox" checked={reviewSyncFields[field]} disabled={similarApplying}
+                      onChange={() => setReviewSyncFields((current) => ({ ...current, [field]: !current[field] }))} />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="similar-edit-toolbar">
+                <button className="cull-batch-action" disabled={similarApplying || similarLoading || !similarCandidates}
+                  onClick={() => setSimilarTargets(similarCandidates?.candidates
+                    .filter((candidate) => candidate.recommended).slice(0, 1000)
+                    .map((candidate) => candidate.asset_id) ?? [])}>
+                  Select recommended
+                </button>
+                <button className="cull-batch-action" disabled={similarApplying}
+                  onClick={() => setSimilarTargets([])}>Clear selection</button>
+                <label className="similar-edit-overwrite">
+                  <input type="checkbox" checked={similarOverwrite} disabled={similarApplying}
+                    onChange={(event) => {
+                      setSimilarOverwrite(event.target.checked);
+                      if (!event.target.checked) {
+                        setSimilarTargets((current) => current.filter((assetId) => {
+                          const candidate = similarCandidates?.candidates.find((item) => item.asset_id === assetId);
+                          return candidate && !candidate.has_individual_edit && !candidate.already_confirmed;
+                        }));
+                      }
+                    }} />
+                  <span>Explicitly allow replacing previously edited / approved photos</span>
+                </label>
+                <strong>{similarTargets.length} selected</strong>
+              </div>
+              {similarLoading && <div className="panel-note">Checking visual similarity and protected photos…</div>}
+              {similarCandidates && (
+                <div className="similar-edit-grid">
+                  {similarCandidates.candidates.map((candidate: BackendSimilarEditCandidate) => {
+                    const blocked = (candidate.has_individual_edit || candidate.already_confirmed) && !similarOverwrite;
+                    const recipe = referencePreviews[candidate.group_id]?.recipes
+                      .find((value) => value.target_asset_id === candidate.asset_id);
+                    const signature = recipe ? recipePreviewSignature(
+                      activeBatchId, referenceBindings[candidate.group_id]?.selected_reference_asset_id,
+                      referenceStyles[candidate.group_id]?.style_profile, recipe, recipeReviews[candidate.asset_id],
+                    ) : null;
+                    const after = editedPreviews[candidate.asset_id]?.signature === signature
+                      ? editedPreviews[candidate.asset_id] : null;
+                    return (
+                      <label className={`similar-edit-item ${similarTargets.includes(candidate.asset_id) ? "selected" : ""}`}
+                        key={candidate.asset_id}>
+                        <input type="checkbox" disabled={similarApplying || blocked}
+                          checked={similarTargets.includes(candidate.asset_id)}
+                          onChange={() => setSimilarTargets((current) =>
+                            current.includes(candidate.asset_id)
+                              ? current.filter((id) => id !== candidate.asset_id)
+                              : [...current, candidate.asset_id].slice(0, 1000))} />
+                        {previewUrls.get(candidate.asset_id) ? (
+                          <img src={previewUrls.get(candidate.asset_id)}
+                            alt={assetNames.get(candidate.asset_id) ?? "RAW photo"} loading="lazy" />
+                        ) : <div className="recipe-review-placeholder">RAW</div>}
+                        <div className="similar-edit-item-body">
+                          <strong>{assetNames.get(candidate.asset_id) ?? candidate.asset_id.slice(0, 8)}</strong>
+                          <small>{candidate.in_source_group ? "Same group" : "Cross-Moment"} · {candidate.similarity != null
+                            ? `${Math.round(candidate.similarity * 100)}% similarity`
+                            : "Similarity evidence unavailable"}</small>
+                          <small>{candidate.has_individual_edit ? "Individual edits protected" :
+                            candidate.already_confirmed ? "Previously approved" :
+                            candidate.recommended ? "Recommended" : "Optional manual selection"}</small>
+                          {after?.preview_url ? (
+                            <img className="similar-edit-after" src={after.preview_url}
+                              alt="Current edited preview" loading="lazy" />
+                          ) : (
+                            <button type="button" className="cull-batch-action"
+                              disabled={similarApplying || !bridge.renderRecipePreview || !recipe}
+                              onClick={(event) => { event.preventDefault(); void renderEditedPreview(candidate.group_id, candidate.asset_id); }}>
+                              Render after
+                            </button>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                  {similarCandidates.candidates.length === 0 && (
+                    <div className="panel-note">No eligible peers: missing analysis, unmatched scenes, rejected RAW, HDR bracket sources or missing Recipes are never auto-edited.</div>
+                  )}
+                </div>
+              )}
+              <div className="similar-edit-footer">
+                <small>Only selected relative corrections transfer. Existing RAW stays untouched; HDR sources and rejected photos are excluded. Check the edited previews and approve before XMP.</small>
+                <button className="button primary"
+                  disabled={similarApplying || similarLoading || !similarCandidates ||
+                    similarTargets.length === 0 || !recipeReviews[reviewSyncSource.assetId] ||
+                    !Object.values(reviewSyncFields).some(Boolean) || !bridge.applySimilarEdits}
+                  onClick={() => void applySimilarEdits()}>
+                  {similarApplying ? "Applying…" : `Apply edits to ${similarTargets.length} photos`}
+                </button>
+              </div>
+            </>
+          )}
+          {similarError && <div className="attention-text">{similarError}</div>}
+          {reviewSyncNote && <div className="review-batch-note">{reviewSyncNote}</div>}
+        </div>
+      )}
       <div className="recipe-review-groups">
         {photoContext?.groups.map((group, groupIndex) => {
           const preview = referencePreviews[group.id];
@@ -3708,7 +3959,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   )}
                 </div>
               </div>
-              {syncingThisGroup && reviewSyncSource && (
+              {!bridge?.similarEditCandidates && syncingThisGroup && reviewSyncSource && (
                 <div className="recipe-sync-panel">
                   <div>
                     <strong>
@@ -3971,7 +4222,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         </div>
                       </div>
                       <div className="recipe-review-actions">
-                        {syncingThisGroup && !isSyncSource && (
+                        {!bridge?.similarEditCandidates && syncingThisGroup && !isSyncSource && (
                           <label className="recipe-sync-target">
                             <input
                               type="checkbox"
@@ -4007,7 +4258,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                                 setReviewSyncNote(null);
                               }}
                             >
-                              {isSyncSource ? "Exception source" : "Sync this exception"}
+                              {isSyncSource ? "Representative selected" : "Batch edit similar"}
                             </button>
                             <button
                               className="review-choice clear recipe-reset"

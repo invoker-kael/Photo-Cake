@@ -1063,3 +1063,11 @@ h2 { font-size: 19px; }
   .similar-edit-workspace { padding: 10px; }
   .similar-edit-grid { grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); }
 }
+
+.similar-edit-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.similar-edit-filter button {
+  cursor: pointer; border: 1px solid #455155; background: #171c20;
+  padding: 6px 11px; border-radius: 6px; color: #d8e0e2; font-size: 12px;
+}
+.similar-edit-filter button.active { background: #2a4852; border-color: #82bbc8; color: #fff; }
+.similar-edit-filter small { margin-left: auto; }

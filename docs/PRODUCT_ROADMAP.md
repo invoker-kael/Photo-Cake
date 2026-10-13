@@ -407,3 +407,10 @@ Implemented first workstation batch-edit workflow: choose a representative adjus
 A stored undo record survives app restarts and refuses to erase edits made afterward. Missing inference evidence causes conservative candidate omission rather than invented confidence. HDR brackets and rejects are never batch-edit targets. This adds focused Tauri adapters but leaves the 27 high-level Photography Commands and Android shared UI contract intact.
 
 Next: validate with diverse user RAW fixtures (same scene different exposure, portraits/bursts, mixed moments, HDR and Lightroom sidecars), improve similarity recommendation at large-library scale and expand direct-control preview where measured image-output parity permits. Do not claim complete Lightroom/Camera Raw visual parity before real validation.
+
+
+### Similar-photo batch-edit usability pass
+
+Add manual-only cross-Moment candidates at conservative visual similarity thresholds while continuing to auto-select only high-similarity and unprotected photos. Photographer can switch between All, Recommended, Other Moments, and Last batch changes. Immediately after applying one representative's relative corrections, automatically render up to eight edited examples and show a before/after contact sheet; offer an explicit eight-photo re-render action for selected current edits. Rendering uses the canonical Recipe and reloaded current review state, never speculative or saved to RAW. The previous approved-photo and custom-edit safeguards and transactional undo continue unchanged.
+
+Next user-fixture validation must compare final Lightroom/Camera Raw interpretation to the embedded-preview approximation; no claim of RAW fidelity has yet been made.

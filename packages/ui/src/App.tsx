@@ -92,6 +92,7 @@ export type {
   WorkflowFocus,
 } from "./batch";
 import { recipePreviewSignature, unconfirmedDeliveryAssets } from "./review-workflow";
+import { defaultSimilarSelections, isSimilarTargetProtected, filterSimilarCandidates } from "./similar-edit";
 
 type WorkspaceView = "library" | "cull" | "groups" | "reference" | "review" | "lightroom";
 type CullViewMode = "TRIAGE" | "ALL";
@@ -430,6 +431,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [similarError, setSimilarError] = useState<string | null>(null);
   const [similarApplying, setSimilarApplying] = useState(false);
   const [similarLastEdit, setSimilarLastEdit] = useState<BackendSimilarEditOperation | null>(null);
+  const [similarViewMode, setSimilarViewMode] = useState<"ALL" | "RECOMMENDED" | "CROSS_MOMENT" | "LAST_BATCH">("ALL");
+  const [similarPreviewRunning, setSimilarPreviewRunning] = useState(false);
+  const [similarPreviewNote, setSimilarPreviewNote] = useState<string | null>(null);
 
   const [handoffPreflights, setHandoffPreflights] = useState<Record<string, BackendLightroomHandoffPreflight>>({});
   const [handoffPreflightErrors, setHandoffPreflightErrors] = useState<Record<string, string>>({});
@@ -517,6 +521,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setSimilarOverwrite(false);
     setSimilarLastEdit(null);
     setSimilarError(null);
+    setSimilarViewMode("ALL");
+    setSimilarPreviewNote(null);
     setHandoffPreflightErrors({});
     setHandoffBatchTargets([]);
     setHandoffBatchNote(null);
@@ -546,8 +552,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
       .then((result) => {
         if (disposed) return;
         setSimilarCandidates(result);
-        setSimilarTargets(result.candidates.filter((candidate) => candidate.recommended)
-          .slice(0, 1000).map((candidate) => candidate.asset_id));
+        setSimilarTargets(defaultSimilarSelections(result.candidates));
       })
       .catch((error: unknown) => { if (!disposed) setSimilarError(String(error)); })
       .finally(() => { if (!disposed) setSimilarLoading(false); });
@@ -2011,6 +2016,67 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
 
+
+  const renderSimilarPreviews = async (targetAssetIds: string[]) => {
+    if (!activeBatchId || !bridge?.renderRecipePreview || !bridge?.loadReferencePreviews ||
+        !bridge?.loadRecipeReviews || !similarCandidates || similarPreviewRunning) return;
+    const targets = [...new Set(targetAssetIds)].slice(0, 8);
+    if (targets.length === 0) return;
+    setSimilarPreviewRunning(true);
+    setSimilarPreviewNote(null);
+    try {
+      // Load the authoritative materialized Recipes after any batch edit.
+      const [previews, reviews] = await Promise.all([
+        bridge.loadReferencePreviews(activeBatchId),
+        bridge.loadRecipeReviews(activeBatchId),
+      ]);
+      const previewsByGroup = new Map(previews.map((preview) => [preview.group_id, preview]));
+      const reviewsByAsset = new Map(reviews.map((review) => [review.asset_id, review]));
+      const candidatesByAsset = new Map(similarCandidates.candidates.map((item) => [item.asset_id, item]));
+      const results: Record<string, BackendReviewRenderResult & { signature: string }> = {};
+      const errors: string[] = [];
+      // Cap concurrency to prevent concurrent high-resolution preview bursts.
+      const lanes = [targets.filter((_, index) => index % 2 === 0),
+        targets.filter((_, index) => index % 2 === 1)];
+      await Promise.all(lanes.map(async (lane) => {
+        for (const assetId of lane) {
+          const candidate = candidatesByAsset.get(assetId);
+          if (!candidate) continue;
+          const preview = previewsByGroup.get(candidate.group_id);
+          const recipe = preview?.recipes.find((item) => item.target_asset_id === assetId);
+          if (!recipe) {
+            errors.push(`${assetNames.get(assetId) ?? assetId.slice(0, 8)}: Recipe unavailable`);
+            continue;
+          }
+          try {
+            const signature = recipePreviewSignature(
+              activeBatchId,
+              referenceBindings[candidate.group_id]?.selected_reference_asset_id,
+              referenceStyles[candidate.group_id]?.style_profile,
+              recipe, reviewsByAsset.get(assetId),
+            );
+            const result = await bridge.renderRecipePreview!(activeBatchId, candidate.group_id, assetId);
+            results[assetId] = { ...result, signature };
+          } catch (error) {
+            errors.push(`${assetNames.get(assetId) ?? assetId.slice(0, 8)}: ${String(error)}`);
+          }
+        }
+      }));
+      setReferencePreviews(Object.fromEntries(previews.map((preview) => [preview.group_id, preview])));
+      setRecipeReviews(Object.fromEntries(reviews.map((review) => [review.asset_id, review])));
+      setEditedPreviews((current) => ({ ...current, ...results }));
+      setSimilarPreviewNote(
+        `Rendered ${Object.keys(results).length}/${targets.length} updated previews (maximum 8 per pass).` +
+        (errors.length ? ` ${errors.length} failed; retry individually.` : ""),
+      );
+      if (errors.length) setSimilarError(errors.slice(0, 2).join("; "));
+    } catch (error) {
+      setSimilarError(String(error));
+    } finally {
+      setSimilarPreviewRunning(false);
+    }
+  };
+
   const applySimilarEdits = async () => {
     if (!bridge?.applySimilarEdits || !bridge?.loadRecipeReviews || !activeBatchId ||
         !reviewSyncSource || similarTargets.length === 0 || similarApplying ||
@@ -2030,6 +2096,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         return next;
       });
       setSimilarLastEdit(result);
+      setSimilarViewMode("LAST_BATCH");
       setReviewRevision((value) => value + 1);
       setReviewSyncNote(
         result.changes.length
@@ -2037,6 +2104,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           : "All selected photos already have those adjustments.",
       );
       setBackendError(null);
+      if (result.changes.length > 0) {
+        await renderSimilarPreviews(result.changes.map((change) => change.asset_id));
+      }
     } catch (error) {
       setSimilarError(String(error));
     } finally {
@@ -2059,6 +2129,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
         return next;
       });
       setSimilarLastEdit(undone);
+      setSimilarViewMode("ALL");
       setReviewRevision((value) => value + 1);
       setReviewSyncNote(`Undid batch edits on ${undone.changes.length} photos; subsequent individual edits were protected.`);
       setBackendError(null);
@@ -3737,8 +3808,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                     <small className="attention-text">Adjust and save at least one slider below before applying.</small>
                   )}
                 </div>
-                <button className="cull-batch-action" disabled={similarApplying}
-                  onClick={() => { setReviewSyncSource(null); setSimilarCandidates(null); setSimilarTargets([]); }}>
+                <button className="cull-batch-action" disabled={similarApplying || similarPreviewRunning}
+                  onClick={() => { setReviewSyncSource(null); setSimilarCandidates(null); setSimilarTargets([]); setSimilarOverwrite(false); }}>
                   Close
                 </button>
               </div>
@@ -3758,9 +3829,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
               </div>
               <div className="similar-edit-toolbar">
                 <button className="cull-batch-action" disabled={similarApplying || similarLoading || !similarCandidates}
-                  onClick={() => setSimilarTargets(similarCandidates?.candidates
-                    .filter((candidate) => candidate.recommended).slice(0, 1000)
-                    .map((candidate) => candidate.asset_id) ?? [])}>
+                  onClick={() => setSimilarTargets(defaultSimilarSelections(similarCandidates?.candidates ?? []))}>
                   Select recommended
                 </button>
                 <button className="cull-batch-action" disabled={similarApplying}
@@ -3772,7 +3841,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       if (!event.target.checked) {
                         setSimilarTargets((current) => current.filter((assetId) => {
                           const candidate = similarCandidates?.candidates.find((item) => item.asset_id === assetId);
-                          return candidate && !candidate.has_individual_edit && !candidate.already_confirmed;
+                          return candidate && !isSimilarTargetProtected(candidate, false);
                         }));
                       }
                     }} />
@@ -3780,11 +3849,33 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                 </label>
                 <strong>{similarTargets.length} selected</strong>
               </div>
+              {similarCandidates && (
+                <div className="similar-edit-filter" role="group" aria-label="Filter similar photos">
+                  {([
+                    ["ALL", "All candidates"],
+                    ["RECOMMENDED", "Recommended"],
+                    ["CROSS_MOMENT", "Other Moments"],
+                    ["LAST_BATCH", "Last batch changes"],
+                  ] as const).map(([filter, label]) => (
+                    <button key={filter} className={similarViewMode === filter ? "active" : ""}
+                      disabled={similarApplying}
+                      onClick={() => setSimilarViewMode(filter)}>{label}</button>
+                  ))}
+                  <small>{similarCandidates.candidates.length} eligible · {similarCandidates.candidates
+                    .filter((candidate) => candidate.recommended).length} recommended ·
+                    {" "}{similarCandidates.candidates.filter((candidate) =>
+                      candidate.has_individual_edit || candidate.already_confirmed).length} protected</small>
+                </div>
+              )}
               {similarLoading && <div className="panel-note">Checking visual similarity and protected photos…</div>}
               {similarCandidates && (
                 <div className="similar-edit-grid">
-                  {similarCandidates.candidates.map((candidate: BackendSimilarEditCandidate) => {
-                    const blocked = (candidate.has_individual_edit || candidate.already_confirmed) && !similarOverwrite;
+                  {filterSimilarCandidates(
+                    similarCandidates.candidates, similarViewMode,
+                    similarLastEdit && !similarLastEdit.undone
+                      ? similarLastEdit.changes.map((change) => change.asset_id) : [],
+                  ).map((candidate: BackendSimilarEditCandidate) => {
+                    const blocked = isSimilarTargetProtected(candidate, similarOverwrite);
                     const recipe = referencePreviews[candidate.group_id]?.recipes
                       .find((value) => value.target_asset_id === candidate.asset_id);
                     const signature = recipe ? recipePreviewSignature(
@@ -3809,17 +3900,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                         <div className="similar-edit-item-body">
                           <strong>{assetNames.get(candidate.asset_id) ?? candidate.asset_id.slice(0, 8)}</strong>
                           <small>{candidate.in_source_group ? "Same group" : "Cross-Moment"} · {candidate.similarity != null
-                            ? `${Math.round(candidate.similarity * 100)}% similarity`
+                            ? `${Math.round(candidate.similarity * 100)}% embedding match`
                             : "Similarity evidence unavailable"}</small>
                           <small>{candidate.has_individual_edit ? "Individual edits protected" :
                             candidate.already_confirmed ? "Previously approved" :
-                            candidate.recommended ? "Recommended" : "Optional manual selection"}</small>
+                            candidate.recommended ? "Recommended" : "Manual match · inspect lighting"}</small>
                           {after?.preview_url ? (
                             <img className="similar-edit-after" src={after.preview_url}
                               alt="Current edited preview" loading="lazy" />
                           ) : (
                             <button type="button" className="cull-batch-action"
-                              disabled={similarApplying || !bridge.renderRecipePreview || !recipe}
+                              disabled={similarApplying || similarPreviewRunning || !bridge.renderRecipePreview || !recipe}
                               onClick={(event) => { event.preventDefault(); void renderEditedPreview(candidate.group_id, candidate.asset_id); }}>
                               Render after
                             </button>
@@ -3833,10 +3924,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                   )}
                 </div>
               )}
+              {similarPreviewNote && <div className="review-batch-note">{similarPreviewNote}</div>}
               <div className="similar-edit-footer">
+                <button className="cull-batch-action"
+                  disabled={similarApplying || similarPreviewRunning || similarTargets.length === 0 ||
+                    !bridge.renderRecipePreview || !bridge.loadReferencePreviews}
+                  onClick={() => void renderSimilarPreviews(similarTargets)}>
+                  {similarPreviewRunning ? "Rendering previews…" :
+                    `Render selected before / after (${Math.min(similarTargets.length, 8)})`}
+                </button>
                 <small>Only selected relative corrections transfer. Existing RAW stays untouched; HDR sources and rejected photos are excluded. Check the edited previews and approve before XMP.</small>
                 <button className="button primary"
-                  disabled={similarApplying || similarLoading || !similarCandidates ||
+                  disabled={similarApplying || similarPreviewRunning || similarLoading || !similarCandidates ||
                     similarTargets.length === 0 || !recipeReviews[reviewSyncSource.assetId] ||
                     !Object.values(reviewSyncFields).some(Boolean) || !bridge.applySimilarEdits}
                   onClick={() => void applySimilarEdits()}>
@@ -4254,6 +4353,9 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                               onClick={() => {
                                 setReviewSyncSource({ groupId: group.id, assetId });
                                 setReviewSyncTargets([]);
+                                setSimilarOverwrite(false);
+                                setSimilarViewMode("ALL");
+                                setSimilarPreviewNote(null);
                                 setReviewSyncFields({ exposure: true, highlights: true, shadows: true, whites: true, blacks: true, contrast: true, saturation: true, vibrance: true });
                                 setReviewSyncNote(null);
                               }}

@@ -393,3 +393,10 @@ Prioritize the actual repeated photographer task: edit one representative RAW, f
 Recommend only with cached visual similarity evidence (except a trusted semantic-similarity grouping); require comparable portrait/scene context across Moments. Exclude HDR bracket sources, rejected photos, missing-Recipe groups and cross-batch assets from all writes. Respect individual changes and previously approved photos by default; surface and honor deliberate opt-in overwrite. Re-validate server-side even when UI selections were previously checked. Limit one operation to 1,000 targets.
 
 Use the existing per-photo override store with atomic operation history, exact before/after snapshot and conflict-aware undo. Updating Recipes invalidates their prior approval through canonical fingerprints; XMP must never be silently rewritten. Permit on-demand approximate before/after previews and signal their non-RAW-parity limitations. Require store tests for atomic protection, undo and newer-adjustment preservation, frontend selection tests, CI and real Lightroom RAW validation. Avoid new high-level Photography Commands and avoid Android breakage.
+
+
+### Batch-edit UX regression requirements
+
+Test both candidate tiers: same-group manual with missing embeddings; cross-Moment must have measured score above manual floor; below recommended threshold must be visible but never auto-selected. Portrait cross-Moment safety floor must exceed general scene floor. Client tests cover safe default selection and filters for recommended, cross-Moment and last-changed assets.
+
+Automatically inspect a bounded visual sample after batch Apply, while keeping source/current group and Review preflight authoritative. Limit preview concurrency; preserve successful previews if a single render fails. Clearing or changing representative source must reset intentional-overwrite opt-in. Do not claim a one-to-one Lightroom RAW preview match. Continue to require real user RAW/Lightroom fixture testing before production-ready color fidelity claims.

@@ -2119,6 +2119,23 @@ fn cached_edit_embedding(id: Uuid, state: &AppState) -> Result<Option<Vec<f32>>,
         .map(|value| value.filter(|embedding| !embedding.is_empty()))
 }
 
+/// Same-group photos remain manually selectable; cross-Moment photos require
+/// measured visual similarity. A weaker but still plausible score offers only
+/// manual selection, never automatic batch edits.
+fn similar_edit_match_tier(
+    same_group: bool, semantic_group: bool, people: bool, score: Option<f32>,
+) -> Option<bool> {
+    let recommended_threshold = if people { 0.92 } else { 0.88 };
+    let manual_threshold = if people { 0.86 } else { 0.76 };
+    if same_group {
+        Some(score.is_some_and(|value| value >= recommended_threshold)
+            || (semantic_group && score.is_none()))
+    } else {
+        score.filter(|value| value.is_finite() && *value >= manual_threshold)
+            .map(|value| value >= recommended_threshold)
+    }
+}
+
 fn validated_similar_edit_candidates(
     batch_id: Uuid, source_group_id: Uuid, source_asset_id: Uuid, state: &AppState,
 ) -> Result<SimilarEditCandidateResult, String> {
@@ -2149,24 +2166,20 @@ fn validated_similar_edit_candidates(
                     Some(embedding_similarity(left, right)),
                 _ => None,
             };
-            let threshold = if source_plan.contains_people { 0.92 } else { 0.88 };
-            // Cross-Moment application requires actual visual evidence, not only timestamp grouping.
-            if !same_group && !similarity.is_some_and(|score| score >= threshold) {
-                continue;
-            }
-            let recommended = similarity.is_some_and(|score| score >= threshold)
-                || (same_group
-                    && matches!(group.basis, photo_core::GroupingBasis::SemanticSimilarity)
-                    && similarity.is_none());
+            let Some(recommended) = similar_edit_match_tier(
+                same_group,
+                matches!(group.basis, photo_core::GroupingBasis::SemanticSimilarity),
+                source_plan.contains_people, similarity,
+            ) else { continue };
+            let individual = state.recipe_reviews.get(asset_id)
+                .map_err(|error| error.to_string())?.is_some();
+            let approved = plan.confirmed_asset_ids.contains(&asset_id);
             candidates.push(SimilarEditCandidate {
                 group_id: group.id, asset_id, similarity,
-                recommended: recommended
-                    && !plan.confirmed_asset_ids.contains(&asset_id)
-                    && state.recipe_reviews.get(asset_id).map_err(|error| error.to_string())?.is_none(),
+                recommended: recommended && !approved && !individual,
                 in_source_group: same_group,
-                has_individual_edit: state.recipe_reviews.get(asset_id)
-                    .map_err(|error| error.to_string())?.is_some(),
-                already_confirmed: plan.confirmed_asset_ids.contains(&asset_id),
+                has_individual_edit: individual,
+                already_confirmed: approved,
             });
         }
     }
@@ -3283,4 +3296,30 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running Photo-Cake");
+}
+
+
+#[cfg(test)]
+mod similar_edit_match_tests {
+    use super::similar_edit_match_tier;
+
+    #[test]
+    fn cross_moment_requires_visual_evidence_and_separates_manual_from_recommended() {
+        assert_eq!(similar_edit_match_tier(false, false, false, None), None);
+        assert_eq!(similar_edit_match_tier(false, false, false, Some(0.70)), None);
+        assert_eq!(similar_edit_match_tier(false, false, false, Some(0.81)), Some(false));
+        assert_eq!(similar_edit_match_tier(false, false, false, Some(0.91)), Some(true));
+        assert_eq!(similar_edit_match_tier(false, false, true, Some(0.80)), None);
+        assert_eq!(similar_edit_match_tier(false, false, true, Some(0.89)), Some(false));
+        assert_eq!(similar_edit_match_tier(false, false, true, Some(0.93)), Some(true));
+        assert_eq!(similar_edit_match_tier(false, true, false, None), None);
+    }
+
+    #[test]
+    fn in_group_manual_selection_is_possible_without_embedding_data() {
+        assert_eq!(similar_edit_match_tier(true, false, false, None), Some(false));
+        assert_eq!(similar_edit_match_tier(true, true, false, None), Some(true));
+        assert_eq!(similar_edit_match_tier(true, false, false, Some(0.97)), Some(true));
+        assert_eq!(similar_edit_match_tier(false, false, false, Some(f32::NAN)), None);
+    }
 }

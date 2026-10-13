@@ -58,3 +58,21 @@ test("batch similar defaults never overwrite individual or approved photos", () 
   assert.equal(isSimilarTargetProtected(values[3], false), true);
   assert.equal(isSimilarTargetProtected(values[2], true), false);
 });
+
+import { filterSimilarCandidates } from "../src/similar-edit.ts";
+
+test("photo filters separate recommended, optional cross-Moment and last edited", () => {
+  const candidates = [
+    { asset_id: "same", in_source_group: true, recommended: true },
+    { asset_id: "other", in_source_group: false, recommended: true },
+    { asset_id: "optional", in_source_group: false, recommended: false },
+    { asset_id: "manual", in_source_group: true, recommended: false },
+  ];
+  assert.deepEqual(filterSimilarCandidates(candidates, "ALL"), candidates);
+  assert.deepEqual(filterSimilarCandidates(candidates, "RECOMMENDED").map((c) => c.asset_id),
+    ["same", "other"]);
+  assert.deepEqual(filterSimilarCandidates(candidates, "CROSS_MOMENT").map((c) => c.asset_id),
+    ["other", "optional"]);
+  assert.deepEqual(filterSimilarCandidates(candidates, "LAST_BATCH", ["optional", "manual"]).map((c) => c.asset_id),
+    ["optional", "manual"]);
+});

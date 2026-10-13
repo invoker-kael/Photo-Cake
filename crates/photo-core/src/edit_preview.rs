@@ -57,6 +57,12 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
         .unwrap_or(0.0)
         .clamp(-100.0, 100.0);
 
+    let has_color_mixer = recipe
+        .adjustments
+        .color_mixer_saturation
+        .as_ref()
+        .is_some_and(|mixer| !mixer.is_empty());
+
     if exposure.abs() < 0.0001
         && contrast.abs() < 0.0001
         && highlights.abs() < 0.0001
@@ -65,6 +71,7 @@ pub fn apply_preview_adjustments(image: DynamicImage, recipe: &Recipe) -> Dynami
         && blacks.abs() < 0.0001
         && saturation.abs() < 0.0001
         && vibrance.abs() < 0.0001
+        && !has_color_mixer
     {
         return image;
     }

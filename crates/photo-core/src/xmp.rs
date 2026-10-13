@@ -4,13 +4,18 @@
 //! supported non-destructive adjustments into small Adobe Camera Raw /
 //! Lightroom-compatible sidecars without touching source RAW bytes.
 
-use crate::{ColorMixerSaturation, RawAsset, Recipe};
+use crate::{ColorMixerSaturation, RawAsset, Recipe, CURRENT_RECIPE_PROCESS_VERSION};
 use quick_xml::{events::Event, Reader};
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
+
+// Sidecars written before Recipe process versioning are V1 by definition. Keep
+// this fixed when CURRENT_RECIPE_PROCESS_VERSION advances so old XMP never gets
+// silently reclassified as a newer interpretation.
+const LEGACY_RECIPE_PROCESS_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct XmpEditState {
@@ -115,6 +120,10 @@ impl XmpEditState {
             r#"crs:Version="17.0""#.to_string(),
             r#"crs:ProcessVersion="15.4""#.to_string(),
             format!(r#"pc:RecipeId="{}""#, self.recipe_id),
+            format!(
+                r#"pc:RecipeProcessVersion="{}""#,
+                CURRENT_RECIPE_PROCESS_VERSION
+            ),
         ];
         if let Some(target_asset_id) = &self.target_asset_id {
             attributes.push(format!(r#"pc:TargetAssetId="{target_asset_id}""#));
@@ -269,12 +278,55 @@ fn parse_xmp_number(name: &str, value: &str) -> Result<f32, XmpParseError> {
         .map_err(|error| XmpParseError::Invalid(format!("{name}={value}: {error}")))
 }
 
+fn recipe_process_version_from_xmp(document: &str) -> Result<u16, XmpParseError> {
+    let mut reader = Reader::from_str(document);
+    reader.config_mut().trim_text(true);
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(element)) | Ok(Event::Empty(element)) => {
+                if element.name().as_ref() != b"rdf:Description" {
+                    continue;
+                }
+                for attribute in element.attributes().with_checks(false) {
+                    let attribute = attribute
+                        .map_err(|error| XmpParseError::Invalid(error.to_string()))?;
+                    let key = std::str::from_utf8(attribute.key.as_ref())
+                        .map_err(|error| XmpParseError::Invalid(error.to_string()))?;
+                    if key.rsplit(':').next().unwrap_or(key) != "RecipeProcessVersion" {
+                        continue;
+                    }
+                    let value = attribute
+                        .decode_and_unescape_value(reader.decoder())
+                        .map_err(|error| XmpParseError::Invalid(error.to_string()))?
+                        .into_owned();
+                    return value.parse::<u16>().map_err(|error| {
+                        XmpParseError::Invalid(format!(
+                            "{key}={value}: invalid Recipe process version: {error}"
+                        ))
+                    });
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(XmpParseError::Invalid(error.to_string())),
+        }
+    }
+
+    Ok(LEGACY_RECIPE_PROCESS_VERSION)
+}
+
 pub fn validate_recipe_xmp(recipe: &Recipe, document: &str) -> Result<(), XmpParseError> {
     let expected = XmpEditState::from_recipe(recipe);
     let actual = XmpEditState::from_xmp_document(document)?;
 
     if expected.recipe_id != actual.recipe_id {
         return Err(XmpParseError::Invalid("recipe id mismatch".to_string()));
+    }
+    if recipe.process_version() != recipe_process_version_from_xmp(document)? {
+        return Err(XmpParseError::Invalid(
+            "recipe process version mismatch".to_string(),
+        ));
     }
     if expected.target_asset_id != actual.target_asset_id {
         return Err(XmpParseError::Invalid("target asset id mismatch".to_string()));
@@ -312,6 +364,9 @@ pub fn xmp_document_matches_recipe_state(recipe: &Recipe, document: &str) -> boo
     };
 
     if expected.target_asset_id != actual.target_asset_id {
+        return false;
+    }
+    if recipe_process_version_from_xmp(document).ok() != Some(recipe.process_version()) {
         return false;
     }
 
@@ -632,6 +687,7 @@ mod tests {
     fn serializes_only_present_adjustments() {
         let xmp = XmpEditState::from_recipe(&recipe(Some(Uuid::nil()))).to_xmp_document();
         assert!(xmp.contains(r#"pc:TargetAssetId="00000000-0000-0000-0000-000000000000""#));
+        assert!(xmp.contains(r#"pc:RecipeProcessVersion="1""#));
         assert!(xmp.contains(r#"crs:Exposure2012="0.35""#));
         assert!(xmp.contains(r#"crs:Highlights2012="-40""#));
         assert!(xmp.contains(r#"crs:Whites2012="-12""#));
@@ -692,6 +748,44 @@ mod tests {
         assert_eq!(parsed.temperature, Some(6100.0));
         assert_eq!(parsed.tint, Some(-3.0));
         assert_eq!(parsed.vibrance, Some(14.0));
+        assert_eq!(
+            recipe_process_version_from_xmp(&document).unwrap(),
+            CURRENT_RECIPE_PROCESS_VERSION
+        );
+    }
+
+    #[test]
+    fn legacy_sidecar_without_explicit_recipe_process_version_remains_v1() {
+        let source = recipe(Some(Uuid::new_v4()));
+        let document = XmpEditState::from_recipe(&source)
+            .to_xmp_document()
+            .replace(
+                &format!(
+                    "\n      pc:RecipeProcessVersion=\"{}\"",
+                    CURRENT_RECIPE_PROCESS_VERSION
+                ),
+                "",
+            );
+
+        assert_eq!(
+            recipe_process_version_from_xmp(&document).unwrap(),
+            LEGACY_RECIPE_PROCESS_VERSION
+        );
+        assert!(xmp_document_matches_recipe_state(&source, &document));
+    }
+
+    #[test]
+    fn different_recipe_process_version_is_not_current() {
+        let source = recipe(Some(Uuid::new_v4()));
+        let document = XmpEditState::from_recipe(&source)
+            .to_xmp_document()
+            .replace(
+                r#"pc:RecipeProcessVersion="1""#,
+                r#"pc:RecipeProcessVersion="2""#,
+            );
+
+        assert!(validate_recipe_xmp(&source, &document).is_err());
+        assert!(!xmp_document_matches_recipe_state(&source, &document));
     }
 
     #[test]
@@ -766,6 +860,10 @@ mod tests {
         assert_eq!(parsed.highlights, Some(-40.0));
         assert_eq!(parsed.shadows, Some(25.0));
         assert_eq!(parsed.saturation, Some(-7.0));
+        assert_eq!(
+            recipe_process_version_from_xmp(document).unwrap(),
+            LEGACY_RECIPE_PROCESS_VERSION
+        );
     }
 
     #[test]

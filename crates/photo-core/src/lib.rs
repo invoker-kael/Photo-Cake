@@ -125,7 +125,7 @@ pub use raw::{
     extract_sequence_number, is_supported_raw, scan_raw_directory, scan_raw_paths, RawAsset,
     RawImportScan,
 };
-pub use recipe::{EditAdjustments, Recipe};
+pub use recipe::{EditAdjustments, Recipe, CURRENT_RECIPE_PROCESS_VERSION};
 pub use recipe_review_store::{
     recipe_review_fingerprint, RecipeReviewConfirmation, RecipeReviewOverride,
     RecipeReviewStore, RecipeReviewStoreError, RecipeReviewSyncFields,

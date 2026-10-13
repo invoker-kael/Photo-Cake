@@ -96,6 +96,12 @@ The model should expand without changing the workflow to support HSL, curves, sk
 
 Every applied target photo has its own Recipe with reference lineage. Photographer exceptions are stored as small per-asset additive Recipe review overrides (currently exposure, contrast and saturation) rather than frozen full-Recipe copies, so changing the reference or group StyleProfile can regenerate the base Recipe without losing intentional single-photo corrections.
 
+### Recipe process compatibility
+
+Photo-Cake assigns a semantic Recipe process version to the interpretation of generated adjustments. V1 is the compatibility baseline for all existing Recipe review confirmations and Photo-Cake XMP written before the version became explicit. A process-version bump is required only when the same stored/generated adjustment values would be interpreted differently by Review or Lightroom handoff; merely adding a new optional control does not automatically require a bump.
+
+A newer process version must invalidate stale Recipe review confirmation and must make an older Photo-Cake sidecar non-current during preflight. This is a review/safety signal only: Photo-Cake still must not overwrite that older sidecar automatically. Adobe Camera Raw's own `crs:ProcessVersion` is separate from Photo-Cake's Recipe process version.
+
 ## Lightroom Workflow
 
 Primary handoff:

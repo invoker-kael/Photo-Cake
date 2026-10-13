@@ -210,6 +210,13 @@ Downstream white balance is pair-gated at multiple boundaries. If either Tempera
 Do not depend on a specific XML namespace prefix when reading supported XMP attributes; namespace processors may legally rename prefixes. Continue treating existing `.xmp` or `.XMP` as protected photographer/Lightroom state. Until a safe merge strategy exists, never overwrite an existing sidecar.
 
 
+## Recipe Process Version Rule
+
+Treat `CURRENT_RECIPE_PROCESS_VERSION` as the semantic version of Photo-Cake's generated Recipe interpretation, not as Adobe Camera Raw's `crs:ProcessVersion`. V1 is implicit for existing Recipe review confirmations and legacy Photo-Cake XMP without `pc:RecipeProcessVersion`. Do not invalidate V1 confirmations merely by making the version explicit.
+
+Bump the Photo-Cake process version only when identical adjustment values would be interpreted differently by canonical Review/preview or Lightroom handoff. A semantic bump must make prior Recipe confirmations stale and prior-version Photo-Cake sidecars non-current during preflight; it must never authorize overwriting those sidecars. Optional new controls that leave old Recipe semantics unchanged do not require a process bump.
+
+
 ## Android Companion Capability Rule
 
 Android reuses shared `photo-core` persistence and may read/write photographer selection/reference decisions. Treat platform bridge methods as capabilities: do not add fake no-op or always-error workstation methods merely to satisfy an interface. Keep RAW import/analyze control, StyleProfile/Recipe editing, direct export and Lightroom XMP writes workstation-only.

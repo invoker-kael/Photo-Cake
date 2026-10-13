@@ -2,6 +2,14 @@ use crate::color_sync::{ColorMixerSaturation, GroupColorSyncPlan, ResolvedColorE
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Semantic version of Photo-Cake Recipe interpretation.
+///
+/// Recipes are regenerated from Reference + evidence rather than stored as frozen
+/// develop settings. V1 therefore remains implicit for existing projects; bump this
+/// only when identical Recipe adjustments would be interpreted differently by the
+/// review or Lightroom handoff path.
+pub const CURRENT_RECIPE_PROCESS_VERSION: u16 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recipe {
     pub id: Uuid,
@@ -29,6 +37,10 @@ pub struct EditAdjustments {
 }
 
 impl Recipe {
+    pub const fn process_version(&self) -> u16 {
+        CURRENT_RECIPE_PROCESS_VERSION
+    }
+
     pub fn from_reference(name: impl Into<String>, references: Vec<Uuid>) -> Self {
         Self {
             id: Uuid::new_v4(),

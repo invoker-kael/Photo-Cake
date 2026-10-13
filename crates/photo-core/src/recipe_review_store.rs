@@ -1,4 +1,4 @@
-use crate::Recipe;
+use crate::{Recipe, CURRENT_RECIPE_PROCESS_VERSION};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -30,9 +30,15 @@ pub struct RecipeReviewConfirmation {
 #[derive(Serialize)]
 struct RecipeFingerprintPayload<'a> {
     schema: &'static str,
+    #[serde(skip_serializing_if = "is_legacy_recipe_process_version")]
+    recipe_process_version: u16,
     target_asset_id: Uuid,
     source_reference_ids: &'a [Uuid],
     adjustments: &'a crate::EditAdjustments,
+}
+
+fn is_legacy_recipe_process_version(version: &u16) -> bool {
+    *version == 1
 }
 
 pub fn recipe_review_fingerprint(
@@ -43,6 +49,7 @@ pub fn recipe_review_fingerprint(
         .ok_or(RecipeReviewStoreError::RecipeMissingTarget(recipe.id))?;
     let payload = RecipeFingerprintPayload {
         schema: "photo-cake-recipe-review-v1",
+        recipe_process_version: CURRENT_RECIPE_PROCESS_VERSION,
         target_asset_id,
         source_reference_ids: &recipe.source_reference_ids,
         adjustments: &recipe.adjustments,
@@ -757,6 +764,33 @@ mod tests {
             RecipeReviewStoreError::DuplicateOverride(id) if id == asset_id
         ));
         assert!(store.get(asset_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn v1_process_version_preserves_existing_confirmation_fingerprint() {
+        #[derive(Serialize)]
+        struct LegacyRecipeFingerprintPayload<'a> {
+            schema: &'static str,
+            target_asset_id: Uuid,
+            source_reference_ids: &'a [Uuid],
+            adjustments: &'a crate::EditAdjustments,
+        }
+
+        let current = recipe(Uuid::new_v4());
+        let target_asset_id = current.target_asset_id.unwrap();
+        let legacy = LegacyRecipeFingerprintPayload {
+            schema: "photo-cake-recipe-review-v1",
+            target_asset_id,
+            source_reference_ids: &current.source_reference_ids,
+            adjustments: &current.adjustments,
+        };
+        let legacy_fingerprint = stable_fingerprint(&serde_json::to_vec(&legacy).unwrap());
+
+        assert_eq!(CURRENT_RECIPE_PROCESS_VERSION, 1);
+        assert_eq!(
+            recipe_review_fingerprint(&current).unwrap(),
+            legacy_fingerprint
+        );
     }
 
     #[test]

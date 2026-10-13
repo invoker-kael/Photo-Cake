@@ -120,6 +120,8 @@ XMP stores Recipe/target identity for traceability. Group sidecar output matches
 
 Selective Color Mixer Saturation now extends the Recipe/XMP model. Future mappings such as Color Mixer Hue/Luminance, tone curve, masks and richer skin/color controls must extend the same model rather than creating a second editing model.
 
+Recipe interpretation also carries a Photo-Cake semantic process version. Because canonical Recipes are regenerated from Reference + evidence rather than persisted as frozen develop settings, V1 is implicit for legacy confirmations/sidecars and explicit on newly written XMP as `pc:RecipeProcessVersion`. Review fingerprints omit the V1 field to remain byte-compatible with existing confirmations; a future V2+ enters the fingerprint payload, forcing re-review. XMP preflight treats a missing field as V1 and a different explicit version as non-current, while still refusing automatic overwrite. This version is independent of Adobe's `crs:ProcessVersion`.
+
 ## Storage and Safety
 
 Default storage behavior:

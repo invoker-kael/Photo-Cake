@@ -33,6 +33,7 @@ Current code already contains substantial reusable groundwork:
 - reference candidate shortlist ordering that respects photographer Cull decisions first, then reuses measured technical quality and group rank, while showing people/face evidence as context only;
 - adaptive `color_sync`;
 - target-bound per-photo Recipe materialization plus persisted additive per-photo review overrides;
+- explicit Recipe semantic process versioning, with V1-compatible review fingerprints and XMP traceability so future algorithm changes fail back to review instead of silently inheriting stale approvals;
 - Lightroom XMP document and same-basename sidecar writing;
 - optional direct export path;
 - Windows workstation plus a real Android companion bridge for Library, Cull, effective Groups and Reference decisions.
@@ -133,6 +134,8 @@ Implemented since the previous milestone: the workstation Cull view supports per
 
 
 Current WB status: provenance capture and persistence are implemented; Lightroom Temperature/Tint synthesis is intentionally still gated. Partial WB never reaches Recipe/XMP.
+
+Recipe compatibility status: ProcessVersion V1 is now explicit at the Recipe/XMP boundary. Existing V1 review confirmations keep their previous fingerprint, and legacy Photo-Cake sidecars without the explicit field are treated as V1. A future semantic bump will invalidate review confirmation and mark older sidecars non-current without overwriting them.
 
 Recipe triage now defaults to an exception-first attention set built from existing photographer/AI Cull evidence plus persisted per-photo overrides; it does not introduce a second scoring model. The Lightroom page now previews the real deliverable XMP count after confirmed Rejects are removed and shows how many deliverable photos carry photo-specific exceptions.
 

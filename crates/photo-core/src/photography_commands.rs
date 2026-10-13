@@ -1,16 +1,18 @@
 //! Stable Photography Command IDs and validated high-level request/response contracts.
  //! Workflow execution must reuse ReferenceStore, canonical Recipe review and XMP writer.
-use crate::{GroupReferenceBinding, PhotoGroup};
+use crate::{GroupReferenceBinding, PhotoGroup, RecipeReviewOverride, RecipeReviewSyncFields, StyleProfile, StyleSyncPreflight};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-pub const PHOTOGRAPHY_COMMAND_IDS: [&str; 11] = [
+pub const PHOTOGRAPHY_COMMAND_IDS: [&str; 17] = [
     "reference.select", "recipe.preview", "recipe.confirm", "recipe.reopen",
     "lightroom.preflight", "lightroom.handoff", "reference.selectBatch",
     "recipe.confirmBatch", "recipe.confirmClearGroups",
     "lightroom.preflightBatch", "lightroom.handoffBatch",
+    "recipe.exceptionSet", "recipe.exceptionClear", "recipe.exceptionSync",
+    "reference.stylePreflight", "reference.styleUpdate", "reference.styleCopyBatch",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +21,8 @@ pub enum PhotographyCommandId {
     LightroomPreflight, LightroomHandoff, ReferenceSelectBatch,
     RecipeConfirmBatch, RecipeConfirmClearGroups,
     LightroomPreflightBatch, LightroomHandoffBatch,
+    RecipeExceptionSet, RecipeExceptionClear, RecipeExceptionSync,
+    ReferenceStylePreflight, ReferenceStyleUpdate, ReferenceStyleCopyBatch,
 }
 impl PhotographyCommandId {
     pub fn parse(id: &str) -> Result<Self, String> {
@@ -34,6 +38,12 @@ impl PhotographyCommandId {
             "recipe.confirmClearGroups" => Ok(Self::RecipeConfirmClearGroups),
             "lightroom.preflightBatch" => Ok(Self::LightroomPreflightBatch),
             "lightroom.handoffBatch" => Ok(Self::LightroomHandoffBatch),
+            "recipe.exceptionSet" => Ok(Self::RecipeExceptionSet),
+            "recipe.exceptionClear" => Ok(Self::RecipeExceptionClear),
+            "recipe.exceptionSync" => Ok(Self::RecipeExceptionSync),
+            "reference.stylePreflight" => Ok(Self::ReferenceStylePreflight),
+            "reference.styleUpdate" => Ok(Self::ReferenceStyleUpdate),
+            "reference.styleCopyBatch" => Ok(Self::ReferenceStyleCopyBatch),
             _ => Err(format!("unknown photography command: {id}")),
         }
     }
@@ -50,6 +60,12 @@ impl PhotographyCommandId {
             Self::RecipeConfirmClearGroups => "recipe.confirmClearGroups",
             Self::LightroomPreflightBatch => "lightroom.preflightBatch",
             Self::LightroomHandoffBatch => "lightroom.handoffBatch",
+            Self::RecipeExceptionSet => "recipe.exceptionSet",
+            Self::RecipeExceptionClear => "recipe.exceptionClear",
+            Self::RecipeExceptionSync => "recipe.exceptionSync",
+            Self::ReferenceStylePreflight => "reference.stylePreflight",
+            Self::ReferenceStyleUpdate => "reference.styleUpdate",
+            Self::ReferenceStyleCopyBatch => "reference.styleCopyBatch",
         }
     }
 }
@@ -102,7 +118,132 @@ pub struct LightroomHandoffBatchRequest {
     pub group_ids: Vec<Uuid>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeExceptionDeltas {
+    pub exposure_delta_ev: f32,
+    pub highlights_delta: f32,
+    pub shadows_delta: f32,
+    pub whites_delta: f32,
+    pub blacks_delta: f32,
+    pub contrast_delta: f32,
+    pub saturation_delta: f32,
+    pub vibrance_delta: f32,
+}
+impl RecipeExceptionDeltas {
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value, bound) in [
+            ("exposure_delta_ev", self.exposure_delta_ev, 3.0),
+            ("highlights_delta", self.highlights_delta, 100.0),
+            ("shadows_delta", self.shadows_delta, 100.0),
+            ("whites_delta", self.whites_delta, 100.0),
+            ("blacks_delta", self.blacks_delta, 100.0),
+            ("contrast_delta", self.contrast_delta, 100.0),
+            ("saturation_delta", self.saturation_delta, 100.0),
+            ("vibrance_delta", self.vibrance_delta, 100.0),
+        ] {
+            if !value.is_finite() || value.abs() > bound {
+                return Err(format!("invalid {name}: expected a finite value between -{bound} and {bound}"));
+            }
+        }
+        Ok(())
+    }
+    pub fn for_asset(self, asset_id: Uuid) -> RecipeReviewOverride {
+        RecipeReviewOverride {
+            asset_id,
+            exposure_delta_ev: self.exposure_delta_ev,
+            highlights_delta: self.highlights_delta,
+            shadows_delta: self.shadows_delta,
+            whites_delta: self.whites_delta,
+            blacks_delta: self.blacks_delta,
+            contrast_delta: self.contrast_delta,
+            saturation_delta: self.saturation_delta,
+            vibrance_delta: self.vibrance_delta,
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeExceptionSetRequest {
+    pub batch_id: Uuid,
+    pub group_id: Uuid,
+    pub asset_id: Uuid,
+    pub deltas: RecipeExceptionDeltas,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeExceptionSyncFields {
+    pub exposure: bool,
+    pub highlights: bool,
+    pub shadows: bool,
+    pub whites: bool,
+    pub blacks: bool,
+    pub contrast: bool,
+    pub saturation: bool,
+    pub vibrance: bool,
+}
+impl RecipeExceptionSyncFields {
+    pub fn any(&self) -> bool {
+        self.exposure || self.highlights || self.shadows || self.whites
+            || self.blacks || self.contrast || self.saturation || self.vibrance
+    }
+}
+impl From<RecipeExceptionSyncFields> for RecipeReviewSyncFields {
+    fn from(fields: RecipeExceptionSyncFields) -> Self {
+        Self {
+            exposure: fields.exposure,
+            highlights: fields.highlights,
+            shadows: fields.shadows,
+            whites: fields.whites,
+            blacks: fields.blacks,
+            contrast: fields.contrast,
+            saturation: fields.saturation,
+            vibrance: fields.vibrance,
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeExceptionSyncRequest {
+    pub batch_id: Uuid,
+    pub group_id: Uuid,
+    pub source_asset_id: Uuid,
+    pub target_asset_ids: Vec<Uuid>,
+    pub fields: RecipeExceptionSyncFields,
+}
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReferenceStyleUpdateRequest {
+    pub batch_id: Uuid,
+    pub group_id: Uuid,
+    pub exposure_bias_ev: f32,
+    pub contrast_preference: f32,
+    pub saturation_preference: f32,
+}
+impl ReferenceStyleUpdateRequest {
+    pub fn validate_values(&self) -> Result<(), String> {
+        for (name, value, bound) in [
+            ("exposure_bias_ev", self.exposure_bias_ev, 3.0),
+            ("contrast_preference", self.contrast_preference, 100.0),
+            ("saturation_preference", self.saturation_preference, 100.0),
+        ] {
+            if !value.is_finite() || value.abs() > bound {
+                return Err(format!("invalid {name}: expected a finite value between -{bound} and {bound}"));
+            }
+        }
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReferenceStyleCopyBatchRequest {
+    pub batch_id: Uuid,
+    pub source_group_id: Uuid,
+    pub target_group_ids: Vec<Uuid>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum PhotographyCommandRequest {
     ReferenceSelect(GroupAssetCommandRequest),
     RecipePreview(GroupAssetCommandRequest),
@@ -115,6 +256,12 @@ pub enum PhotographyCommandRequest {
     RecipeConfirmClearGroups(RecipeConfirmClearGroupsRequest),
     LightroomPreflightBatch(LightroomPreflightBatchRequest),
     LightroomHandoffBatch(LightroomHandoffBatchRequest),
+    RecipeExceptionSet(RecipeExceptionSetRequest),
+    RecipeExceptionClear(GroupAssetCommandRequest),
+    RecipeExceptionSync(RecipeExceptionSyncRequest),
+    ReferenceStylePreflight(GroupCommandRequest),
+    ReferenceStyleUpdate(ReferenceStyleUpdateRequest),
+    ReferenceStyleCopyBatch(ReferenceStyleCopyBatchRequest),
 }
 impl PhotographyCommandRequest {
     pub fn parse(id: &str, payload: Value) -> Result<Self, String> {
@@ -143,6 +290,18 @@ impl PhotographyCommandRequest {
                 Self::LightroomPreflightBatch(serde_json::from_value(payload).map_err(invalid)?),
             PhotographyCommandId::LightroomHandoffBatch =>
                 Self::LightroomHandoffBatch(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::RecipeExceptionSet =>
+                Self::RecipeExceptionSet(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::RecipeExceptionClear =>
+                Self::RecipeExceptionClear(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::RecipeExceptionSync =>
+                Self::RecipeExceptionSync(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::ReferenceStylePreflight =>
+                Self::ReferenceStylePreflight(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::ReferenceStyleUpdate =>
+                Self::ReferenceStyleUpdate(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::ReferenceStyleCopyBatch =>
+                Self::ReferenceStyleCopyBatch(serde_json::from_value(payload).map_err(invalid)?),
         })
     }
     pub const fn batch_id(&self) -> Uuid {
@@ -155,6 +314,12 @@ impl PhotographyCommandRequest {
             Self::RecipeConfirmClearGroups(r) => r.batch_id,
             Self::LightroomPreflightBatch(r) => r.batch_id,
             Self::LightroomHandoffBatch(r) => r.batch_id,
+            Self::RecipeExceptionSet(r) => r.batch_id,
+            Self::RecipeExceptionClear(r) => r.batch_id,
+            Self::RecipeExceptionSync(r) => r.batch_id,
+            Self::ReferenceStylePreflight(r) => r.batch_id,
+            Self::ReferenceStyleUpdate(r) => r.batch_id,
+            Self::ReferenceStyleCopyBatch(r) => r.batch_id,
         }
     }
     /// effective_groups are loaded by the adapter exclusively for self.batch_id().
@@ -178,6 +343,43 @@ impl PhotographyCommandRequest {
                 validate_groups(batch_id, &r.group_ids, effective_groups),
             Self::LightroomHandoffBatch(r) =>
                 validate_groups(batch_id, &r.group_ids, effective_groups),
+            Self::RecipeExceptionSet(r) => {
+                validate_asset(batch_id, r.group_id, r.asset_id, effective_groups)?;
+                r.deltas.validate()
+            }
+            Self::RecipeExceptionClear(r) =>
+                validate_asset(batch_id, r.group_id, r.asset_id, effective_groups),
+            Self::RecipeExceptionSync(r) => {
+                validate_asset(batch_id, r.group_id, r.source_asset_id, effective_groups)?;
+                if !r.fields.any() {
+                    return Err("select at least one Recipe exception field to sync".to_string());
+                }
+                if r.target_asset_ids.is_empty() {
+                    return Err("no target photos selected for Recipe exception sync".to_string());
+                }
+                let mut seen = HashSet::new();
+                for target_id in &r.target_asset_ids {
+                    if *target_id == r.source_asset_id || !seen.insert(*target_id) {
+                        return Err(format!("duplicate or source Recipe exception target: {target_id}"));
+                    }
+                    validate_asset(batch_id, r.group_id, *target_id, effective_groups)?;
+                }
+                Ok(())
+            }
+            Self::ReferenceStylePreflight(r) =>
+                validate_group(batch_id, r.group_id, effective_groups),
+            Self::ReferenceStyleUpdate(r) => {
+                validate_group(batch_id, r.group_id, effective_groups)?;
+                r.validate_values()
+            }
+            Self::ReferenceStyleCopyBatch(r) => {
+                let mut ids = vec![r.source_group_id];
+                ids.extend_from_slice(&r.target_group_ids);
+                if r.target_group_ids.is_empty() {
+                    return Err("no target groups selected for look reuse".to_string());
+                }
+                validate_groups(batch_id, &ids, effective_groups)
+            },
         }
     }
 }
@@ -255,6 +457,12 @@ pub enum PhotographyCommandResult {
     RecipeConfirmClearGroups(RecipeConfirmClearGroupsResult),
     LightroomPreflightBatch(LightroomPreflightBatchResult),
     LightroomHandoffBatch(LightroomHandoffBatchResult),
+    RecipeExceptionSet(RecipeReviewOverride),
+    RecipeExceptionClear(RecipeExceptionClearResult),
+    RecipeExceptionSync(RecipeExceptionSyncResult),
+    ReferenceStylePreflight(StyleSyncPreflight),
+    ReferenceStyleUpdate(ReferenceStyleResult),
+    ReferenceStyleCopyBatch(ReferenceStyleBatchResult),
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct RecipePreviewResult {
@@ -325,6 +533,28 @@ pub struct LightroomHandoffBatchResult {
     pub groups: Vec<LightroomHandoffResult>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RecipeExceptionClearResult {
+    pub asset_id: Uuid,
+    pub cleared: bool,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct RecipeExceptionSyncResult {
+    pub group_id: Uuid,
+    pub source_asset_id: Uuid,
+    pub overrides: Vec<RecipeReviewOverride>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct ReferenceStyleResult {
+    pub group_id: Uuid,
+    pub reference_set_id: Uuid,
+    pub style_profile: StyleProfile,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct ReferenceStyleBatchResult {
+    pub styles: Vec<ReferenceStyleResult>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,7 +574,7 @@ mod tests {
 
     #[test]
     fn registered_commands_are_stable_and_unknown_is_rejected() {
-        assert_eq!(PHOTOGRAPHY_COMMAND_IDS.len(), 11);
+        assert_eq!(PHOTOGRAPHY_COMMAND_IDS.len(), 17);
         for id in PHOTOGRAPHY_COMMAND_IDS {
             assert_eq!(PhotographyCommandId::parse(id).unwrap().as_str(), id);
         }
@@ -441,6 +671,132 @@ mod tests {
             })).unwrap();
             assert!(empty.validate_target(&groups).is_err());
         }
+    }
+
+    fn neutral_deltas() -> serde_json::Value {
+        serde_json::json!({
+            "exposure_delta_ev":0.0,"highlights_delta":0.0,"shadows_delta":0.0,
+            "whites_delta":0.0,"blacks_delta":0.0,"contrast_delta":0.0,
+            "saturation_delta":0.0,"vibrance_delta":0.0
+        })
+    }
+    fn sync_fields() -> serde_json::Value {
+        serde_json::json!({
+            "exposure":true,"highlights":false,"shadows":false,"whites":false,
+            "blacks":false,"contrast":false,"saturation":false,"vibrance":false
+        })
+    }
+
+    #[test]
+    fn exception_and_style_commands_validate_scope_values_and_payload() {
+        let (batch, group, asset, groups) = fixture();
+        let valid = PhotographyCommandRequest::parse("recipe.exceptionSet", serde_json::json!({
+            "batch_id":batch,"group_id":group,"asset_id":asset,"deltas":neutral_deltas()
+        })).unwrap();
+        assert!(valid.validate_target(&groups).is_ok());
+        let mut bad = neutral_deltas();
+        bad["exposure_delta_ev"] = serde_json::json!(4.0);
+        let invalid = PhotographyCommandRequest::parse("recipe.exceptionSet", serde_json::json!({
+            "batch_id":batch,"group_id":group,"asset_id":asset,"deltas":bad
+        })).unwrap();
+        assert!(invalid.validate_target(&groups).is_err());
+        assert!(PhotographyCommandRequest::parse("recipe.exceptionSet", serde_json::json!({
+            "batch_id":batch,"group_id":group,"asset_id":asset,
+            "deltas":neutral_deltas(),"recipe":{"exposure":999}
+        })).is_err());
+        assert!(PhotographyCommandRequest::parse("recipe.exceptionSet", serde_json::json!({
+            "batch_id":batch,"group_id":group,"asset_id":asset,
+            "deltas":{"fingerprint":"not-trusted"}
+        })).is_err());
+        let clear = PhotographyCommandRequest::parse("recipe.exceptionClear", serde_json::json!({
+            "batch_id":batch,"group_id":group,"asset_id":asset
+        })).unwrap();
+        assert!(clear.validate_target(&groups).is_ok());
+        assert!(clear.validate_target(&[]).is_err());
+        let targets = [asset];
+        for target_ids in [
+            vec![], vec![targets[0]], vec![Uuid::new_v4()],
+        ] {
+            let command = PhotographyCommandRequest::parse("recipe.exceptionSync", serde_json::json!({
+                "batch_id":batch,"group_id":group,"source_asset_id":asset,
+                "target_asset_ids":target_ids,"fields":sync_fields()
+            })).unwrap();
+            assert!(command.validate_target(&groups).is_err());
+        }
+        let other = Uuid::new_v4();
+        let mut expanded = groups.clone();
+        expanded[0].asset_ids.push(other);
+        let valid = PhotographyCommandRequest::parse("recipe.exceptionSync", serde_json::json!({
+            "batch_id":batch,"group_id":group,"source_asset_id":asset,
+            "target_asset_ids":[other],"fields":sync_fields()
+        })).unwrap();
+        assert!(valid.validate_target(&expanded).is_ok());
+        let duplicate = PhotographyCommandRequest::parse("recipe.exceptionSync", serde_json::json!({
+            "batch_id":batch,"group_id":group,"source_asset_id":asset,
+            "target_asset_ids":[other,other],"fields":sync_fields()
+        })).unwrap();
+        assert!(duplicate.validate_target(&expanded).is_err());
+        let invalid_fields = PhotographyCommandRequest::parse("recipe.exceptionSync", serde_json::json!({
+            "batch_id":batch,"group_id":group,"source_asset_id":asset,
+            "target_asset_ids":[other],"fields":{"exposure":true,"sql":"DROP"}
+        }));
+        assert!(invalid_fields.is_err());
+        let style = PhotographyCommandRequest::parse("reference.styleUpdate", serde_json::json!({
+            "batch_id":batch,"group_id":group,
+            "exposure_bias_ev":0.0,"contrast_preference":40.0,"saturation_preference":0.0
+        })).unwrap();
+        assert!(style.validate_target(&groups).is_ok());
+        let invalid = PhotographyCommandRequest::parse("reference.styleUpdate", serde_json::json!({
+            "batch_id":batch,"group_id":group,
+            "exposure_bias_ev":0.0,"contrast_preference":140.0,"saturation_preference":0.0
+        })).unwrap();
+        assert!(invalid.validate_target(&groups).is_err());
+        let preflight = PhotographyCommandRequest::parse("reference.stylePreflight", serde_json::json!({
+            "batch_id":batch,"group_id":group
+        })).unwrap();
+        assert!(preflight.validate_target(&groups).is_ok());
+        let copy = PhotographyCommandRequest::parse("reference.styleCopyBatch", serde_json::json!({
+            "batch_id":batch,"source_group_id":group,"target_group_ids":[group]
+        })).unwrap();
+        assert!(copy.validate_target(&groups).is_err());
+    }
+
+    #[test]
+    fn style_copy_batch_all_or_nothing_scope_validation() {
+        let (batch, source, _, mut groups) = fixture();
+        let target = Uuid::new_v4();
+        let other_asset = Uuid::new_v4();
+        groups.push(PhotoGroup {
+            id: target, kind: PhotoGroupKind::Moment,
+            basis: GroupingBasis::Singleton, asset_ids: vec![other_asset],
+            manual_locked: false,
+        });
+        let good = PhotographyCommandRequest::parse("reference.styleCopyBatch", serde_json::json!({
+            "batch_id":batch,"source_group_id":source,"target_group_ids":[target]
+        })).unwrap();
+        assert!(good.validate_target(&groups).is_ok());
+        let invalids = vec![
+            vec![],
+            vec![target, target],
+            vec![source],
+            vec![target, Uuid::new_v4()],
+        ];
+        for targets in invalids {
+            let cmd = PhotographyCommandRequest::parse("reference.styleCopyBatch", serde_json::json!({
+                "batch_id":batch,"source_group_id":source,"target_group_ids":targets
+            })).unwrap();
+            assert!(cmd.validate_target(&groups).is_err());
+        }
+        assert!(PhotographyCommandRequest::parse("reference.styleCopyBatch", serde_json::json!({
+            "batch_id":batch,"source_group_id":source,"target_group_ids":[target],
+            "style_profile":{"contrast_preference":300}
+        })).is_err());
+        let wrong_batch = PhotographyCommandRequest::parse("reference.styleCopyBatch", serde_json::json!({
+            "batch_id":Uuid::new_v4(),"source_group_id":source,"target_group_ids":[target]
+        })).unwrap();
+        // Effective groups are supplied by the adapter for the requested batch:
+        // the foreign batch must not expose either source or target group.
+        assert!(wrong_batch.validate_target(&[]).is_err());
     }
 
 }

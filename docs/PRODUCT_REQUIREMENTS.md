@@ -647,3 +647,31 @@ and unrelated Cull/Style/group workflows remain outside this slice. Command IDs
 are independent of UI labels; request contracts reject arbitrary Recipe JSON,
 fingerprints and XMP XML. A Command is a validated business entrypoint, not a
 second persistence layer or workflow engine.
+
+## Photography Commands — third slice: photographer exceptions and StyleProfile
+
+Six additional stable high-level Commands use the existing Command Registry:
+`recipe.exceptionSet`, `recipe.exceptionClear`, `recipe.exceptionSync`,
+`reference.stylePreflight`, `reference.styleUpdate` and
+`reference.styleCopyBatch`. Windows exception sliders/reset, selected-field
+exception sync, look readiness and single/batch StyleProfile operations route
+through these validated entries. First-slice single-group and second-slice
+batch Commands remain unchanged.
+
+All mutable requests include batch/group/asset scope where appropriate;
+cross-batch edits, duplicate targets, source-as-target and arbitrary Recipe
+JSON/fingerprint/XMP XML are rejected. Numeric changes are finite and within
+the existing photo-core limits. Explicit selected exception fields and
+photographer-specified numeric deltas are allowed; autonomous Recipe JSON is
+not. A per-photo exception set requires a current editable canonical Recipe;
+clearing an old exception remains possible after Reference changes when the
+asset still belongs to its group. Sync keeps existing per-target unselected
+fields through the original transactional `RecipeReviewStore::set_many`.
+Reference Style updates preserve the set's other look metadata, while
+multi-group look sync uses the existing atomic
+`ReferenceStore::copy_group_style_profile_many`, preserving every target's
+selected Reference and independent adaptive baseline.
+
+This is an additional high-level business entrypoint, not a Recipe generator,
+Style engine, writer, or workflow scheduler. CLI/MCP and unrelated photography
+operations are not included.

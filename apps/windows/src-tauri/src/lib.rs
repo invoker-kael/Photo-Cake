@@ -27,6 +27,8 @@ use photo_core::{
     RecipeConfirmClearGroupsResult as CommandClearGroupsResult,
     LightroomPreflightBatchGroupResult, LightroomPreflightBatchResult,
     LightroomHandoffBatchResult as CommandBatchHandoffResult,
+    RecipeExceptionClearResult, RecipeExceptionSyncResult as CommandExceptionSyncResult,
+    ReferenceStyleResult as CommandStyleResult, ReferenceStyleBatchResult as CommandStyleBatchResult,
     CURRENT_RECIPE_PROCESS_VERSION,
 };
 use photo_inference::LocalAnalyzeExecutor;
@@ -867,6 +869,77 @@ fn photography_command(
                         target_count, written_count,
                         already_current_count: target_count.saturating_sub(written_count),
                     }
+                }).collect(),
+            })
+        }
+        PhotographyCommandRequest::RecipeExceptionSet(request) => {
+            // Confirm there is a current, editable canonical Recipe before any
+            // exception is persisted. Reject and HDR source protection is
+            // authoritative in resolve_reviewed_group_recipes.
+            let (editable, recipes) = resolve_reviewed_group_recipes(request.group_id, &state)?;
+            if !editable.asset_ids.contains(&request.asset_id)
+                || !recipes.iter().any(|r| r.target_asset_id == Some(request.asset_id))
+            {
+                return Err(format!(
+                    "photo {} is not an editable Recipe target in group {}",
+                    request.asset_id, request.group_id,
+                ));
+            }
+            let values = request.deltas;
+            let override_value = set_recipe_review(
+                request.asset_id.to_string(),
+                values.exposure_delta_ev, values.highlights_delta, values.shadows_delta,
+                values.whites_delta, values.blacks_delta, values.contrast_delta,
+                values.saturation_delta, values.vibrance_delta, state,
+            )?;
+            PhotographyCommandResult::RecipeExceptionSet(override_value)
+        }
+        PhotographyCommandRequest::RecipeExceptionClear(request) => {
+            // Clearing a stale per-photo exception is permitted even when its
+            // old Reference was removed; membership was validated above.
+            clear_recipe_review(request.asset_id.to_string(), state)?;
+            PhotographyCommandResult::RecipeExceptionClear(RecipeExceptionClearResult {
+                asset_id: request.asset_id, cleared: true,
+            })
+        }
+        PhotographyCommandRequest::RecipeExceptionSync(request) => {
+            let result = sync_recipe_review_exception(
+                request.group_id.to_string(),
+                request.source_asset_id.to_string(),
+                request.target_asset_ids.into_iter().map(|id| id.to_string()).collect(),
+                request.fields.into(), state,
+            )?;
+            PhotographyCommandResult::RecipeExceptionSync(CommandExceptionSyncResult {
+                group_id: result.group_id, source_asset_id: result.source_asset_id,
+                overrides: result.overrides,
+            })
+        }
+        PhotographyCommandRequest::ReferenceStylePreflight(request) => {
+            let result = preflight_reference_style_sync(
+                request.batch_id.to_string(), request.group_id.to_string(), state,
+            )?;
+            PhotographyCommandResult::ReferenceStylePreflight(result)
+        }
+        PhotographyCommandRequest::ReferenceStyleUpdate(request) => {
+            let result = update_group_reference_style(
+                request.group_id.to_string(), request.exposure_bias_ev,
+                request.contrast_preference, request.saturation_preference, state,
+            )?;
+            PhotographyCommandResult::ReferenceStyleUpdate(CommandStyleResult {
+                group_id: result.group_id, reference_set_id: result.reference_set_id,
+                style_profile: result.style_profile,
+            })
+        }
+        PhotographyCommandRequest::ReferenceStyleCopyBatch(request) => {
+            let result = copy_reference_style_to_groups(
+                request.source_group_id.to_string(),
+                request.target_group_ids.into_iter().map(|id| id.to_string()).collect(),
+                state,
+            )?;
+            PhotographyCommandResult::ReferenceStyleCopyBatch(CommandStyleBatchResult {
+                styles: result.styles.into_iter().map(|style| CommandStyleResult {
+                    group_id: style.group_id, reference_set_id: style.reference_set_id,
+                    style_profile: style.style_profile,
                 }).collect(),
             })
         }
@@ -1770,7 +1843,6 @@ fn batch_recipe_reviews(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
 fn set_recipe_review(
     asset_id: String,
     exposure_delta_ev: f32,
@@ -1801,7 +1873,6 @@ fn set_recipe_review(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
 fn sync_recipe_review_exception(
     group_id: String,
     source_asset_id: String,
@@ -1877,7 +1948,6 @@ fn sync_recipe_review_exception(
     })
 }
 
-#[tauri::command]
 fn clear_recipe_review(
     asset_id: String,
     state: State<'_, AppState>,
@@ -1908,7 +1978,6 @@ fn style_sync_context_for_group(
     ))
 }
 
-#[tauri::command]
 fn preflight_reference_style_sync(
     batch_id: String,
     source_group_id: String,
@@ -1993,7 +2062,6 @@ fn batch_reference_styles(
     Ok(styles)
 }
 
-#[tauri::command]
 fn update_group_reference_style(
     group_id: String,
     exposure_bias_ev: f32,
@@ -2059,7 +2127,6 @@ fn copy_group_reference_style(
     })
 }
 
-#[tauri::command]
 fn copy_reference_style_to_groups(
     source_group_id: String,
     target_group_ids: Vec<String>,
@@ -2915,14 +2982,8 @@ pub fn run() {
             batch_reference_readiness,
             clear_group_reference,
             batch_recipe_reviews,
-            set_recipe_review,
-            sync_recipe_review_exception,
-            clear_recipe_review,
             batch_reference_styles,
-            preflight_reference_style_sync,
-            update_group_reference_style,
             copy_group_reference_style,
-            copy_reference_style_to_groups,
             batch_recipe_review_preflight,
             batch_reference_previews,
             set_group_hdr_merged,

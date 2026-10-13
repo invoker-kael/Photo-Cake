@@ -570,6 +570,8 @@ export interface PhotoCakeBridge {
   loadRecipeReviews?(batchId: string): Promise<BackendRecipeReviewOverride[]>;
   loadRecipeReviewPreflight?(batchId: string): Promise<BackendRecipeReviewGroupPreflight[]>;
   setRecipeReview?(
+    batchId: string,
+    groupId: string,
     assetId: string,
     exposureDeltaEv: number,
     highlightsDelta: number,
@@ -581,12 +583,13 @@ export interface PhotoCakeBridge {
     vibranceDelta: number,
   ): Promise<BackendRecipeReviewOverride>;
   syncRecipeReviewException?(
+    batchId: string,
     groupId: string,
     sourceAssetId: string,
     targetAssetIds: string[],
     fields: BackendRecipeReviewSyncFields,
   ): Promise<BackendRecipeReviewSyncResult>;
-  clearRecipeReview?(assetId: string): Promise<void>;
+  clearRecipeReview?(batchId: string, groupId: string, assetId: string): Promise<void>;
   setRecipeReviewed?(batchId: string, groupId: string, assetId: string): Promise<void>;
   confirmRecipeReviews?(batchId: string, items: BackendRecipeReviewBatchItem[]): Promise<BackendRecipeReviewBatchResult>;
   confirmRecipeReviewGroups?(batchId: string, groupIds: string[]): Promise<BackendRecipeReviewGroupBatchResult>;
@@ -598,6 +601,7 @@ export interface PhotoCakeBridge {
     sourceGroupId: string,
   ): Promise<BackendStyleSyncPreflight>;
   updateReferenceStyle?(
+    batchId: string,
     groupId: string,
     exposureBiasEv: number,
     contrastPreference: number,
@@ -608,6 +612,7 @@ export interface PhotoCakeBridge {
     targetGroupId: string,
   ): Promise<BackendGroupReferenceStyle>;
   copyReferenceStyleToGroups?(
+    batchId: string,
     sourceGroupId: string,
     targetGroupIds: string[],
   ): Promise<BackendGroupReferenceStyleBatchResult>;

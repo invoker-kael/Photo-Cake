@@ -1648,10 +1648,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     contrastPreference: number,
     saturationPreference: number,
   ) => {
-    if (!bridge?.updateReferenceStyle) return;
+    if (!bridge?.updateReferenceStyle || !activeBatchId) return;
     setStyleUpdating(groupId);
     try {
       const style = await bridge.updateReferenceStyle(
+        activeBatchId,
         groupId,
         exposureBiasEv,
         contrastPreference,
@@ -1692,7 +1693,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     sourceGroupId: string,
     targetGroupIds: string[],
   ) => {
-    if (!bridge?.copyReferenceStyleToGroups || !sourceGroupId || targetGroupIds.length === 0) {
+    if (!bridge?.copyReferenceStyleToGroups || !activeBatchId || !sourceGroupId || targetGroupIds.length === 0) {
       return;
     }
 
@@ -1700,6 +1701,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setStyleBatchNote(null);
     try {
       const result = await bridge.copyReferenceStyleToGroups(
+        activeBatchId,
         sourceGroupId,
         targetGroupIds,
       );
@@ -1731,10 +1733,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     saturationDelta: number,
     vibranceDelta: number,
   ) => {
-    if (!bridge?.setRecipeReview) return;
+    if (!bridge?.setRecipeReview || !activeBatchId) return;
+    const groupId = recipeReviewItems.find((item) => item.asset_id === assetId)?.group_id;
+    if (!groupId) {
+      setBackendError("Photo is not in the current editable Recipe review.");
+      return;
+    }
     setReviewUpdating(assetId);
     try {
       const review = await bridge.setRecipeReview(
+        activeBatchId,
+        groupId,
         assetId,
         exposureDeltaEv,
         highlightsDelta,
@@ -1808,6 +1817,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const syncRecipeReviewException = async () => {
     if (
       !bridge?.syncRecipeReviewException ||
+      !activeBatchId ||
       !reviewSyncSource ||
       reviewSyncTargets.length === 0 ||
       !Object.values(reviewSyncFields).some(Boolean)
@@ -1819,6 +1829,7 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setReviewSyncNote(null);
     try {
       const result: BackendRecipeReviewSyncResult = await bridge.syncRecipeReviewException(
+        activeBatchId,
         reviewSyncSource.groupId,
         reviewSyncSource.assetId,
         reviewSyncTargets,
@@ -1832,9 +1843,11 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
             Math.abs(review.exposure_delta_ev) <= 0.0001 &&
             Math.abs(review.highlights_delta) <= 0.0001 &&
             Math.abs(review.shadows_delta) <= 0.0001 &&
+            Math.abs(review.whites_delta) <= 0.0001 &&
+            Math.abs(review.blacks_delta) <= 0.0001 &&
             Math.abs(review.contrast_delta) <= 0.0001 &&
             Math.abs(review.saturation_delta) <= 0.0001 &&
-        Math.abs(review.vibrance_delta) <= 0.0001;
+            Math.abs(review.vibrance_delta) <= 0.0001;
           if (neutral) delete next[review.asset_id];
           else next[review.asset_id] = review;
         }
@@ -1874,13 +1887,18 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const resetRecipeReview = async (assetId: string) => {
-    if (!bridge?.clearRecipeReview) {
+    if (!bridge?.clearRecipeReview || !activeBatchId) {
       void saveRecipeReview(assetId, 0, 0, 0, 0, 0, 0, 0, 0);
+      return;
+    }
+    const groupId = recipeReviewItems.find((item) => item.asset_id === assetId)?.group_id;
+    if (!groupId) {
+      setBackendError("Photo is not in the current Recipe group.");
       return;
     }
     setReviewUpdating(assetId);
     try {
-      await bridge.clearRecipeReview(assetId);
+      await bridge.clearRecipeReview(activeBatchId, groupId, assetId);
       setRecipeReviews((current) => {
         const next = { ...current };
         delete next[assetId];

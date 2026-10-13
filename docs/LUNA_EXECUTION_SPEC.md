@@ -296,3 +296,30 @@ new sidecars by identity, values and ProcessVersion; do not modify RAWs, overwri
 a photographer XMP, claim an unverified target, or leave partial created
 sidecars after failure. Future Agent/CLI/MCP adapters are not built in this
 slice; other photographic operations stay on their established paths.
+
+## Photography Command execution rule (third slice: human edits)
+
+Keep all eleven first/second-slice Commands. Route the six photographer
+exception/look operations through the existing `photography_command`
+registry and dispatcher: `recipe.exceptionSet`,
+`recipe.exceptionClear`, `recipe.exceptionSync`,
+`reference.stylePreflight`, `reference.styleUpdate`, and
+`reference.styleCopyBatch`. Windows buttons must not bypass Commands
+while future Agent/CLI adapters call another persistence implementation.
+
+Validate batch/group/asset membership, duplicates, source-as-target, required
+selected fields, finite bounded values and strict typed payload keys before
+any writes. Saving a per-photo exception requires a current editable Recipe;
+a stale stored exception may be cleared when its photo is still in the
+requested group. Use only existing RecipeReviewStore methods, preserving
+atomic multi-target syncing and non-selected fields. Photographer Reject
+and HDR source exclusions remain authoritative; AI RejectSuggestion does
+not become a photographer Reject.
+
+Look preflight only recommends targets; the photographer may explicitly
+choose cross-scene groups. Style updates must preserve other StyleProfile
+fields; batch look copying retains each target's own Reference and reuses
+the single transactional ReferenceStore implementation. Never write XMP
+from these Commands, bypass canonical Recipe/fingerprint/ProcessVersion
+validation, or implement full CLI/MCP, autonomous Recipe changes or a
+new Style engine in this slice.

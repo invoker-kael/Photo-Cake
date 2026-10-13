@@ -126,41 +126,39 @@ const bridge: PhotoCakeBridge = {
   loadRecipeReviewPreflight: (batchId) =>
     invoke<BackendRecipeReviewGroupPreflight[]>("batch_recipe_review_preflight", { batchId }),
   setRecipeReview: (
-    assetId,
-    exposureDeltaEv,
-    highlightsDelta,
-    shadowsDelta,
-    whitesDelta,
-    blacksDelta,
-    contrastDelta,
-    saturationDelta,
-    vibranceDelta,
+    batchId, groupId, assetId, exposureDeltaEv, highlightsDelta,
+    shadowsDelta, whitesDelta, blacksDelta, contrastDelta,
+    saturationDelta, vibranceDelta,
   ) =>
-    invoke<BackendRecipeReviewOverride>("set_recipe_review", {
-      assetId,
-      exposureDeltaEv,
-      highlightsDelta,
-      shadowsDelta,
-      whitesDelta,
-      blacksDelta,
-      contrastDelta,
-      saturationDelta,
-      vibranceDelta,
+    invoke<BackendRecipeReviewOverride>("photography_command", {
+      commandId: "recipe.exceptionSet",
+      request: {
+        batch_id: batchId, group_id: groupId, asset_id: assetId,
+        deltas: {
+          exposure_delta_ev: exposureDeltaEv, highlights_delta: highlightsDelta,
+          shadows_delta: shadowsDelta, whites_delta: whitesDelta,
+          blacks_delta: blacksDelta, contrast_delta: contrastDelta,
+          saturation_delta: saturationDelta, vibrance_delta: vibranceDelta,
+        },
+      },
     }),
   syncRecipeReviewException: (
-    groupId,
-    sourceAssetId,
-    targetAssetIds,
+    batchId, groupId, sourceAssetId, targetAssetIds,
     fields: BackendRecipeReviewSyncFields,
   ) =>
-    invoke<BackendRecipeReviewSyncResult>("sync_recipe_review_exception", {
-      groupId,
-      sourceAssetId,
-      targetAssetIds,
-      fields,
+    invoke<BackendRecipeReviewSyncResult>("photography_command", {
+      commandId: "recipe.exceptionSync",
+      request: {
+        batch_id: batchId, group_id: groupId,
+        source_asset_id: sourceAssetId,
+        target_asset_ids: targetAssetIds, fields,
+      },
     }),
-  clearRecipeReview: (assetId) =>
-    invoke<void>("clear_recipe_review", { assetId }),
+  clearRecipeReview: (batchId, groupId, assetId) =>
+    invoke("photography_command", {
+      commandId: "recipe.exceptionClear",
+      request: { batch_id: batchId, group_id: groupId, asset_id: assetId },
+    }).then(() => undefined),
   setRecipeReviewed: (batchId, groupId, assetId) =>
     invoke("photography_command", {
       commandId: "recipe.confirm", request: { batch_id: batchId, group_id: groupId, asset_id: assetId },
@@ -191,31 +189,34 @@ const bridge: PhotoCakeBridge = {
   loadReferenceStyles: (batchId) =>
     invoke<BackendGroupReferenceStyle[]>("batch_reference_styles", { batchId }),
   preflightReferenceStyleSync: (batchId, sourceGroupId) =>
-    invoke<BackendStyleSyncPreflight>("preflight_reference_style_sync", {
-      batchId,
-      sourceGroupId,
+    invoke<BackendStyleSyncPreflight>("photography_command", {
+      commandId: "reference.stylePreflight",
+      request: { batch_id: batchId, group_id: sourceGroupId },
     }),
   updateReferenceStyle: (
-    groupId,
-    exposureBiasEv,
-    contrastPreference,
-    saturationPreference,
+    batchId, groupId, exposureBiasEv, contrastPreference, saturationPreference,
   ) =>
-    invoke<BackendGroupReferenceStyle>("update_group_reference_style", {
-      groupId,
-      exposureBiasEv,
-      contrastPreference,
-      saturationPreference,
+    invoke<BackendGroupReferenceStyle>("photography_command", {
+      commandId: "reference.styleUpdate",
+      request: {
+        batch_id: batchId, group_id: groupId,
+        exposure_bias_ev: exposureBiasEv,
+        contrast_preference: contrastPreference,
+        saturation_preference: saturationPreference,
+      },
     }),
   copyReferenceStyle: (sourceGroupId, targetGroupId) =>
     invoke<BackendGroupReferenceStyle>("copy_group_reference_style", {
       sourceGroupId,
       targetGroupId,
     }),
-  copyReferenceStyleToGroups: (sourceGroupId, targetGroupIds) =>
-    invoke<BackendGroupReferenceStyleBatchResult>("copy_reference_style_to_groups", {
-      sourceGroupId,
-      targetGroupIds,
+  copyReferenceStyleToGroups: (batchId, sourceGroupId, targetGroupIds) =>
+    invoke<BackendGroupReferenceStyleBatchResult>("photography_command", {
+      commandId: "reference.styleCopyBatch",
+      request: {
+        batch_id: batchId, source_group_id: sourceGroupId,
+        target_group_ids: targetGroupIds,
+      },
     }),
   loadReferencePreviews: (batchId) =>
     invoke<BackendGroupReferencePreview[]>("batch_reference_previews", { batchId }),

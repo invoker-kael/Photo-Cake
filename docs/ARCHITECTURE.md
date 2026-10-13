@@ -693,3 +693,35 @@ single-group writes), preserves existing photographer XMP and RAW bytes, and
 reports counts from verified sidecar state. Case-variant duplicate sidecars are
 conflicts; errors roll back only newly created sidecars. Other workflows,
 Android RAW processing, and CLI/MCP remain unconverted.
+
+## Photography Commands — third slice: exception and look intent
+
+```text
+Windows UI / future CLI / future Agent / future MCP
+                         |
+                Photography Commands
+          validated scope + narrow numeric/field intent
+                         |
+                     photo-core
+    RecipeReviewStore / ReferenceStore / canonical Recipe
+                         |
+            existing Review + XMP safety gates
+```
+
+The registry now defines 17 Commands: six first-slice single-group, five
+second-slice batch and six third-slice photographer adjustment/look commands.
+No second dispatcher is introduced. Third-slice typed payloads carry
+batch/group/asset IDs, finite bounded deltas or explicit field flags; they
+do not accept Recipe objects, fingerprint overrides or file write requests.
+The Windows dispatcher resolves group membership before mutation and uses
+existing `resolve_reviewed_group_recipes`, `RecipeReviewStore::set`/
+`set_many`/`clear`, `build_style_sync_preflight` and
+`ReferenceStore::update_group_style_profile`/
+`copy_group_style_profile_many`. Multi-target copies preserve the database
+transaction, existing target Reference selections, Style metadata and
+photographer exception precedence. UI and Android share the Bridge's
+optional methods without introducing Android RAW processing.
+
+Unmigrated Cull, grouping, reference clearing, HDR merge and other
+operational endpoints remain outside the registry. CLI and MCP are future
+adapters, not implemented servers.

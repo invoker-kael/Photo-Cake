@@ -168,5 +168,9 @@ pub use photography_commands::{
     RecipeConfirmClearGroupsRequest, LightroomPreflightBatchRequest,
     LightroomHandoffBatchRequest, ReferenceSelectBatchResult, RecipeConfirmBatchResult,
     RecipeConfirmClearGroupsResult, LightroomPreflightBatchGroupResult,
-    LightroomPreflightBatchResult, LightroomHandoffBatchResult, PHOTOGRAPHY_COMMAND_IDS,
+    LightroomPreflightBatchResult, LightroomHandoffBatchResult,
+    RecipeExceptionDeltas, RecipeExceptionSetRequest, RecipeExceptionSyncFields,
+    RecipeExceptionSyncRequest, RecipeExceptionClearResult, RecipeExceptionSyncResult,
+    ReferenceStyleUpdateRequest, ReferenceStyleCopyBatchRequest,
+    ReferenceStyleResult, ReferenceStyleBatchResult, PHOTOGRAPHY_COMMAND_IDS,
 };

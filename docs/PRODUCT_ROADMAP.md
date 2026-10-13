@@ -328,3 +328,21 @@ Command migration: exception-aware Recipe override/sync, Reference Style
 propagation, and review/culling gates, only with explicit photographer intent
 and reuse of existing persistence/transactions. Other current UI routes are
 not yet Command-based.
+
+## Photography Commands — third vertical slice: photographer adjustments
+
+Extended the same registry/Windows adapter with `recipe.exceptionSet`,
+`recipe.exceptionClear`, `recipe.exceptionSync`,
+`reference.stylePreflight`, `reference.styleUpdate` and
+`reference.styleCopyBatch`. Windows sliders and reset, per-photo selected
+exception field copying, StyleProfile preflight/updates and batch look sync
+now route through typed scope-validated Commands. The existing
+RecipeReviewStore/ReferenceStore remain the sole persistence paths, and
+multi-target sync remains atomic.
+
+First (single group) and second (batch Reference/Recipe/Lightroom) slices
+remain supported. Still no standalone CLI/MCP runtime, autonomous editing,
+RAW engine, second dispatcher or Android RAW development. Remaining
+candidate stages: Cull/Quick Cull human confirmation, reference clearing,
+group refinement and HDR merge intent; prioritize real user controls and
+existing transaction boundaries, not abstract registry coverage.

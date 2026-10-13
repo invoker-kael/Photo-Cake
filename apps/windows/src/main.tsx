@@ -52,27 +52,28 @@ const bridge: PhotoCakeBridge = {
   resumeBatch: (batchId) => invoke<BackendBatch>("resume_batch", { batchId }),
   cancelBatch: (batchId) => invoke<BackendBatch>("cancel_batch", { batchId }),
   refineGroups: (batchId) =>
-    invoke<BackendSemanticRefinementReport>("refine_batch_groups", { batchId }),
+    invoke<BackendSemanticRefinementReport>("photography_command", {
+      commandId: "group.refine", request: { batch_id: batchId },
+    }),
   keepMomentTogether: (batchId, groupId) =>
-    invoke<BackendPhotoContext["groups"]>("keep_batch_moment_together", {
-      batchId,
-      groupId,
+    invoke<BackendPhotoContext["groups"]>("photography_command", {
+      commandId: "group.keepTogether",
+      request: { batch_id: batchId, group_id: groupId },
     }),
   allowGroupRefinement: (batchId, groupId) =>
-    invoke<BackendPhotoContext["groups"]>("allow_batch_group_refinement", {
-      batchId,
-      groupId,
+    invoke<BackendPhotoContext["groups"]>("photography_command", {
+      commandId: "group.allowRefine",
+      request: { batch_id: batchId, group_id: groupId },
     }),
   mergeGroups: (batchId, groupIds) =>
-    invoke<BackendPhotoContext["groups"]>("merge_batch_groups", {
-      batchId,
-      groupIds,
+    invoke<BackendPhotoContext["groups"]>("photography_command", {
+      commandId: "group.merge", request: { batch_id: batchId, group_ids: groupIds },
     }),
   splitGroup: (batchId, groupId, splitBeforeAssetId) =>
-    invoke<BackendPhotoContext["groups"]>("split_batch_group", {
-      batchId,
-      groupId,
-      splitBeforeAssetId,
+    invoke<BackendPhotoContext["groups"]>("photography_command", {
+      commandId: "group.split",
+      request: { batch_id: batchId, group_id: groupId,
+        split_before_asset_id: splitBeforeAssetId },
     }),
   loadWorkflowStatus: (batchId) =>
     invoke<BackendWorkflowStatus>("batch_workflow_status", { batchId }),
@@ -127,8 +128,11 @@ const bridge: PhotoCakeBridge = {
       commandId: "reference.selectBatch",
       request: { batch_id: batchId, selections: items },
     }),
-  clearGroupReference: (groupId) =>
-    invoke<void>("clear_group_reference", { groupId }),
+  clearGroupReference: (batchId, groupId) =>
+    invoke("photography_command", {
+      commandId: "reference.clear",
+      request: { batch_id: batchId, group_id: groupId },
+    }).then(() => undefined),
   loadRecipeReviews: (batchId) =>
     invoke<BackendRecipeReviewOverride[]>("batch_recipe_reviews", { batchId }),
   loadRecipeReviewPreflight: (batchId) =>

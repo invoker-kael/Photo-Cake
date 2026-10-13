@@ -382,6 +382,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   const [referenceBatchTargets, setReferenceBatchTargets] = useState<string[]>([]);
   const [referenceBatchUpdating, setReferenceBatchUpdating] = useState(false);
   const [referenceBatchNote, setReferenceBatchNote] = useState<string | null>(null);
+  const [referenceClearConfirmGroupId, setReferenceClearConfirmGroupId] = useState<string | null>(null);
+  const [referenceClearUpdating, setReferenceClearUpdating] = useState<string | null>(null);
   const [referenceStyles, setReferenceStyles] = useState<Record<string, BackendGroupReferenceStyle>>({});
   const [referencePreviews, setReferencePreviews] = useState<Record<string, BackendGroupReferencePreview>>({});
   const [recipeReviews, setRecipeReviews] = useState<Record<string, BackendRecipeReviewOverride>>({});
@@ -484,6 +486,8 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
     setGroupRefinementNote(null);
     setReferenceBatchTargets([]);
     setReferenceBatchNote(null);
+    setReferenceClearConfirmGroupId(null);
+    setReferenceClearUpdating(null);
     setCullBatchNote(null);
     setCullDecisionUpdating(null);
     setReviewBatchNote(null);
@@ -1649,19 +1653,47 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
   };
 
   const clearReferencePhoto = async (groupId: string) => {
-    if (!bridge?.clearGroupReference) return;
+    if (!bridge?.clearGroupReference || !activeBatchId || referenceClearUpdating) return;
+    setReferenceClearUpdating(groupId);
     try {
-      await bridge.clearGroupReference(groupId);
+      await bridge.clearGroupReference(activeBatchId, groupId);
       setReferenceBindings((current) => {
         const next = { ...current };
         delete next[groupId];
         return next;
       });
-      setReferenceBatchNote(null);
+      setReferenceStyles((current) => {
+        const next = { ...current };
+        delete next[groupId];
+        return next;
+      });
+      setReferencePreviews((current) => {
+        const next = { ...current };
+        delete next[groupId];
+        return next;
+      });
+      setStyleBatchTargets([]);
+      setStyleBatchNote(null);
+      setHandoffPreflights((current) => {
+        const next = { ...current };
+        delete next[groupId];
+        return next;
+      });
+      setReferenceClearConfirmGroupId(null);
+      setReferenceBatchNote(
+        "Reference unlinked. Re-select a Reference and review regenerated Recipes before the next Lightroom handoff; existing XMP and RAW files were not removed.",
+      );
+      // Readiness, Review and Lightroom preflight are derived from current
+      // References: invalidate all displayed downstream evidence.
+      setGroupRevision((revision) => revision + 1);
+      setReviewRevision((revision) => revision + 1);
+      setHandoffPreflightRevision((revision) => revision + 1);
       setEditedPreviews({});
       setBackendError(null);
     } catch (error) {
       setBackendError(String(error));
+    } finally {
+      setReferenceClearUpdating(null);
     }
   };
 
@@ -2710,11 +2742,17 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
           </div>
         </div>
 
-        {groupingLockedByReference && (
-          <div className="group-refine-note">
-            Grouping is locked because Reference selection has started. Clear References before merge, split or semantic regrouping.
-          </div>
-        )}
+        <div className="group-command-status" aria-live="polite">
+          <strong>{groupingLockedByReference ? "Grouping locked" : "Grouping editable"}</strong>
+          <span>
+            {groups.length} groups · {Object.keys(referenceBindings).length} selected References
+          </span>
+          <small>
+            {groupingLockedByReference
+              ? "Reference bindings must be cleared before changing group structure. Clearing References does not delete RAW files or exported Lightroom sidecars."
+              : "Semantic refinement and manual Keep together / Merge / Split use validated group commands. Existing manually locked groups remain protected."}
+          </small>
+        </div>
         {groupRefinementNote && (
           <div className="group-refine-note">{groupRefinementNote}</div>
         )}
@@ -3262,13 +3300,41 @@ export default function App({ bridge, mode = "workstation" }: AppProps) {
                       : "Not selected"}
                   </strong>
                   {binding && bridge?.clearGroupReference && (
-                    <button
-                      className="review-choice clear"
-                      disabled={referenceBatchUpdating}
-                      onClick={() => void clearReferencePhoto(group.id)}
-                    >
-                      Clear
-                    </button>
+                    <div className="reference-clear-control">
+                      <button
+                        className="review-choice clear"
+                        disabled={referenceBatchUpdating || referenceClearUpdating != null}
+                        onClick={() => {
+                          if (referenceClearConfirmGroupId === group.id) {
+                            void clearReferencePhoto(group.id);
+                          } else {
+                            setReferenceClearConfirmGroupId(group.id);
+                          }
+                        }}
+                      >
+                        {referenceClearUpdating === group.id
+                          ? "Unlinking…"
+                          : referenceClearConfirmGroupId === group.id
+                            ? "Confirm unlink"
+                            : "Unlink Reference"}
+                      </button>
+                      {referenceClearConfirmGroupId === group.id && (
+                        <div className="reference-clear-warning">
+                          <small>
+                            This unlocks regrouping only after all other groups are unlinked.
+                            Recipes and Lightroom preflight must be reviewed again;
+                            existing RAW and XMP files will not be deleted.
+                          </small>
+                          <button
+                            className="review-choice clear"
+                            disabled={referenceClearUpdating != null}
+                            onClick={() => setReferenceClearConfirmGroupId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                   {binding && (
                     <small className="reference-preview-status">

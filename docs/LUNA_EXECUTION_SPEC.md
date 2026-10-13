@@ -349,3 +349,29 @@ review/undo controls, mark saving operations busy, and show errors
 without claiming a write succeeded. Android companion keeps its
 platform-specific bridge until consciously migrated; do not
 introduce Android RAW processing, CLI or MCP in this batch.
+
+## Photography Command execution rule (fifth slice: groups and Reference)
+
+Preserve all prior 21 stable Commands. Add `group.refine`,
+`group.keepTogether`, `group.allowRefine`, `group.merge`,
+`group.split`, and `reference.clear` through the same Registry and
+Windows dispatcher. Windows grouping and Reference-clear buttons must
+use that validated boundary; remove redundant Windows Tauri exposure
+without removing their existing business implementations.
+
+Reject foreign groups and split photos, duplicate/overlapping merged
+groups, one-group merges, first-photo splits and arbitrary grouping
+configuration payloads. Refine only an existing batch. Do not bypass
+`ensure_grouping_mutation_allowed` after Reference selection, even
+when frontend Group state is stale. Retain RawCatalog's existing
+semantic/manual lock and correction semantics; never create a
+second group persistence path.
+
+The Reference-unlink UI must require explicit photographer
+confirmation, show why regrouping is blocked while other References
+exist, and clarify that existing XMP/RAW stays intact. On success
+refresh grouped content, Reference readiness, Recipe review and
+Lightroom preflight. Preserve review overrides and existing sidecars,
+and never pretend that clearing a Reference automatically rolls back
+a Lightroom delivery. CLI/MCP and autonomous regrouping are not
+part of this batch.

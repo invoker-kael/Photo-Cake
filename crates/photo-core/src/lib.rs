@@ -175,5 +175,6 @@ pub use photography_commands::{
     ReferenceStyleResult, ReferenceStyleBatchResult,
     CullDecideRequest, CullConfirmVisibleRequest, CullQuickApplyRequest,
     CullQuickUndoRequest, CullDecideResult, CullConfirmVisibleResult,
-    CullQuickApplyResult, PHOTOGRAPHY_COMMAND_IDS,
+    CullQuickApplyResult, BatchCommandRequest, GroupMergeRequest,
+    GroupSplitRequest, ReferenceClearResult, PHOTOGRAPHY_COMMAND_IDS,
 };

@@ -35,7 +35,7 @@ const bridge: PhotoCakeBridge = {
     invoke<BackendReferenceBinding[]>("batch_reference_bindings", { batchId }),
   setGroupReference: (_batchId, groupId, assetId) =>
     invoke<BackendReferenceBinding>("set_group_reference", { groupId, assetId }),
-  clearGroupReference: (groupId) =>
+  clearGroupReference: (_batchId, groupId) =>
     invoke<void>("clear_group_reference", { groupId }),
 };
 

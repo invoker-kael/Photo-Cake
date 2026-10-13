@@ -582,7 +582,7 @@ export interface PhotoCakeBridge {
     batchId: string,
     items: BackendReferenceBatchItem[],
   ): Promise<BackendReferenceBatchResult>;
-  clearGroupReference?(groupId: string): Promise<void>;
+  clearGroupReference?(batchId: string, groupId: string): Promise<void>;
   loadRecipeReviews?(batchId: string): Promise<BackendRecipeReviewOverride[]>;
   loadRecipeReviewPreflight?(batchId: string): Promise<BackendRecipeReviewGroupPreflight[]>;
   setRecipeReview?(

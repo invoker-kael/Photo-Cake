@@ -707,3 +707,31 @@ Windows UI displays eligible Keep/Review/Reject counts before confirm,
 preserves Triage/All, preview/evidence context, Quick Cull selection,
 loading states, full error text and undo. Android companion retains its
 platform bridge and is not a RAW processing client.
+
+## Photography Commands — fifth slice: Groups and Reference correction
+
+Six additional high-level Commands complete the existing Windows grouping
+and Reference-clear entrypoints: `group.refine`, `group.keepTogether`,
+`group.allowRefine`, `group.merge`, `group.split`, and
+`reference.clear`. Existing Windows Groups/Reference controls now call
+these commands through the single validated dispatcher, while the Android
+companion keeps its current platform-specific Reference-clear bridge.
+
+Every request names a batch. Group and split requests validate membership
+against the batch's effective groups; merges reject duplicate groups,
+overlapping member photos and sets smaller than two; splits reject a
+non-member or first photo. Commands do not accept arbitrary grouping
+configurations, reference set edits, persisted recipe payloads or XMP XML.
+Group refinement additionally resolves an existing project batch before
+running. Critically, all five grouping mutations retain the original
+backend `ensure_grouping_mutation_allowed` guard: after any Reference
+has been selected, the group structure cannot change until all group
+References are cleared. Semantic planning and manual-lock persistence
+stay inside the existing RawCatalog and refinement workflow.
+
+Reference clear removes only a group binding through the existing
+ReferenceStore function. It does not delete RAW images, per-photo overrides,
+or Lightroom XMP. Windows UI requires explicit two-step confirmation,
+explains downstream re-review and updates dependent Recipe and Lightroom
+preflight views after success. Current reference selection, culling
+decisions, Recipe review and XMP handoff semantics are unchanged.

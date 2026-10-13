@@ -30,7 +30,7 @@ use photo_core::{
     RecipeExceptionClearResult, RecipeExceptionSyncResult as CommandExceptionSyncResult,
     ReferenceStyleResult as CommandStyleResult, ReferenceStyleBatchResult as CommandStyleBatchResult,
     GroupAssetSelection, CullDecideResult, CullConfirmVisibleResult,
-    CullQuickApplyResult,
+    CullQuickApplyResult, ReferenceClearResult,
     CURRENT_RECIPE_PROCESS_VERSION,
 };
 use photo_inference::LocalAnalyzeExecutor;
@@ -987,6 +987,49 @@ fn photography_command(
             )?;
             PhotographyCommandResult::CullQuickUndo(result)
         }
+        PhotographyCommandRequest::GroupRefine(request) => {
+            // No target group required, but the batch must exist even if it has
+            // no effective groups yet. The original Reference lock still gates it.
+            state.store.load_batch(request.batch_id)
+                .map_err(|error| error.to_string())?;
+            let result = refine_batch_groups(request.batch_id.to_string(), state)?;
+            PhotographyCommandResult::GroupRefine(result)
+        }
+        PhotographyCommandRequest::GroupKeepTogether(request) => {
+            let groups = keep_batch_moment_together(
+                request.batch_id.to_string(), request.group_id.to_string(), state,
+            )?;
+            PhotographyCommandResult::GroupKeepTogether(groups)
+        }
+        PhotographyCommandRequest::GroupAllowRefine(request) => {
+            let groups = allow_batch_group_refinement(
+                request.batch_id.to_string(), request.group_id.to_string(), state,
+            )?;
+            PhotographyCommandResult::GroupAllowRefine(groups)
+        }
+        PhotographyCommandRequest::GroupMerge(request) => {
+            let groups = merge_batch_groups(
+                request.batch_id.to_string(),
+                request.group_ids.into_iter().map(|id| id.to_string()).collect(),
+                state,
+            )?;
+            PhotographyCommandResult::GroupMerge(groups)
+        }
+        PhotographyCommandRequest::GroupSplit(request) => {
+            let groups = split_batch_group(
+                request.batch_id.to_string(), request.group_id.to_string(),
+                request.split_before_asset_id.to_string(), state,
+            )?;
+            PhotographyCommandResult::GroupSplit(groups)
+        }
+        PhotographyCommandRequest::ReferenceClear(request) => {
+            // Only clear the binding here: do not destroy Recipe overrides,
+            // existing RAW images or already delivered Lightroom XMP.
+            clear_group_reference(request.group_id.to_string(), state)?;
+            PhotographyCommandResult::ReferenceClear(ReferenceClearResult {
+                group_id: request.group_id, cleared: true,
+            })
+        }
     };
     serde_json::to_value(result).map_err(|error| error.to_string())
 }
@@ -1122,7 +1165,6 @@ fn current_effective_groups(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
 fn keep_batch_moment_together(
     batch_id: String,
     group_id: String,
@@ -1139,7 +1181,6 @@ fn keep_batch_moment_together(
     current_effective_groups(batch_id, &state)
 }
 
-#[tauri::command]
 fn allow_batch_group_refinement(
     batch_id: String,
     group_id: String,
@@ -1156,7 +1197,6 @@ fn allow_batch_group_refinement(
     current_effective_groups(batch_id, &state)
 }
 
-#[tauri::command]
 fn merge_batch_groups(
     batch_id: String,
     group_ids: Vec<String>,
@@ -1177,7 +1217,6 @@ fn merge_batch_groups(
     current_effective_groups(batch_id, &state)
 }
 
-#[tauri::command]
 fn split_batch_group(
     batch_id: String,
     group_id: String,
@@ -1197,7 +1236,6 @@ fn split_batch_group(
     current_effective_groups(batch_id, &state)
 }
 
-#[tauri::command]
 fn refine_batch_groups(
     batch_id: String,
     state: State<'_, AppState>,
@@ -1903,7 +1941,6 @@ fn set_group_reference(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
 fn clear_group_reference(
     group_id: String,
     state: State<'_, AppState>,
@@ -3059,18 +3096,12 @@ pub fn run() {
             build_companion_snapshot,
             apply_companion_decision_patch,
             batch_photo_context,
-            refine_batch_groups,
-            keep_batch_moment_together,
-            allow_batch_group_refinement,
-            merge_batch_groups,
-            split_batch_group,
             batch_workflow_status,
             batch_culling,
             batch_culling_reviews,
             batch_latest_moment_quick_cull,
             batch_reference_bindings,
             batch_reference_readiness,
-            clear_group_reference,
             batch_recipe_reviews,
             batch_reference_styles,
             copy_group_reference_style,

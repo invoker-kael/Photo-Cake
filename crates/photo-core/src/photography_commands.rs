@@ -1,12 +1,12 @@
 //! Stable Photography Command IDs and validated high-level request/response contracts.
  //! Workflow execution must reuse ReferenceStore, canonical Recipe review and XMP writer.
-use crate::{GroupReferenceBinding, PhotoGroup, RecipeReviewOverride, RecipeReviewSyncFields, StyleProfile, StyleSyncPreflight, CullingReview, CullingUserDecision, MomentQuickCullOperation};
+use crate::{GroupReferenceBinding, PhotoGroup, RecipeReviewOverride, RecipeReviewSyncFields, StyleProfile, StyleSyncPreflight, CullingReview, CullingUserDecision, MomentQuickCullOperation, SemanticRefinementReport};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use uuid::Uuid;
 
-pub const PHOTOGRAPHY_COMMAND_IDS: [&str; 21] = [
+pub const PHOTOGRAPHY_COMMAND_IDS: [&str; 27] = [
     "reference.select", "recipe.preview", "recipe.confirm", "recipe.reopen",
     "lightroom.preflight", "lightroom.handoff", "reference.selectBatch",
     "recipe.confirmBatch", "recipe.confirmClearGroups",
@@ -14,6 +14,8 @@ pub const PHOTOGRAPHY_COMMAND_IDS: [&str; 21] = [
     "recipe.exceptionSet", "recipe.exceptionClear", "recipe.exceptionSync",
     "reference.stylePreflight", "reference.styleUpdate", "reference.styleCopyBatch",
     "cull.decide", "cull.confirmVisible", "cull.quickApply", "cull.quickUndo",
+    "group.refine", "group.keepTogether", "group.allowRefine",
+    "group.merge", "group.split", "reference.clear",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +27,7 @@ pub enum PhotographyCommandId {
     RecipeExceptionSet, RecipeExceptionClear, RecipeExceptionSync,
     ReferenceStylePreflight, ReferenceStyleUpdate, ReferenceStyleCopyBatch,
     CullDecide, CullConfirmVisible, CullQuickApply, CullQuickUndo,
+    GroupRefine, GroupKeepTogether, GroupAllowRefine, GroupMerge, GroupSplit, ReferenceClear,
 }
 impl PhotographyCommandId {
     pub fn parse(id: &str) -> Result<Self, String> {
@@ -50,6 +53,12 @@ impl PhotographyCommandId {
             "cull.confirmVisible" => Ok(Self::CullConfirmVisible),
             "cull.quickApply" => Ok(Self::CullQuickApply),
             "cull.quickUndo" => Ok(Self::CullQuickUndo),
+            "group.refine" => Ok(Self::GroupRefine),
+            "group.keepTogether" => Ok(Self::GroupKeepTogether),
+            "group.allowRefine" => Ok(Self::GroupAllowRefine),
+            "group.merge" => Ok(Self::GroupMerge),
+            "group.split" => Ok(Self::GroupSplit),
+            "reference.clear" => Ok(Self::ReferenceClear),
             _ => Err(format!("unknown photography command: {id}")),
         }
     }
@@ -76,6 +85,12 @@ impl PhotographyCommandId {
             Self::CullConfirmVisible => "cull.confirmVisible",
             Self::CullQuickApply => "cull.quickApply",
             Self::CullQuickUndo => "cull.quickUndo",
+            Self::GroupRefine => "group.refine",
+            Self::GroupKeepTogether => "group.keepTogether",
+            Self::GroupAllowRefine => "group.allowRefine",
+            Self::GroupMerge => "group.merge",
+            Self::GroupSplit => "group.split",
+            Self::ReferenceClear => "reference.clear",
         }
     }
 }
@@ -280,6 +295,24 @@ pub struct CullQuickUndoRequest {
     pub operation_id: Uuid,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BatchCommandRequest {
+    pub batch_id: Uuid,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupMergeRequest {
+    pub batch_id: Uuid,
+    pub group_ids: Vec<Uuid>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupSplitRequest {
+    pub batch_id: Uuid,
+    pub group_id: Uuid,
+    pub split_before_asset_id: Uuid,
+}
 #[derive(Debug, Clone, PartialEq)]
 pub enum PhotographyCommandRequest {
     ReferenceSelect(GroupAssetCommandRequest),
@@ -303,6 +336,12 @@ pub enum PhotographyCommandRequest {
     CullConfirmVisible(CullConfirmVisibleRequest),
     CullQuickApply(CullQuickApplyRequest),
     CullQuickUndo(CullQuickUndoRequest),
+    GroupRefine(BatchCommandRequest),
+    GroupKeepTogether(GroupCommandRequest),
+    GroupAllowRefine(GroupCommandRequest),
+    GroupMerge(GroupMergeRequest),
+    GroupSplit(GroupSplitRequest),
+    ReferenceClear(GroupCommandRequest),
 }
 impl PhotographyCommandRequest {
     pub fn parse(id: &str, payload: Value) -> Result<Self, String> {
@@ -351,6 +390,18 @@ impl PhotographyCommandRequest {
                 Self::CullQuickApply(serde_json::from_value(payload).map_err(invalid)?),
             PhotographyCommandId::CullQuickUndo =>
                 Self::CullQuickUndo(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::GroupRefine =>
+                Self::GroupRefine(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::GroupKeepTogether =>
+                Self::GroupKeepTogether(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::GroupAllowRefine =>
+                Self::GroupAllowRefine(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::GroupMerge =>
+                Self::GroupMerge(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::GroupSplit =>
+                Self::GroupSplit(serde_json::from_value(payload).map_err(invalid)?),
+            PhotographyCommandId::ReferenceClear =>
+                Self::ReferenceClear(serde_json::from_value(payload).map_err(invalid)?),
         })
     }
     pub const fn batch_id(&self) -> Uuid {
@@ -373,6 +424,12 @@ impl PhotographyCommandRequest {
             Self::CullConfirmVisible(r) => r.batch_id,
             Self::CullQuickApply(r) => r.batch_id,
             Self::CullQuickUndo(r) => r.batch_id,
+            Self::GroupRefine(r) => r.batch_id,
+            Self::GroupKeepTogether(r) => r.batch_id,
+            Self::GroupAllowRefine(r) => r.batch_id,
+            Self::GroupMerge(r) => r.batch_id,
+            Self::GroupSplit(r) => r.batch_id,
+            Self::ReferenceClear(r) => r.batch_id,
         }
     }
     /// effective_groups are loaded by the adapter exclusively for self.batch_id().
@@ -442,6 +499,25 @@ impl PhotographyCommandRequest {
             Self::CullQuickUndo(r) => {
                 if r.operation_id.is_nil() {
                     return Err("invalid Quick Cull operation ID".to_string());
+                }
+                Ok(())
+            },
+            Self::GroupRefine(_) => Ok(()),
+            Self::GroupKeepTogether(r) | Self::GroupAllowRefine(r)
+            | Self::ReferenceClear(r) =>
+                validate_group(batch_id, r.group_id, effective_groups),
+            Self::GroupMerge(r) => {
+                if r.group_ids.len() < 2 {
+                    return Err("merge requires at least two different groups".to_string());
+                }
+                validate_groups(batch_id, &r.group_ids, effective_groups)
+            },
+            Self::GroupSplit(r) => {
+                validate_asset(batch_id, r.group_id, r.split_before_asset_id, effective_groups)?;
+                let group = effective_groups.iter().find(|g| g.id == r.group_id)
+                    .expect("validated group is in effective set");
+                if group.asset_ids.len() < 2 || group.asset_ids.first() == Some(&r.split_before_asset_id) {
+                    return Err("split must select a photo after the first one".to_string());
                 }
                 Ok(())
             },
@@ -532,6 +608,12 @@ pub enum PhotographyCommandResult {
     CullConfirmVisible(CullConfirmVisibleResult),
     CullQuickApply(CullQuickApplyResult),
     CullQuickUndo(MomentQuickCullOperation),
+    GroupRefine(SemanticRefinementReport),
+    GroupKeepTogether(Vec<PhotoGroup>),
+    GroupAllowRefine(Vec<PhotoGroup>),
+    GroupMerge(Vec<PhotoGroup>),
+    GroupSplit(Vec<PhotoGroup>),
+    ReferenceClear(ReferenceClearResult),
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct RecipePreviewResult {
@@ -625,6 +707,12 @@ pub struct ReferenceStyleBatchResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ReferenceClearResult {
+    pub group_id: Uuid,
+    pub cleared: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CullDecideResult {
     pub asset_id: Uuid,
     pub decision: Option<CullingUserDecision>,
@@ -659,7 +747,7 @@ mod tests {
 
     #[test]
     fn registered_commands_are_stable_and_unknown_is_rejected() {
-        assert_eq!(PHOTOGRAPHY_COMMAND_IDS.len(), 21);
+        assert_eq!(PHOTOGRAPHY_COMMAND_IDS.len(), 27);
         for id in PHOTOGRAPHY_COMMAND_IDS {
             assert_eq!(PhotographyCommandId::parse(id).unwrap().as_str(), id);
         }
@@ -929,6 +1017,60 @@ mod tests {
             "batch_id":batch,"operation_id":Uuid::nil()
         })).unwrap();
         assert!(invalid.validate_target(&groups).is_err());
+    }
+
+    #[test]
+    fn grouping_commands_validate_scope_duplicates_and_split_position() {
+        let (batch, group, asset, mut groups) = fixture();
+        let second = Uuid::new_v4();
+        groups.push(PhotoGroup {
+            id: second, kind: PhotoGroupKind::Moment, basis: GroupingBasis::Singleton,
+            asset_ids: vec![Uuid::new_v4()], manual_locked: false,
+        });
+        for id in ["group.keepTogether", "group.allowRefine", "reference.clear"] {
+            let valid = PhotographyCommandRequest::parse(id, serde_json::json!({
+                "batch_id":batch, "group_id":group,
+            })).unwrap();
+            assert!(valid.validate_target(&groups).is_ok());
+            let invalid = PhotographyCommandRequest::parse(id, serde_json::json!({
+                "batch_id":batch, "group_id":Uuid::new_v4(),
+            })).unwrap();
+            assert!(invalid.validate_target(&groups).is_err());
+            assert!(PhotographyCommandRequest::parse(id, serde_json::json!({
+                "batch_id":batch, "group_id":group, "force":true,
+            })).is_err());
+        }
+        let refine = PhotographyCommandRequest::parse("group.refine", serde_json::json!({
+            "batch_id":batch,
+        })).unwrap();
+        assert!(refine.validate_target(&groups).is_ok());
+        assert!(PhotographyCommandRequest::parse("group.refine", serde_json::json!({
+            "batch_id":batch, "config":{"ignore_references":true},
+        })).is_err());
+        for group_ids in [vec![group], vec![group, group], vec![group, Uuid::new_v4()]] {
+            let invalid = PhotographyCommandRequest::parse("group.merge", serde_json::json!({
+                "batch_id":batch, "group_ids":group_ids,
+            })).unwrap();
+            assert!(invalid.validate_target(&groups).is_err());
+        }
+        let valid = PhotographyCommandRequest::parse("group.merge", serde_json::json!({
+            "batch_id":batch, "group_ids":[group, second],
+        })).unwrap();
+        assert!(valid.validate_target(&groups).is_ok());
+        let first = PhotographyCommandRequest::parse("group.split", serde_json::json!({
+            "batch_id":batch, "group_id":group, "split_before_asset_id":asset,
+        })).unwrap();
+        assert!(first.validate_target(&groups).is_err());
+        let second_asset = Uuid::new_v4();
+        groups[0].asset_ids.push(second_asset);
+        let good = PhotographyCommandRequest::parse("group.split", serde_json::json!({
+            "batch_id":batch, "group_id":group, "split_before_asset_id":second_asset,
+        })).unwrap();
+        assert!(good.validate_target(&groups).is_ok());
+        let foreign = PhotographyCommandRequest::parse("group.split", serde_json::json!({
+            "batch_id":batch, "group_id":group, "split_before_asset_id":Uuid::new_v4(),
+        })).unwrap();
+        assert!(foreign.validate_target(&groups).is_err());
     }
 
 }

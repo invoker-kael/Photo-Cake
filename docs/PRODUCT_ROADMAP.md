@@ -368,3 +368,24 @@ retains its existing native culling path.
 Potential next high-value stage: group refinement and Reference
 clearing/handoff recovery, subject to existing locking and downstream
 safety. CLI/Agent/MCP remain prospective adapters only.
+
+## Photography Commands — fifth vertical slice: group correction and UI
+
+With prior 21 IDs retained, the same Registry adds:
+`group.refine`, `group.keepTogether`, `group.allowRefine`,
+`group.merge`, `group.split`, and `reference.clear`.
+The mature Windows Groups controls—semantic refine, original moment
+lock, unlock for further refinement, manual merge/split—and Reference
+unlink now share the same typed validated business boundary used by
+Cull, Reference selection, Review and Lightroom handoff.
+
+Windows UI adds a visible grouping lock/readiness summary and a two-step
+Reference unlink confirmation. Successful unlink refreshes dependent
+readiness, Recipe Review and XMP preflight instead of leaving stale
+results visible. Existing Lightroom XMP is not silently deleted.
+No new grouping algorithm, image editing process, raw-file mutation,
+CLI/MCP server or Android RAW backend is introduced.
+
+Next focus should be quality and integration passes on the complete
+27-command photography chain, especially recovery and human-facing
+handoff failure explanations, before adding unrelated command IDs.

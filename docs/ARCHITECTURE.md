@@ -757,3 +757,35 @@ Shared UI Bridge methods remain optional for Android. Windows
 exposes the unified Command route for these actions; Android has
 an independent companion backend and retains its legacy Cull adapter.
 No general CLI/MCP server is implemented.
+
+## Photography Commands — fifth slice: grouping and Reference unlink
+
+```text
+Windows Groups / Reference UI
+            |
+  photography_command (27 IDs)
+            |
+  strict batch/group/asset validation
+            |
+  existing Tauri grouping/reference functions
+            |
+ RawCatalog semantic/manual grouping + ReferenceStore bindings
+            |
+ grouping lock after Reference selection
+```
+
+The Windows adapter reuses `refine_collection_semantic_groups` and the
+original catalog's moment keep/unlock, merge and split operations. For
+all structure-changing operations, `ensure_grouping_mutation_allowed`
+remains authoritative, including when the UI is stale. Only an existing
+batch may request free-running semantic refinement. The adapter's
+`reference.clear` command validates batch and group membership and
+calls the existing ReferenceStore binding-clear operation; it never
+deletes XMP or photo metadata.
+
+A single registry/dispatcher now covers 27 photography commands.
+The Windows UI provides visible lock status, confirmation for unlink
+and cache invalidation for Review/XMP preflight; it is an adapter, not
+a second database of grouping state. The optional shared UI Bridge
+continues to support Android's native companion action until a
+separate Android Command adapter exists.

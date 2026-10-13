@@ -284,7 +284,9 @@ mod tests {
         let analysis = analyze_preview_exposure(Uuid::new_v4(), &image);
         let hues = analysis.hue_color_distribution.unwrap();
         assert!(hues.red.coverage > 0.55);
-        assert!(hues.blue.coverage > 0.35);
+        assert!(hues.blue.coverage > 0.30);
+        assert!(hues.aqua.coverage > 0.05);
+        assert!((hues.blue.coverage + hues.aqua.coverage - 0.40).abs() < 0.02);
         assert!(hues.red.saturation > 0.70);
         assert!(hues.blue.saturation > 0.60);
     }
